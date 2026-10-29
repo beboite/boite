@@ -1,5 +1,5 @@
 /** The provider list, its reload and dry run, and the model catalog a probe reads. */
-import { RpcErrorCode, providerEnabled, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
+import { RpcErrorCode, checkLocalAcpCommand, providerEnabled, threadActive, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { CLAUDE_MODELS } from './accounts-seed';
 import { MUSE_EFFORT, PI_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from './providers';
@@ -128,6 +128,41 @@ export function providerCatalogMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'model must be a non-empty string when given', data: { field: 'model', expected: 'a non-empty string' } });
       }
       return probe(ctx, params.providerId, params.accountId);
+    },
+    // The core's `providers/local-command.ts`, on a Windows machine where every
+    // program is found: the same checks, ids, refusals and event.
+    'providers.addLocal': async (params) => {
+      const checked = checkLocalAcpCommand(params, 'windows');
+      if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.refusal.message, data: { field: checked.refusal.field, expected: checked.refusal.expected } });
+      const { id, command } = checked;
+      if (ctx.providers.some(entry => entry.id === id)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `a provider with the id ${id} already exists`, data: { field: 'name', expected: 'a name no other provider uses', providerId: id } });
+      }
+      ctx.providers.push({
+        id, name: command.name, shortName: command.name, protocol: 'acp', source: 'user', available: true,
+        executable: command.command.includes('\\') ? command.command : `${DATA_DIR}\\demo\\${command.command}.exe`,
+        models: [{ id: 'default', name: 'Agent default', default: true }],
+        capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: false, resume: true },
+        login: false, alwaysIsolated: false, install: null, titles: false, enabled: true,
+      });
+      ensureDefaults(ctx);
+      const result = { loaded: structuredClone(ctx.providers), rejected: [] };
+      ctx.emit('providers.updated', structuredClone(result));
+      return { providerId: id, ...result };
+    },
+    'providers.removeLocal': async (params) => {
+      const provider = ctx.providers.find(entry => entry.id === params.providerId);
+      if (!provider) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${params.providerId}`, data: { providerId: params.providerId } });
+      if (provider.source !== 'user') {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${provider.name} ships with Boite and cannot be removed; turn it off instead`, data: { providerId: provider.id, field: 'providerId', expected: 'a provider added on this machine' } });
+      }
+      if ([...ctx.threads.values()].some(thread => thread.providerId === provider.id && threadActive(thread.status))) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `a turn of ${provider.name} is still running: stop it first`, data: { providerId: provider.id } });
+      }
+      ctx.providers = ctx.providers.filter(entry => entry.id !== provider.id);
+      const result = { loaded: structuredClone(ctx.providers), rejected: [] };
+      ctx.emit('providers.updated', structuredClone(result));
+      return result;
     },
     'providers.dryRun': async (params) => {
       const provider = ctx.providers[0];

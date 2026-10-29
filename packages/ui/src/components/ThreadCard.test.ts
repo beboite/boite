@@ -274,3 +274,24 @@ test('merge event compares GitHub URLs without case sensitivity', async () => {
   release(old); await settle();
   expect(document.querySelector('[data-testid=thread-pr]')?.getAttribute('data-state')).toBe('MERGED');
 });
+
+test('a card unmounted with its rename open still writes the title typed so far', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  const thread = store.threads.find(row => !row.archived && row.projectId)!;
+  const project = store.projects.find(row => row.id === thread.projectId)!;
+  vi.spyOn(client, 'call').mockResolvedValue(null as never);
+  const rename = vi.spyOn(store, 'rename').mockResolvedValue();
+  mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
+  await settle();
+  document.querySelector('[data-testid=thread-row]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  flushSync();
+  const input = document.querySelector<HTMLInputElement>('[data-testid=thread-rename]')!;
+  input.value = 'Typed before it left';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  await unmount(mounted);
+  mounted = undefined;
+  await settle();
+  expect(rename.mock.calls).toEqual([[thread.id, 'Typed before it left']]);
+});

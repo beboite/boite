@@ -17,6 +17,12 @@
  *   outputs (1.2 MB each) live in `part_blobs`, and the RSS the first read adds.
  * - startup: `new Core` on a copy of the seeded journal, its
  *   `startup.stores-ready` and `startup.recovered` phases, and a title recovery.
+ * - thread list: `listThreads` on 4,000 threads of about 700 bytes each with 10
+ *   messages, about the 3,660 threads in 2.3 MiB of a loaded machine's journal,
+ *   each list after a thread write, with SQLite's default 2 MiB page cache and
+ *   with the journal's own. The bytes each list reads from the file (Linux
+ *   `rchar`, NaN elsewhere) are what a machine short of memory waits on the
+ *   disk for.
  */
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -126,6 +132,53 @@ function seed(dir: string): void {
   journal.close();
 }
 
+/** Bytes this process asked the kernel to read, from any file: Linux's `rchar`, NaN elsewhere. */
+function bytesRead(): number {
+  try { return Number(/^rchar: (\d+)$/m.exec(readFileSync('/proc/self/io', 'utf8'))![1]); } catch { return NaN; }
+}
+
+function listing(): Record<string, number> {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-journal-reads-list-'));
+  const journal = new Journal(join(dataDir, 'journal.db'));
+  try {
+    journal.db.transaction(() => {
+      for (let i = 0; i < 4000; i++) {
+        const id = `thr_${i}`;
+        journal.putThread(thread(id, { title: `Thread ${i} `.padEnd(600, '.'), createdAt: i, updatedAt: i }));
+        for (let m = 0; m < 10; m++) {
+          journal.putMessage({ id: `msg_${i}_${m}`, threadId: id, turnId: `trn_${id}_0`, role: m % 2 ? 'assistant' : 'user', state: 'complete', createdAt: i * 100 + m,
+            parts: [{ type: 'text', text: `message ${m} of thread ${i}` }] });
+        }
+      }
+    })();
+    const own = (journal.db.query('PRAGMA cache_size').get() as { cache_size: number }).cache_size;
+    const out: Record<string, number> = {};
+    for (const [name, cache] of [['Default', -2000], ['', own]] as const) {
+      journal.db.exec(`PRAGMA cache_size = ${cache}`);
+      const first = journal.getThread('thr_0');
+      journal.listThreads(); // Fills what this cache holds: the lists below read what it could not keep.
+      // Five lists warm up, twenty count; the write before each list is outside the time.
+      const samples: number[] = [];
+      let bytes = 0;
+      for (let i = 0; i < 25; i++) {
+        journal.putThread({ ...first, updatedAt: first.updatedAt + i + 1 });
+        const before = bytesRead(), at = performance.now();
+        journal.listThreads();
+        const took = performance.now() - at, read = bytesRead() - before;
+        if (i < 5) continue;
+        samples.push(took);
+        bytes += read;
+      }
+      out[`list${name}Ms`] = median(samples);
+      out[`list${name}KiB`] = bytes / samples.length / 1024;
+    }
+    return out;
+  } finally {
+    journal.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
 async function startup(seeded: string): Promise<Record<string, number>> {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-journal-reads-start-'));
   cpSync(seeded, dataDir, { recursive: true });
@@ -152,7 +205,7 @@ const results: Record<string, number[]> = {};
 try {
   seed(seeded);
   for (let run = 0; run < runs; run++) {
-    const sample = { ...await withCore(longThread), ...await withCore(heavyTurn), ...await startup(seeded) };
+    const sample = { ...await withCore(longThread), ...await withCore(heavyTurn), ...await startup(seeded), ...listing() };
     for (const [name, value] of Object.entries(sample)) (results[name] ??= []).push(value);
   }
 } finally { rmSync(seeded, { recursive: true, force: true }); }

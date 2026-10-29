@@ -1,5 +1,9 @@
 # The Android app
 
+This is the Android client: it connects to an existing core, which
+runs the agents and keeps the conversations. To host the core on the phone
+itself, use the separate [Boite Server app and Termux](android-server.md).
+
 `apps/android` is a Trusted Web Activity: a small Android package that opens
 one HTTPS page in Chrome, full screen, without an address bar. The nightly's
 opens the phone app's own address, `APP_ORIGIN` in the contracts
@@ -95,11 +99,13 @@ cannot install.
 
 Changing the key means a new SHA-256 fingerprint in `assetlinks.json`, and
 every installed app must be uninstalled first, because Android refuses an
-update signed by another certificate.
+update signed by another certificate. The same key signs Boite Server
+([Android server](android-server.md#publishing-the-app)), whose nightly checks
+its APK against that fingerprint too.
 
 ## Building it locally
 
-JDK 17 and the Android SDK (platform 36; Gradle fetches the build tools it
+JDK 17 and the Android SDK (platform 37; Gradle fetches the build tools it
 needs):
 
 ```sh

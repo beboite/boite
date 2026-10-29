@@ -5,6 +5,7 @@
   import InfoTip from './InfoTip.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import type { Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import { fill, strings } from '../lib/strings';
 
   /**
@@ -66,10 +67,10 @@
     if (ok) await call('tailscale.disable');
   }
 
-  /** A phone's link through the new address, shown with its QR code in the group card above. */
+  /** A phone's link through the new address, shown with its QR code in the group card on Machines, where the window goes. */
   function pair() {
     void store.addDevice();
-    requestAnimationFrame(() => document.getElementById('settings-group')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }));
+    workspace.active.showSettings('machines', 'group');
   }
 
   let sentence = $derived.by(() => {

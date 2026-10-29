@@ -27,11 +27,14 @@ with mode `0600`; the owner requests a phone link through Settings or
 `pairing.grant`. Stop the scratch core before removing its directory.
 
 One core holds `<dataDir>/core.lock`. Another refuses to start on the same data.
-A dead holder can be replaced. Linux compares the holder's start key (boot id
-and start ticks) with the one in the lock, so a stepped wall clock never frees
-it; Windows compares process start time to reject a reused PID more than two
-seconds newer than the lock; macOS retains a lock while its recorded PID is
-alive.
+The operating system holds the lock (`flock` on Linux and macOS, `LockFileEx`
+on Windows, `packages/core/src/platform/`) and drops it when its holder dies,
+so a dead holder never blocks a start and two starts never both get in. The
+file's record (PID, start time, Linux start key, `osLock`) names the holder in
+the refusal only. A record without `osLock` comes from a core older than the
+OS lock: Linux compares its start key (boot id and start ticks), Windows
+rejects a reused PID more than two seconds newer than the record, and macOS
+retains it while its PID is alive.
 
 | Option | Meaning |
 | --- | --- |
@@ -47,6 +50,8 @@ otherwise `~/.local/share/boite2`) or
 providers and managed installs. Tests must use fresh directories.
 
 ## The UI
+
+The composer's slash menu reads global manual skills from `brain.commands`, including on drafts and drivers without commands; `disable-model-invocation: true` hides them from model catalogs and enables core expansion on explicit invocation.
 
 The Windows shell forwards its eight client-area edges and corners to Tauri's
 native resize loop. Windows 10 uses `shadow(false)` to avoid a grey frame;
@@ -111,6 +116,13 @@ resulting client credential are retained. See [machines](machines.md) and
 
 ## Projects and worktrees
 
+A project's action menu offers Rename on desktop and phone. It changes the
+display name through `projects.rename`, retains the folder and conversations,
+and broadcasts `project.updated` to other clients. Paired devices may rename
+too. Trimmed names must contain 1 to 1024 UTF-16 code units; the core rejects
+larger names before journaling or broadcasting. The system drafts project
+keeps its localized name.
+
 Owners open a folder through the project dialog by selecting its machine and
 browsing or typing an absolute path. `projects.browse` is owner-only; the native
 folder picker is available only on the shell's local core. Dropping a desktop
@@ -137,6 +149,11 @@ Settings > Appearance > Buttons can hide the Worktree switch on desktop and in
 the phone's options sheet. This device preference preserves the draft's choice
 and the project's default.
 
+Thread worktree registration, recovery, branch rename and rollback commands serialize
+by the canonical Git common directory. Linked checkouts share that queue; other
+repositories and running jobs remain independent. Queued preparation rechecks
+cancellation before spawning, and queue time counts against an explicit timeout.
+
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
 the thread, with `-c checkout.workers=0` (one checkout worker per core) unless
 the repository's or the user's git config sets `checkout.workers`; the core
@@ -147,7 +164,8 @@ without writing a thread. Git calls appear in the thread's trace. The header
 shows the recorded branch.
 
 Settings > General > Worktrees offers project storage or an absolute shared
-folder; phone owners reach it through Settings > Worktrees.
+folder. Phone owners open that card from a project's Manage project menu or
+a settings link; it has no row in the phone's settings list.
 `settings.worktreeStorage` stores `{ mode: 'project', directory: null }` or
 `{ mode: 'shared', directory: '<absolute path on the core machine>' }`.
 Shared storage uses `<project-name>-<project-id>/wt-<id>` to separate repositories
@@ -289,7 +307,8 @@ with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it, and its refusal names what is pending and in which
 child. Input counts when a device names it on a family member; a device that
 cannot read its drafts protects every thread from expiry and merged-PR archives,
-never from Mark done. Done reads archived summaries only on expansion,
+never from Mark done. A paused workflow run holds expiry but not Mark done,
+which stops it as archiving does. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work. Mark done records its own date; automatic archives
@@ -300,8 +319,8 @@ a done date stay retained. Expiry runs at startup and once per minute, skips
 families with pending work or input, and uses the recoverable deletion flow below.
 
 Settings > General > Conversations offers Group working threads,
-stored on this device; phone settings offer the same switch under device
-preferences. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
+stored on this device. Phones reach the switch through the thread list's
+Display options. The sidebar's Display options panel (`DisplayOptions.svelte`) offers the
 view choice and this switch, each scope behind its "i". In Projects it adds the
 project order choice, once there is a project to order, and the idle-projects switch.
 It stays open while adjusting multiple options.
@@ -318,29 +337,37 @@ and opens the pull request. A done or archived row reads like a thread row
 has no menu button: a right click, or a long press on a phone (`lib/long-press.ts`),
 opens its menu, and restoring sits in the time's place under the pointer.
 
-Projects shows projects with any active conversation or a draft, including
-projects whose conversations are all working. Each project header has separate
+Projects lists projects in sections (`projectSections` in
+`lib/project-threads.svelte.ts`), on desktop and phone. Working, on top, exists
+only while working grouping is enabled (off by default) and holds the projects whose every conversation is at work with no pin or unsent text, in
+a conversation or a new draft, so nothing there waits on the user; a project leaves it as soon as one conversation
+needs the user, and the section goes with its last project. The open projects
+follow: any other conversation or a draft. Each project header has separate
 Working, Done and Archived counters. When working grouping is enabled, its counter toggles
 that list; Done toggles completed history and Archived the manual archives. All lists start closed. Working
 includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
-Recent. One closed fold below the main list, on desktop and phone, holds every
-project the list leaves out (`ProjectShelf.svelte`, its rows in `ProjectShelfRows.svelte`,
-loaded at the first opening or once the list has drawn): idle ones, empty or with
-every conversation archived, then archived projects, a step quieter and marked
-with the archive glyph. It reads Idle projects or Archived projects while it holds
-one kind, Other projects once it holds both. Choosing an idle row starts a draft
+Recent. Set aside, below the open projects, holds the projects with nothing open
+but conversations archived by hand: archiving is how work is put away to pick up
+later, so those projects keep a card whose body is that list, drawn at once and
+read like open rows, with no Archived pill while the card is unfolded. Working
+and Set aside start open; their headers fold them for the session.
+Two closed folds below, on desktop and phone, hold the projects with no card
+(`ProjectShelf.svelte`, its rows in `ProjectShelfRows.svelte`, loaded at the
+first opening or once the list has drawn): Idle projects, with nothing to do,
+at most a done history, then Archived projects, a step quieter. Choosing an idle row starts a draft
 there; choosing an archived row restores the project, then starts a draft. Under
 the pointer a row archives (idle) or restores and removes (archived) without
 opening anything; its full menu opens with a right click or a long press, and an
 idle row takes a dragged thread. An idle project
-with done or archived conversations shows those counts on its row; each unfolds
+with done conversations shows that count on its row, which unfolds
 that history under it. Creating or restoring a conversation or starting a draft
-returns its project to the main list.
+returns its project to the open cards. In the custom order a project moves among
+the cards of its own section.
 Group idle projects, in settings and the Display options panel, can be disabled
-to keep every project in its normal order. Both grouping preferences persist on
+to keep every project but the Working ones as open cards, in their normal order. Both grouping preferences persist on
 the device. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.
@@ -372,10 +399,13 @@ waits for processes before hiding it behind persistent markers.
 history and prior archive flags. A paired phone may delete and undo from its
 thread menu; the deleted list and the retention period stay owner-only. Undo toasts last eight seconds.
 The default retention is 30 days; 0 disables purge. Restart and disconnection do
-not erase the markers. Files, branches, worktrees and native transcripts stay
-on disk; project removal purges that project's pending deletions.
+not erase the markers. Files, branches and worktrees stay on disk; project
+removal purges that project's pending deletions. A later purge can remove
+unreferenced Claude transcripts from accounts Boite isolated itself; the
+user's own CLI profiles and other providers' transcripts remain
+([transcripts Boite removes](accounts.md#transcripts-boite-removes)).
 
-Archiving an experimental agent in its Settings requires typing its existing
+Archiving a bot in its Settings requires typing its existing
 name exactly. Cancel, Escape and Back keep it active. Archiving stops its work
 and removes it from the active list; its profile and history remain searchable.
 
@@ -391,19 +421,20 @@ engines configured to stop with the shell.
 ### Merged pull request archives
 
 Projects default to `autoArchiveMergedPr: true`; the owner changes it through
-`projects.setAutoArchiveMergedPr`. The core can automatically archive an idle
+`projects.setAutoArchiveMergedPr`. The core can automatically archive a
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip. The
 proof takes the checkout's current branch from `git status`, not the thread's
 recorded starting branch. The repository's cached fetch remotes identify origin,
 then explicitly linked URLs are read directly with `gh pr view`, even when they
-are absent from the repository list. Every linked PR is checked before accepting
+are absent from the repository's page. Every linked PR is checked before accepting
 a merge: another open linked PR keeps the conversation visible. A linked merge
 needs the exact tip but may have another head name, because agents often push
 `HEAD:fix/...`.
 
-Without a linked proof, the repository's newest 200 PRs are shared with sidebar
-discovery. Its branch needs exactly one local PR; unrelated fork branches do not
+Without a linked proof, the repository's page, its 100 PRs updated last, is
+shared with sidebar discovery; only that read counts as evidence, never what
+earlier pages taught. Its branch needs exactly one local PR; unrelated fork branches do not
 count. A full page requires a branch-specific query and a complete result before
 archiving. `git status` runs only when a merged PR could match. A negative proof
 retries after one minute even when the thread has not changed, so an external
@@ -416,18 +447,26 @@ archives and permits hiding them again when the policy is enabled.
 A shared checkout, reused branch history, ambiguous root holder, dirty tree or
 failed Git/GitHub read leaves the conversation visible.
 
-Viewed, pinned or unread threads remain visible, as do threads with protected
-client input, live processes or terminals, queued turns, background work, pending
-cards or messages, unfinished goals or loops, and active, paused or undelivered
+When a badge read or linked-PR watch detects a merge, that conversation is checked
+directly, without the startup grace, settling delay or periodic history scan.
+Failed detected proofs suppress repeated reads for a minute, independently of the
+scan. A thread update or changed PR links permit an earlier retry. A failed read
+of one conversation leaves it visible and does not stop other detected merges.
+It moves to Done even while viewed, unread or finishing its current prompt.
+The prompt and its processes keep running, its final answer is retained, and the
+Done row shows its live state until it finishes. Pinned threads remain visible,
+as do threads with protected client input, terminals, queued turns,
+pending cards or messages, unfinished goals or loops, and active, paused or undelivered
 workflows. Completed workflow and delegated children can remain as history:
 every retained child, including an archived child, must be idle with a completed
-turn, read, and free of the same activity and input protections. Undelivered or
+turn and be free of the same activity and input protections. Undelivered or
 uncertain family results keep the parent visible. Fresh repository and family
 state checks precede the archive transaction. A late child turn or wake cannot
 start under an archived parent; Restore admits new work again without changing
-the children's existing archive flags. The pass starts after a 90-second startup
-grace and repeats at 60-second intervals after completion, admitting at most
-eight candidates within a 30-second budget for proof and validation.
+the children's existing archive flags. A fallback history scan catches merges
+no surface has read. It starts after a 90-second startup grace and repeats at
+60-second intervals after completion, scanning at most 128 rows and admitting
+eight idle candidates within a 30-second budget for proof and validation.
 
 Automatic archive changes visibility and records its reason; it does not stop
 work or remove a worktree or branch. An hour later the
@@ -445,7 +484,7 @@ Manual archive and deletion keep their explicit clearing behavior.
 
 `threads.move { threadId, projectId, stopBackground? }` moves a root and its
 children to another project on the same machine. Desktop drag and the desktop
-or phone menu call the same RPC. Sub-threads and resident agent sessions cannot
+or phone menu call the same RPC. Sub-threads and bot sessions cannot
 move independently. Unknown, unchanged, archived or missing targets are refused.
 A target project that was archived becomes visible again.
 
@@ -550,6 +589,16 @@ The native shell cases require their executable and adjacent files;
 `BOITE_E2E_SKIP_SHELL=1` explicitly selects a partial core/browser run.
 It does not establish native macOS or Linux WebView coverage.
 
+`bun test tests/e2e/shared-cores.test.ts` starts three real cores on loopback
+with independent temporary journals and Git repositories: two Contact owners
+and one group member. It exercises both association directions, signed/sealed
+relays, role and route refusals, board claims/tombstones, host compute,
+member restart, scoped cancellation, policy revocation and actual Git result
+fetch/object verification/cherry-pick. It runs echo only and performs no paid
+inference or real account action. `shared-collaboration.test.ts` separately
+checks desktop/phone presentation through two in-memory clients. Neither
+fixture proves selective external-provider isolation or native Windows behavior.
+
 Windows process usage reaches the registry through a completion-port event,
 or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
 must wait for both the expected PID set and install leases before checking them;
@@ -594,7 +643,10 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    domain is a file there, an `export *` and one line in each `extends`.
    A branch cut before the split, still editing the single `index.ts`, runs
    `bun scripts/migrate/split-contracts.ts` once `git merge origin/main`
-   stops: it replays its edits onto the domain files.
+   stops: it replays its edits onto the domain files. A rule for its params
+   in `RPC_PARAMS` (`packages/contracts/src/rpc-params.ts`) runs in the router
+   and the in-memory client before either handler, and refuses a bad field
+   with `InvalidParams` and `{ field }`; `settings.set` has one so far.
 2. Register the core handler in the domain's `register*Methods` function.
    For `threads.*`, use `registerThreadMethods` in
    `packages/core/src/threads/rpc.ts`, called by `packages/core/src/modules.ts`.
@@ -605,9 +657,9 @@ live in `fake-client.parity.test.ts`. A fake path below a directory named
    assembled in `fake-client.ts`; agent, plugin and workflow classes handle
    their own methods. A missing map entry fails `bun run check`.
    `packages/ui/src/lib/client.ts` already has a generic `call` method.
-4. Keep owner-only methods out of `DEVICE_METHODS` in
-   `packages/contracts/src/access.ts` and `AGENT_METHODS` in
-   `packages/core/src/access.ts`. Document the reason beside any permission.
+4. Keep owner-only methods out of `DEVICE_METHODS` and `AGENT_METHODS` in
+   `packages/contracts/src/access.ts`; the core and the in-memory client apply
+   the same `accessRefusal`. Document the reason beside any permission.
 5. Test the result and access boundary with a temporary core. Follow
    `packages/core/test/thread-remove.test.ts` for a paired-device refusal.
    The test client in `packages/core/src/client.ts` exposes `error.rpc.code`;
@@ -690,6 +742,11 @@ Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
 `bun run build:core:exe` first. Other platforms use the compiled core. Windows verifies the
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
+
+The JavaScript build minifies identifiers as well as whitespace and syntax;
+function names in its stacks can differ from the source. The compiled sidecar
+keeps identifiers readable. `browser-page-kit.test.ts` evaluates the minified
+page script in a fresh realm, without the bundle's globals.
 
 `stage:core` places `jobs-worker.js`, `guard-worker.js` and
 `artifact-retention-worker.js` beside the core, with both CLI shims. The jobs
@@ -782,8 +839,11 @@ compiled worker, and uses fresh data without provider calls.
 
 The installed-binary compatibility check uses a local mock API, fresh homes
 and no login: `BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
-from the repository root. It covers discovery, a read tool, cold resume, plan
-mode and cancellation beside a locked, incompatible version 1 profile.
+from the repository root. It covers discovery, a read tool, queued and immediate
+follow-ups in one execution, cold resume, plan mode and cancellation beside a
+locked, incompatible version 1 profile. `tests/e2e/opencode2-steering.test.ts`
+checks the queued bubbles, Send now and compact tools on desktop and phone
+against a scripted native server, without an installed provider.
 
 Real-provider tests use CLI logins and spend tokens. Run selected cases from
 `packages/core`, one at a time; never enable them for an ordinary fixture run.
@@ -792,7 +852,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | --- | --- |
 | `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts`: turn, resume, native import and warm process |
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts`: ACP turn and cold resume |
-| `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, ACP turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
+| `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, native API turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts`: default login, model/effort and cold resume; empty isolated homes can open sign-in |
 | `BOITE_E2E_GROK_QUOTA=1` | `test/grok-quota.live.test.ts`: quota for the existing default login |
 | `BOITE_E2E_GROK_PROXY=1` | `test/grok-proxy.live.test.ts`: Grok behind a Douane gateway, on an isolated account that never signed in; `BOITE_E2E_GROK_PROXY_URL` is the gateway's API URL, `BOITE_E2E_GROK_PROXY_KEY` its key |
@@ -842,24 +902,50 @@ quoting a performance figure and include its command and date.
 
 ## Architecture checks
 
-`bun run check` includes `bun run check:architecture`; the latter uses Bun's
-parser without workspace dependencies. `bun test scripts/architecture` covers
-cycle detection, resolution, boundaries and source sizes. Runtime-import scope
+`bun run check` includes `bun run check:architecture`; it reads imports with
+Bun's transpiler and the `<script>` blocks of Svelte components with the UI's
+own `svelte/compiler`, so a component's imports are edges of the graph and a
+cycle through a component fails. `bun test scripts/architecture` covers
+cycle detection, resolution, boundaries and source sizes. The roots it reads
+are `ROOTS` in `scripts/architecture/inventory.ts`; a missing root fails rather
+than narrowing the check. Runtime-import scope
 and exclusions are documented in
 [architecture](architecture.md#module-boundaries-and-complexity).
 
-Production TypeScript, JavaScript and Svelte files have a 900-line ceiling.
-Existing exceptions in `scripts/architecture/size-budget.json` may shrink.
+Production TypeScript, JavaScript, Svelte, Rust, Kotlin and Java files have a
+900-line ceiling; tests, declarations and a Rust module's `tests.rs` do not
+count. Two files above it have an allowance in
+`scripts/architecture/size-budget.json` that may only shrink:
+
+- `apps/android-server/termux/boite-server.ts`: the Termux controller ships as
+  one file, which `install.sh` fetches alone and an update copies alone. It
+  splits once the bootstrap carries a directory.
+- `apps/shell/src-tauri/src/browser.rs`: the shell's browser surfaces, above
+  the ceiling before Rust entered the check.
+
 `--write-size-budget` lowers or removes allowances; it never raises them.
 `--rebaseline-size-budget` can raise them for a reviewed integration of branches
-written before the limits existed. Exempt contract, client and string tables
-have an explicit reason in that file.
+written before the limits existed. Nothing is exempt.
 
 `bun run audit:complexity --json` produces an advisory comparison for TypeScript,
 JavaScript and Svelte scripts, excluding Rust. A high score requires review of
 ownership and duplication, not an automatic split.
 
 ## UI spacing and motion
+
+Settings, Experiments, Pinned model quotas adds a pin to Account limits and
+the Limits page. The card follows the open conversation's model provider,
+including every matching Douane account, and offers four conversation corners
+or a dock below the thread or bot list. Drag the card from outside its buttons
+to a corner or the sidebar; arrow keys move a focused card and Home docks it.
+When the reading column leaves too little margin for the card, it docks
+automatically without changing the saved corner. The dock reserves space above
+the sidebar controls; the list keeps its own scroll. Where the sidebar is
+unavailable, a narrow conversation reserves space below the messages instead
+of covering them. Empty drafts keep a floating card so pinning does not shift
+the welcome or composer. Pin and placement are device preferences under
+`boite.pinned-quotas.v1`. Reads share the other quota views'
+cache and events; only an owner refresh forces the providers to read again.
 
 Use `app.css` tokens for colour, radii, spacing and motion, and mirror every
 English string in all translations. Floating menus use `lib/floating.ts` and
@@ -958,6 +1044,18 @@ clients, blocking questions and finished turns do not show typing. The dots
 pause on hidden pages and become static under reduced motion.
 `tests/e2e/chat-context.test.ts` checks these transitions and phone layout.
 
+Inline Markdown uses markdown-it with raw HTML disabled. Emphasis can wrap
+links and code, nest, and use underscores. Link labels retain inline formatting;
+balanced destinations, titles, escapes, entities and hard line breaks follow
+CommonMark. Boite adds file and thread links after parsing that structure,
+keeps formulas opaque, and turns remote images into links without fetching them.
+Automatic paths keep underscores literal. Windows destinations identified by a
+root or an unescaped separator preserve backslashes; other destinations retain
+CommonMark escapes and entity decoding.
+Block parsing and streaming boundaries remain in Boite's renderer.
+`tests/e2e/markdown.test.ts` covers these formats at desktop and phone widths;
+`tests/e2e/diagrams.test.ts` checks diagrams and formulas.
+
 Received agent mail appears on the right with the user accent; sent agent mail
 appears on the left with a neutral surface. Owner prompts keep the user style.
 The letter's creation time shows its age in the app's language, updates every
@@ -1007,11 +1105,18 @@ zoom; plain browsers keep their native shortcut behavior.
 ### File attachments
 
 Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
-attachments, at most 5 MB each and 10 MB together. Base64 travels in
-`turns.start`; the client rejects a frame above the 16 MB RPC limit before send.
-The total cannot grow without a separate upload channel: the journal keeps a
-message's attachments inline, and `threads.get` cannot page a message heavier
-than its 12 MB page. PNG, JPEG, GIF and WebP use native image input. Other
+attachments, at most 5 MB each and 10 MB together. On a core advertising
+`features.attachmentUploads`, selected files upload before Send through
+`attachments.upload`. Finished uploads replace the corresponding
+`turns.start` attachment bytes with empty data and an `attachmentIds` entry;
+the core resolves those connection-owned leases before validation and
+journalling (`attachment-uploads.ts`). Pending uploads never hold Send:
+their original base64 bytes travel inline, as on older cores. Expired upload
+IDs retry with the original bytes and the same input receipt. These uploads
+do not raise the per-file or per-turn caps, and the client still rejects a
+frame above the 16 MB RPC limit before send. The journal retains the original
+attachments; message reads remain subject to their page budget.
+PNG, JPEG, GIF and WebP use native image input. Other
 files, including PDFs and archives, use `kind: 'file'` and host paths in the
 prompt, and so does an image the provider's agent takes no block of: a GIF for
 Antigravity, whose server reads PNG, JPEG and WebP only. Provider tools decide which formats they can read. Boite neither
@@ -1027,6 +1132,21 @@ browser decodes them (Safari does); elsewhere they travel as a plain file. A
 source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
+
+None of this holds the box. A pasted, dropped or picked file shows at once as
+a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
+taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
+The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
+and falls back to the page where a browser has neither. Files of one composer
+settle in the order they came, each into its placeholder's place, its undo
+steps included. A placeholder is never saved, synced or uploaded; when a sync
+conflict moves the words to a new draft, the file lands in that draft instead
+(`followRead`, `lib/draft-attachments.ts`). Send pressed meanwhile waits on a
+spinner and goes once every file is ready, in the box it was pressed in; typing
+on, or a sync that swaps the box, cancels it. A refused file drops its tile
+and its reference, in the box and in its undo steps, and says why. A file past
+the twenty, from the same drop or a later one, waits for one of them to be
+refused, and is refused itself only once they are all read.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because
@@ -1045,7 +1165,8 @@ The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed
 by archive or project removal. A copy the core wrote or compared is not read
 again while its size, mtime and inode stay the same; an agent's edit changes
-them, and the next reference gets a fresh copy. Timeline cards download those copies. Composer
+them, and the next reference gets a fresh copy. A different size rejects the
+old copy without reading its contents. Timeline cards download those copies. Composer
 `[Image N]` references follow attachment order, preview inline and renumber after
 removal. A tile opens its picture large above the box; a second click on the
 tile, or a click on the large picture, puts it away. Copying or cutting a reference carries its picture
@@ -1063,12 +1184,23 @@ paste, cut, a picture added or removed and every text the app writes are steps
 of their own, so deleting everything and typing by mistake comes back in two
 undos, pictures included. A sent prompt clears that history.
 
+ArrowUp on an idle thread loads the recalled prompt's deferred attachments
+before entering edit mode, like the message's Edit button. A late load cannot
+replace a new draft, another recall or another visit. Submitting an edit
+validates its current attachments and page references before rewinding history;
+attachments deliberately removed from the recalled prompt stay removed.
+
 Original file links in the local desktop thread may open through the system
 application, with executable links retaining their explicit local behavior.
 The shell resolves symlinks, checks thread containment and rejects browsed-webview
 callers. Remote cores, browsers and phones retain preview/download behavior.
 Published snapshots from `boite attach` use the separate safe download/open rules
 in [CLI](cli.md); they do not authorize executing an uploaded file.
+
+File tickets and compressed view copies open without waiting for a FIFO writer
+on POSIX, then check the opened handle's type. A ticket body truncated after its
+size was checked errors instead of completing with fewer bytes than advertised.
+Download names use RFC 8187 encoding for both file and byte tickets.
 
 Inline text previews use the conversation's vertical scroll, including when
 the pointer is over the file contents. Long lines scroll horizontally inside

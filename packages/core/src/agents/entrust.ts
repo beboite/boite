@@ -1,10 +1,9 @@
-import type { AgentConversationMessage, AgentEntrustment, AgentProfile, RpcParams } from '@boite/contracts';
+import type { AgentEntrustment, AgentProfile, RpcParams } from '@boite/contracts';
 import type { GoalOutcome } from '../activity.ts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { newId } from '../ids.ts';
 import type { AgentStore } from './store.ts';
-import { object, text } from './validation.ts';
+import { object, quoted, text } from './validation.ts';
 
 const SETTING = 'agents:entrusted';
 export const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a verified result.';
@@ -14,9 +13,9 @@ const EVENTS = { complete: 'done', blocked: 'blocked', stopped: 'stopped' } as c
 
 /**
  * Ordinary threads the owner handed to a persistent agent. The thread keeps
- * its model and session; a goal keeps it working, the agent's instructions
- * join its turns, and the agent tells its direct conversation when it takes
- * the thread over and when the goal ends.
+ * its model and session; a goal keeps it working and the agent's instructions
+ * join its turns. It goes on the agent's desk, a line in the agent's thread
+ * says so, and the goal's end wakes the agent with an event.
  */
 export class AgentEntrustments {
   private held: AgentEntrustment[] | null = null;
@@ -24,7 +23,7 @@ export class AgentEntrustments {
   constructor(private readonly core: Core, private readonly store: AgentStore) {
     core.activity.onGoal(event => this.ended(event));
     // Both sources stop with the core: activity closes first and the journal guard covers the bus.
-    core.bus.onAny((name, payload) => {
+    core.bus.onCommitted((name, payload) => {
       if (core.journal.isClosed()) return;
       try {
         if (name === 'thread.updated' && (payload as { archived?: boolean }).archived) this.drop((payload as { id: string }).id);
@@ -53,23 +52,29 @@ export class AgentEntrustments {
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) throw refused('threadId: expected an existing, unarchived thread');
     if (thread.parentThreadId) throw refused('threadId: expected a top-level thread, not a delegated child');
-    if (thread.agentSessionId) throw refused('threadId: expected an ordinary thread, not a persistent agent session');
+    if (thread.agentSessionId) throw refused('threadId: expected an ordinary thread, not a bot\'s thread');
     if (thread.projectId === null) throw refused('threadId: expected a thread that belongs to a project');
     const agentId = text(params.agentId, 'agentId', 160);
     if (this.profile(agentId)?.status !== 'active') throw refused('agentId: expected an active agent');
     const objective = (params.objective === undefined ? '' : text(params.objective, 'objective', 4000, true)) || DEFAULT_OBJECTIVE;
     this.core.activity.set({ threadId, goal: { objective } });
     const entry: AgentEntrustment = { threadId, agentId, objective, at: Date.now() };
+    // Entrusted to another bot: the one before loses the grant, as on a take-back.
+    const before = this.of(threadId);
     this.write([...this.list().filter(other => other.threadId !== threadId), entry]);
-    this.post(agentId, threadId, thread.title, 'entrusted', `I am taking over "${thread.title}".`);
+    if (before && before.agentId !== agentId) this.release(before);
+    this.store.projects.follow(agentId, threadId, 'entrusted');
+    this.core.agentRuntime.line(agentId, `The user entrusted "${thread.title}" (${threadId}) to you: ${objective}`);
     this.store.changed();
     return { ...entry };
   }
 
-  /** The owner takes the thread back: the entrustment and the goal it started end, without a message. */
+  /** The owner takes the thread back: the entrustment, the goal it started and the grant it gave end, without a message. */
   private takeBack(threadId: string): null {
-    if (!this.of(threadId)) return null;
-    this.write(this.list().filter(entry => entry.threadId !== threadId));
+    const entry = this.of(threadId);
+    if (!entry) return null;
+    this.write(this.list().filter(other => other.threadId !== threadId));
+    this.release(entry);
     if (this.core.journal.getThread(threadId) && this.core.activity.get(threadId).goal) {
       try { this.core.activity.control({ threadId, kind: 'goal', action: 'remove' }); } catch { /* The goal ended meanwhile. */ }
     }
@@ -78,27 +83,35 @@ export class AgentEntrustments {
   }
 
   private drop(threadId: string): void {
-    if (!this.of(threadId)) return;
-    this.write(this.list().filter(entry => entry.threadId !== threadId));
+    const entry = this.of(threadId);
+    if (!entry) return;
+    this.write(this.list().filter(other => other.threadId !== threadId));
+    this.release(entry);
     this.store.changed();
   }
 
-  /** One message per goal outcome. A met goal ends the entrustment; a blocker or a stop keeps it for the resume. */
+  /**
+   * A goal outcome. A met goal ends the entrustment; a blocker or a stop keeps
+   * it for the resume. Done and blocked wake the agent with an event; a stop is
+   * the user's own doing and only leaves a line.
+   */
   private ended(event: GoalOutcome): void {
     const entry = this.of(event.threadId);
     if (!entry) return;
     const thread = this.core.journal.getThread(event.threadId);
-    if (event.outcome === 'complete') this.write(this.list().filter(other => other.threadId !== entry.threadId));
-    this.post(entry.agentId, entry.threadId, thread?.title ?? '', EVENTS[event.outcome], event.text.slice(0, ANSWER_LIMIT));
+    const over = event.outcome === 'complete';
+    if (over) { this.write(this.list().filter(other => other.threadId !== entry.threadId)); this.release(entry); }
+    const what = `Entrusted thread ${entry.threadId}, titled ${quoted(thread?.title ?? '')}: goal ${EVENTS[event.outcome]}.`;
+    if (event.outcome === 'stopped') this.core.agentRuntime.line(entry.agentId, what);
+    // The news of a met goal is the entrustment's last word: it reaches the bot though the grant ended with it.
+    else this.core.agentRuntime.fact(entry.agentId, { key: `goal:${entry.threadId}:${event.outcome}:${Date.now()}`, text: `${what}\nIts final answer: ${quoted(event.text.slice(0, ANSWER_LIMIT))}`, threadIds: over ? [] : [entry.threadId], urgent: true });
     this.store.changed();
   }
 
-  /** Posted in the agent's direct conversation; nothing is delivered, so no work is enqueued. */
-  private post(agentId: string, threadId: string, title: string, event: NonNullable<AgentConversationMessage['thread']>['event'], body: string): void {
-    this.store.records.create('message', {
-      scope: { kind: 'agent', id: agentId }, senderId: agentId, text: body, recipientIds: [], replyTo: null,
-      episodeId: newId('episode_'), sourceRunId: null, thread: { id: threadId, title, event },
-    });
+  /** The bot's follow loses the owner's grant; it stays only where the bot reaches the thread another way. */
+  private release(entry: AgentEntrustment): void {
+    const agent = this.profile(entry.agentId);
+    if (agent) this.store.projects.release(agent, entry.threadId);
   }
 
   private profile(agentId: string): AgentProfile | null {

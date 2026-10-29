@@ -20,7 +20,7 @@ export const AGENT_OWN_MODEL = 'default';
 export const PROBE_TIMEOUT_MS = 20_000;
 
 /** How long a failed request waits for the child's exit before blaming itself. */
-export const EXIT_GRACE_MS = 500;
+export { EXIT_GRACE_MS } from '../exit.ts';
 
 /** How long a stopped turn waits for its `turn/completed` before the host is closed. */
 export const INTERRUPT_DEADLINE_MS = 30_000;
@@ -57,13 +57,15 @@ type ApprovalMode = 'allowAll' | 'promptUnmatched' | 'onRequest' | 'denyUnmatche
 export interface InitializeResult {
   museHome?: string;
   schema?: { version?: number; fingerprint?: string };
-  serverInfo?: { version?: string };
+  serverInfo?: { name?: string; version?: string };
 }
 
 /** `Session`, the fields read here. */
 export interface MuseSessionRecord {
   sessionId: string;
   modelId?: string | null;
+  providerId?: string;
+  workspaceRoot?: string;
   approvalMode?: { mode?: string } | null;
 }
 

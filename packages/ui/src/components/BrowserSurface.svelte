@@ -17,7 +17,7 @@
   import { ZOOM_DEFAULT, stepZoom, zoomKey } from '../lib/zoom';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
+  import { featureOn } from '../lib/features.svelte';
   import { validPreviewSelection } from '../lib/preview-comments';
   import BrowserTools from './BrowserTools.svelte';
   import { runBrowserAction } from '../lib/browser-tools.svelte';
@@ -48,7 +48,7 @@
     });
   });
   let selectionOwner: { store: Store; threadId: string; client: Store['client']; machineId: string } | null = null;
-  const enabled = $derived(experimentOn('preview-comments'));
+  const enabled = $derived(featureOn('preview-comments'));
 
   function cancelSelection(): void {
     request = null;

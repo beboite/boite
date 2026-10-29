@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import type { ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
@@ -10,7 +11,6 @@ export const KEEPALIVE_PROMPT = 'Cache keepalive: reply ok, no tools.';
 /** What the opening message of a ping is labelled. */
 export const KEEPALIVE_LABEL = 'Prompt cache kept warm';
 
-const BUSY = ['queued', 'running', 'waiting'];
 
 /**
  * One wait of a thread on its agents: from the end of its last real turn,
@@ -130,8 +130,8 @@ export class CacheKeepalive {
     const setting = this.core.settings.get().cacheKeepalive;
     if (!setting) return 'the setting is off';
     if (thread.archived) return 'the thread is archived';
-    // A resident agent and a delegated one answer someone else, who has the cache that matters.
-    if (thread.agentSessionId || thread.parentThreadId) return 'not a conversation of the user';
+    // A delegated agent answers its parent, who has the cache that matters.
+    if (thread.parentThreadId) return 'not a conversation of the user';
     if (thread.sessionId === null) return 'the thread has no session to resume';
     const waiting = this.waiting(thread.id);
     if (waiting !== true) return waiting;
@@ -155,7 +155,7 @@ export class CacheKeepalive {
   /** True while a delegated agent of the thread works or a workflow of it runs, otherwise why not. */
   private waiting(threadId: ThreadId): true | string {
     try {
-      if (this.core.delegation.get(threadId).agents.some((agent) => BUSY.includes(agent.thread.status))) return true;
+      if (this.core.delegation.get(threadId).agents.some((agent) => threadActive(agent.thread.status))) return true;
       if (this.core.workflows.list(threadId).some((run) => run.status === 'running')) return true;
     } catch (error) {
       return `its agents could not be read: ${messageOf(error)}`;
@@ -168,6 +168,9 @@ export class CacheKeepalive {
    * first, and the ping looks again a little later.
    */
   private expected(threadId: ThreadId): boolean {
+    // Keep the wait and recheck: cancelling compaction must allow the next
+    // ping without requiring another conversation turn to rebuild the wait.
+    if (this.threads.autoCompact.planned(threadId)) return true;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return true;
     const deferred = this.threads.deferred;
     if (deferred.pendingWakes.has(threadId) || deferred.deferredAnswers.has(threadId) || deferred.consumed.has(threadId)) return true;
@@ -189,7 +192,7 @@ export class CacheKeepalive {
     if (plan > Date.now()) { this.schedule(threadId, wait, plan - Date.now()); return; }
     if (this.expected(threadId)) { this.schedule(threadId, wait, CACHE_KEEPALIVE.retryMs); return; }
     try {
-      const turn = this.threads.startTurn(threadId, KEEPALIVE_PROMPT, [], undefined, 'keepalive', undefined, undefined, KEEPALIVE_LABEL);
+      const turn = this.threads.startTurn(threadId, { prompt: KEEPALIVE_PROMPT, display: KEEPALIVE_LABEL }, { kind: 'keepalive' });
       this.log('info', threadId, `Prompt cache keepalive ping ${wait.pings + 1} sent`, 'cache-keepalive.ping', turn.id, { pings: wait.pings + 1 });
     } catch (error) {
       this.end(threadId, `the ping was refused: ${messageOf(error)}`);

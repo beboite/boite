@@ -1,4 +1,5 @@
-import type { AgentRoutine, AgentSchedule, RpcParams } from '@boite/contracts';
+import { AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, AGENT_ROUTINES_MAX } from '@boite/contracts';
+import type { AgentRoutine, AgentSchedule, RpcParams, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { boolean, integer, object, text } from './validation.ts';
@@ -50,14 +51,42 @@ export function nextOccurrence(schedule:AgentSchedule,after:number):number|null 
   }
   throw refused('schedule: could not find the next local occurrence');
 }
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** A schedule in a few words, for the agent's own context. */
+export function scheduleText(schedule: AgentSchedule): string {
+  if (schedule.kind === 'once') return `once at ${new Date(schedule.at).toISOString()}`;
+  if (schedule.kind === 'interval') return `every ${schedule.everyMinutes} min`;
+  return `daily at ${schedule.time} ${schedule.timezone}${schedule.days ? ` on ${schedule.days.map(day => DAYS[day]).join(', ')}` : ''}`;
+}
+
+/** The outcome a finished occurrence leaves on its routine. */
+function outcomeOf(turn: Turn): NonNullable<AgentRoutine['lastOutcome']> {
+  if (turn.status === 'done') return turn.quiet ? 'quiet' : 'done';
+  return turn.status === 'stopped' ? 'stopped' : 'error';
+}
+
+/**
+ * Routines: a due one becomes a `routine` turn on its agent's thread. An
+ * occurrence still queued or running skips the next one, which only moves
+ * `nextAt`; one that failed, stopped or had nothing to say never blocks. A
+ * paused agent, a paused core or a spent daily budget skips the occurrence
+ * (`lastOutcome: 'skipped'`); the agent's thread busy with something else
+ * holds it until that turn ends.
+ */
 export class AgentRoutines {
   constructor(private readonly core:Core){}
   private get r(){return this.core.workforce.records;}
+
   save(params:RpcParams<'agents.routine.save'>):AgentRoutine {
     const v=params.value;object(v,'routine');const agent=this.r.get('profile',text(v.agentId,'agentId',160));
-    if(params.threadId){const session=this.core.workforce.session(params.threadId);if(session.agentId!==agent.id||session.scope.kind!=='agent')throw refused('routine: use the agent direct conversation to schedule work');this.core.workforce.assertScope(session,session.scope,'routines');}
+    if(params.threadId!==undefined&&this.core.workforce.agentOfThread(params.threadId)?.id!==agent.id)throw refused('routine: an agent schedules its own routines from its own thread',{field:'agentId'});
     const previous=params.id?this.r.get('routine',params.id):null;
     if(previous&&previous.agentId!==agent.id)throw refused('agentId: a routine cannot change owner');
+    if(!previous){
+      const held=this.r.list('routine').filter(r=>r.agentId===agent.id).length;
+      if(held>=AGENT_ROUTINES_MAX)throw refused(`routine: ${agent.name} already has ${held} routines, the most an agent may hold is ${AGENT_ROUTINES_MAX}; remove one before adding another`,{field:'agentId',count:held,max:AGENT_ROUTINES_MAX});
+    }
     const schedule=checkSchedule(v.schedule),enabled=boolean(v.enabled,'enabled');
     const changed=JSON.stringify(previous?.schedule)!==JSON.stringify(schedule);
     // A once routine that already ran is done: resuming it must not fire it again at its past date.
@@ -65,40 +94,88 @@ export class AgentRoutines {
     const spent=schedule.kind==='once'&&!changed&&previous?.lastScheduledAt!=null;
     const nextAt=!enabled||spent?null:previous?.enabled&&!changed?previous.nextAt:schedule.kind==='once'?schedule.at:nextOccurrence(schedule,Date.now());
     const lastScheduledAt=schedule.kind==='once'&&changed?null:previous?.lastScheduledAt??null;
-    const value={agentId:agent.id,name:text(v.name,'name',120),prompt:text(v.prompt,'prompt',16000),schedule,enabled,nextAt,lastWorkId:previous?.lastWorkId??null,lastScheduledAt};
-    const result=params.id?this.r.update('routine',params.id,params.expectedRevision!,value):this.r.create('routine',value);
+    const value:Omit<AgentRoutine,'id'|'revision'|'createdAt'|'updatedAt'>={agentId:agent.id,name:text(v.name,'name',AGENT_ROUTINE_NAME_MAX),prompt:text(v.prompt,'prompt',AGENT_ROUTINE_PROMPT_MAX),schedule,enabled,nextAt,lastTurnId:previous?.lastTurnId??null,lastScheduledAt,lastOutcome:previous?.lastOutcome??null};
+    const result=params.id?this.r.update('routine',params.id,integer(params.expectedRevision,'expectedRevision',1,Number.MAX_SAFE_INTEGER),value):this.r.create('routine',value);
     this.core.workforce.changed();return result;
   }
-  run(params:RpcParams<'agents.routine.run'>){
-    return this.r.command(`routine:${params.routineId}`,params.requestId,{routineId:params.routineId},()=>{
-      const routine=this.r.get('routine',params.routineId),agent=this.r.get('profile',routine.agentId);
-      if(agent.status!=='active')throw refused('routine: agent is paused or archived');
-      if(routine.lastWorkId&&!['done','cancelled'].includes(this.r.get('work',routine.lastWorkId).status))throw refused('routine: previous work is unfinished');
-      const work=this.core.workforce.resident.enqueue(agent.id,routine.prompt);
-      this.r.update('routine',routine.id,routine.revision,{...routine,lastWorkId:work.id,lastScheduledAt:Date.now(),nextAt:routine.enabled&&routine.schedule.kind!=='once'?nextOccurrence(routine.schedule,Date.now()):null,enabled:routine.enabled&&routine.schedule.kind!=='once'});
-      this.core.workforce.changed();return work;
-    });
+
+  remove(params:RpcParams<'agents.routine.remove'>):{removed:true} {
+    const routine=this.r.get('routine',text(params.routineId,'routineId',160));
+    if(params.threadId!==undefined&&this.core.workforce.agentOfThread(params.threadId)?.id!==routine.agentId)throw refused('routine: an agent removes only its own routines',{field:'routineId'});
+    this.r.remove('routine',routine.id);
+    this.core.workforce.changed();
+    return {removed:true};
   }
+
+  /** The owner's Run now: the occurrence starts at once, whatever the pause or the budget, on an idle thread. */
+  run(params:RpcParams<'agents.routine.run'>):{turnId:string} {
+    const routine=this.r.get('routine',text(params.routineId,'routineId',160));
+    const agent=this.r.get('profile',routine.agentId);
+    if(agent.status==='archived')throw refused(`routine: ${agent.name} is archived`,{field:'routineId'});
+    const requestId=`run-${text(params.requestId,'requestId',100)}`;
+    // A retried Run now answers the turn it started, whatever that turn is doing now.
+    const prior=this.core.journal.turnRequest(this.core.workforce.open(agent.id).threadId,requestId);
+    if(prior)return {turnId:prior.turn_id};
+    const turn=this.core.agentRuntime.start(agent,{kind:'routine',label:`Routine · ${routine.name}`,prompt:routine.prompt,requestId});
+    this.occurred(routine,turn.id,false);
+    return {turnId:turn.id};
+  }
+
+  /** Writes an occurrence that started, or one that was skipped, and moves the routine to its next time. */
+  private occurred(routine:AgentRoutine,turnId:string|null,due:boolean):void {
+    const now=Date.now();
+    const current=this.r.get('routine',routine.id);
+    const once=current.schedule.kind==='once';
+    // Run now leaves the schedule as it was; a due occurrence moves it on.
+    const next=due?{nextAt:current.enabled&&!once?nextOccurrence(current.schedule,now):null,enabled:current.enabled&&!once}:{};
+    this.r.update('routine',current.id,current.revision,{...current,...next,lastScheduledAt:now,
+      ...(turnId===null?{lastOutcome:'skipped' as const}:{lastTurnId:turnId,lastOutcome:null})});
+    this.core.workforce.changed();
+  }
+
+  /** A due occurrence whose previous one still runs only moves on. */
+  private advance(routine:AgentRoutine):void {
+    const now=Date.now();
+    const once=routine.schedule.kind==='once';
+    this.r.update('routine',routine.id,routine.revision,{...routine,nextAt:routine.enabled&&!once?nextOccurrence(routine.schedule,now):null,enabled:routine.enabled&&!once});
+    this.core.workforce.changed();
+  }
+
+  /** The routine whose last occurrence this turn was, with its outcome. */
+  finished(turn:Turn):void {
+    if(turn.execution?.operation!=='routine')return;
+    const routine=this.r.list('routine').find(r=>r.lastTurnId===turn.id);
+    if(!routine)return;
+    this.r.update('routine',routine.id,routine.revision,{...routine,lastOutcome:outcomeOf(turn)});
+    this.core.workforce.changed();
+  }
+
   /**
-   * The earliest future `nextAt` as of a record-write count. A due routine held back
-   * by a paused agent or unfinished work waits for a record write too, so until
-   * the count moves or that time comes, a tick reads nothing.
+   * The earliest future `nextAt` as of a record-write count: until the count
+   * moves or that time comes, a tick reads nothing. A due routine held by a busy
+   * thread keeps the next tick reading.
    */
   private next:{writes:number;at:number|null}|null=null;
   tick(now=Date.now()):void {
-    if(this.core.workforce.limits().paused||this.core.stopping)return;
+    if(this.core.stopping)return;
     const writes=this.r.writes;
     if(this.next&&this.next.writes===writes&&(this.next.at===null||this.next.at>now))return;
-    let at:number|null=null,ran=false;
+    let at:number|null=null,held=false;
+    const paused=this.core.workforce.limits().paused;
     for(const routine of this.r.list('routine')){
       if(!routine.enabled||routine.nextAt===null)continue;
       if(routine.nextAt>now){at=at===null?routine.nextAt:Math.min(at,routine.nextAt);continue;}
-      if(this.r.get('profile',routine.agentId).status!=='active')continue;
-      if(routine.lastWorkId&&!['done','cancelled'].includes(this.r.get('work',routine.lastWorkId).status))continue;
-      this.run({routineId:routine.id,requestId:`due-${routine.nextAt}-${routine.revision}`});
-      ran=true;
+      const agent=this.r.find('profile',routine.agentId);
+      if(!agent||agent.status==='archived')continue;
+      const last=routine.lastTurnId?this.core.journal.getTurn(routine.lastTurnId):null;
+      if(last&&(last.status==='queued'||last.status==='running')){this.advance(routine);continue;}
+      if(paused||agent.status==='paused'){this.occurred(routine,null,true);continue;}
+      const attempt=this.core.agentRuntime.attempt(agent,{kind:'routine',label:`Routine · ${routine.name}`,prompt:routine.prompt,requestId:`due-${routine.id}-${routine.nextAt}`});
+      if(attempt.held==='busy'){held=true;continue;}
+      this.occurred(routine,attempt.turn?.id??null,true);
     }
-    // A run moved its routine's nextAt: read them all again next time.
-    this.next=ran?null:{writes,at};
+    // A skipped or started occurrence moved its own `nextAt`: the earliest is read again after them.
+    if(!held)for(const routine of this.r.list('routine'))if(routine.enabled&&routine.nextAt!==null&&routine.nextAt>now)at=at===null?routine.nextAt:Math.min(at,routine.nextAt);
+    this.next=held?null:{writes:this.r.writes,at};
   }
 }

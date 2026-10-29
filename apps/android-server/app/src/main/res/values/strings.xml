@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Boite Server</string>
+    <string name="tagline">Boite on this phone, for your other devices.</string>
+    <string name="check_again">Check again</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied</string>
+    <string name="done">Done</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Setup -->
+    <string name="termux_title">Install Termux</string>
+    <string name="termux_body">Boite Server runs inside Termux, a Linux environment for Android. Install it from F-Droid or from its GitHub releases: Boite Server is made for that build.</string>
+    <string name="termux_fdroid">F-Droid</string>
+    <string name="termux_github">GitHub</string>
+    <string name="permission_title">Let Boite Server use Termux</string>
+    <string name="permission_body">Boite Server starts, stops and updates Boite by running commands in Termux. Android asks you to allow it once.</string>
+    <string name="permission_allow">Allow</string>
+    <string name="permission_settings">App settings</string>
+    <string name="setup_title">Install Boite in Termux</string>
+    <string name="setup_step_channel">Choose the releases to follow.</string>
+    <string name="setup_step_paste">Open Termux, paste this command and press Enter. It downloads several hundred megabytes: use Wi-Fi.</string>
+    <string name="setup_step_wait">Come back here once Termux says Boite is running. This screen turns into the dashboard by itself.</string>
+    <string name="setup_open_termux">Open Termux</string>
+    <string name="setup_termux_said">Termux: %1$s</string>
+    <string name="channel_stable">Stable</string>
+    <string name="channel_nightly">Nightly</string>
+
+    <!-- Status -->
+    <string name="state_running">Running</string>
+    <string name="state_starting">Starting</string>
+    <string name="state_stopped">Stopped</string>
+    <string name="version">Boite %1$s</string>
+    <string name="channel_line">%1$s channel</string>
+    <string name="up_for">up for %1$s</string>
+    <string name="duration_days">%1$d d %2$d h</string>
+    <string name="duration_hours">%1$d h %2$d min</string>
+    <string name="duration_minutes">%1$d min</string>
+    <string name="reach_at">Open it from another device at</string>
+    <string name="tailscale_address">Tailscale</string>
+    <string name="wifi_address">Wi-Fi</string>
+    <string name="waiting_tailscale">Waiting for Tailscale: the server listens once this phone joins the tailnet.</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="restart">Restart</string>
+    <string name="busy_start">Starting…</string>
+    <string name="busy_stop">Stopping. A turn under way gets up to 75 s to finish.</string>
+    <string name="busy_restart">Restarting. A turn under way gets up to 75 s to finish.</string>
+    <string name="busy_other">Working…</string>
+
+    <!-- Signing the agents in -->
+    <string name="sign_in_title">Agents</string>
+    <string name="sign_in_unknown">Boite did not say which agents are signed in.</string>
+    <string name="nobody_signed_in">No agent is signed in</string>
+    <string name="sign_in_hint">A conversation gets no answer until one is. Sign in opens Termux: open the link it shows, sign in, then paste the code back if it asks for one. You can also pair a Boite desktop app below and sign in from its Settings › Providers.</string>
+    <string name="signed_in">Signed in</string>
+    <string name="signed_out">Not signed in</string>
+    <string name="sign_in_checking">Not checked yet</string>
+    <string name="sign_in_error">Sign-in check failed</string>
+    <string name="sign_in">Sign in</string>
+
+    <!-- Pairing -->
+    <string name="pair_title">Pair a device</string>
+    <string name="pair_device">Phone or browser</string>
+    <string name="pair_device_hint">Opens Boite on this server with a phone\'s access.</string>
+    <string name="pair_owner">Desktop app</string>
+    <string name="pair_owner_hint">Gives a Boite desktop app full control of this server, as its owner.</string>
+    <string name="pair_show">Show code</string>
+    <string name="pair_dialog_device">Pair a phone or browser</string>
+    <string name="pair_dialog_owner">Pair a desktop app</string>
+    <string name="pair_dialog_body">Scan the code from the other device, or send it the link. The link works once.</string>
+    <string name="pair_until">Good until %1$s.</string>
+    <string name="pair_copy">Copy link</string>
+    <string name="pair_secret">Anyone with this link gets in: share it only with your own device.</string>
+
+    <!-- Updates and agents -->
+    <string name="updates_title">Updates</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="up_to_date">Boite %1$s is up to date.</string>
+    <string name="available">Boite %1$s is available.</string>
+    <string name="update_now">Update</string>
+    <string name="updating">Updating. Boite stops for a moment once the new version is ready.</string>
+    <string name="updated">Boite %1$s installed.</string>
+    <string name="claude">Claude Code</string>
+    <string name="codex">Codex</string>
+    <string name="not_installed">not installed</string>
+    <string name="not_checked">…</string>
+    <string name="update_claude">Update Claude Code</string>
+    <string name="updating_claude">Updating Claude Code…</string>
+    <string name="claude_updated">Claude Code updated to %1$s.</string>
+    <string name="claude_current">Claude Code %1$s is up to date.</string>
+    <string name="codex_hint">Termux\'s package manager updates Codex: pkg upgrade codex.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="setting_channel">Releases</string>
+    <string name="setting_host">Listen on</string>
+    <string name="host_lan">Wi-Fi and Tailscale</string>
+    <string name="host_tailscale">Tailscale only</string>
+    <string name="host_local">This phone only</string>
+    <string name="setting_port">Port</string>
+    <string name="setting_port_invalid">A port from 1024 to 65535.</string>
+    <string name="save">Save</string>
+    <string name="setting_autostart">Start with the phone</string>
+    <string name="restart_to_apply">Saved. Restart Boite to apply it.</string>
+
+    <!-- Keeping it alive -->
+    <string name="alive_title">Keep it running</string>
+    <string name="alive_body">Android stops apps in the background to save battery. For a server that stays up:</string>
+    <string name="alive_battery">Set Termux\'s battery use to Unrestricted.</string>
+    <string name="alive_autostart">Allow Boite Server to start with the phone. Some phones keep that switch in Boite Server settings › Battery usage, others in an autostart list; without it, Boite stays off after a restart.</string>
+    <string name="alive_children">On Android 12 and later, turn on Developer options › Disable child process restrictions where the phone offers it.</string>
+    <string name="alive_termux_settings">Termux settings</string>
+    <string name="alive_app_settings">Boite Server settings</string>
+    <string name="alive_guide">Guide for %1$s</string>
+
+    <!-- Logs -->
+    <string name="logs_title">Logs</string>
+    <string name="logs_show">Show logs</string>
+    <string name="logs_refresh">Refresh</string>
+    <string name="logs_empty">Nothing logged yet.</string>
+
+    <!-- Removal -->
+    <string name="remove_title">Remove Boite Server</string>
+    <string name="remove_body">Stops Boite and removes it from Termux. Your conversations stay unless you delete them too.</string>
+    <string name="remove_button">Remove</string>
+    <string name="remove_purge">Also delete the conversations</string>
+    <string name="remove_confirm">Remove Boite from this phone?</string>
+</resources>

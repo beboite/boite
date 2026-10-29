@@ -69,6 +69,8 @@ function describe(entry: Served, reference: number, what: string): string {
  * that page). Without a send time, only the newest record of the path can be
  * told, against `receivedAt`, when its devtools event reached us: that event
  * can come after the server answered, so no window can rule the server out.
+ * Matching a path and time window cannot identify a CDP request: concurrent
+ * same-URL requests can share a record, so every candidate is labelled.
  */
 export function uiServerSide(url: string, sentAt: number | null, receivedAt: number): string | null {
   let parsed: URL;
@@ -79,10 +81,10 @@ export function uiServerSide(url: string, sentAt: number | null, receivedAt: num
   if (sentAt === null) {
     const newest = served.findLast((candidate) => candidate.port === port && candidate.path === path);
     if (newest === undefined) return 'the UI server has no record of it';
-    return `no send time; newest record: ${describe(newest, receivedAt, 'devtools reported it')}`;
+    return `no send time; newest record (request identity unverified): ${describe(newest, receivedAt, 'devtools reported it')}`;
   }
   // The server cannot see it before Chrome sent it.
   const entry = served.findLast((candidate) => candidate.port === port && candidate.path === path && candidate.at >= sentAt - CLOCK_SLACK_MS);
   if (entry === undefined) return 'the UI server never got it';
-  return describe(entry, sentAt, 'it was sent');
+  return `possible server match (request identity unverified): ${describe(entry, sentAt, 'it was sent')}`;
 }

@@ -11,7 +11,7 @@ import { invalidParams } from '../errors.ts';
 const MAX_DEPTH = 64;
 
 /** The repository directory holding `config`, worktrees and submodules followed to their common directory. */
-function gitDirOf(start: string): string | null {
+export function gitCommonDirOf(start: string): string | null {
   let dir = resolve(start);
   for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
     const candidate = join(dir, '.git');
@@ -90,7 +90,7 @@ export function checkNormalizedRemote(value: unknown, field: string): string {
 /** The normalized remote of the checkout `cwd` is in, or null. */
 export function gitRemoteOf(cwd: string): string | null {
   try {
-    const gitDir = gitDirOf(cwd);
+    const gitDir = gitCommonDirOf(cwd);
     if (gitDir === null) return null;
     const config = join(gitDir, 'config');
     if (!existsSync(config) || statSync(config).size > 1_048_576) return null;

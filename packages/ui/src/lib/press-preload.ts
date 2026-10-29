@@ -1,5 +1,5 @@
 /*
- * The `press-preload` experiment: what a click would load starts on the press.
+ * Load on press: what a click would load starts on the press.
  * A mouse button stays down for 60 to 120 ms before the click fires, a finger
  * longer; on a remote machine that is most of a round trip. One capture
  * listener on the window reads two attributes, so a row costs nothing to mark:
@@ -12,8 +12,8 @@
  * - `data-preload-view="settings" | "agents" | "home"`: the page's code chunk.
  *
  * It stays off under automation (`navigator.webdriver`), so benchmarks and
- * end-to-end runs measure the plain click even on a profile that has the
- * switch on; its own test opts in with `__BOITE_PRESS_PRELOAD_TEST__`.
+ * end-to-end runs measure the plain click; its own test opts in with
+ * `__BOITE_PRESS_PRELOAD_TEST__`.
  */
 
 import { prefetchAllowed } from './prefetch';
@@ -39,7 +39,7 @@ const views: Record<string, () => Promise<unknown>> = {
   home: () => import('../components/home/HomePage.svelte')
 };
 
-/** False under a driven browser, unless the experiment's own test asked for it. */
+/** False under a driven browser, unless its own test asked for it. */
 export function preloadAllowed(nav: { webdriver?: boolean } = navigator): boolean {
   return nav.webdriver !== true || window.__BOITE_PRESS_PRELOAD_TEST__ === true;
 }

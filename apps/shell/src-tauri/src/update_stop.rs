@@ -42,14 +42,18 @@ fn request_shutdown(path: &str, port: u16, token: &str, pid: u32) -> Result<Admi
 
 /// Cancellation and each admission request share the mutex. Once committed, cancellation is too late.
 /// A core with the handoff commits on the first request, busy or not; an older one is polled until idle.
-pub(crate) fn stop_for_update(directory: &Path, control: &Mutex<InstallState>, committed: impl Fn()) -> Result<bool, String> {
+/// `idle_only`, for an install nobody asked for now, skips the handoff and asks for the idle stop
+/// once: a busy core keeps running and the answer is false. So it is when `still` turns false
+/// before that request: the window came back on screen while the install waited for the core.
+pub(crate) fn stop_for_update(directory: &Path, control: &Mutex<InstallState>, idle_only: bool, still: impl Fn() -> bool, committed: impl Fn()) -> Result<bool, String> {
     let core = read_core_file(&directory.join("core.json"))?.ok_or("core.json is missing; nothing was installed")?;
     let pid = core.pid.ok_or("core.json must identify the core pid; nothing was installed")?;
     let process = Watched::open(pid).ok_or("the expected core process could not be watched; nothing was installed")?;
-    let mut handoff = true;
+    let mut handoff = !idle_only;
     loop {
         let mut state = control.lock().map_err(|_| "update admission state is poisoned")?;
         if *state == InstallState::Cancelled { return Ok(false); }
+        if idle_only && !still() { return Ok(false); }
         if !process.exited_within(Duration::ZERO) {
             if health(core.port, pid).is_none() { return Err("the live engine did not answer as the expected core; nothing was installed".into()); }
             if handoff {
@@ -60,6 +64,7 @@ pub(crate) fn stop_for_update(directory: &Path, control: &Mutex<InstallState>, c
             } else {
                 match request_shutdown("/shutdown-if-idle", core.port, &core.token, pid)? {
                     Admission::Accepted => {}
+                    Admission::Busy if idle_only => return Ok(false),
                     Admission::Busy => {
                         drop(state);
                         std::thread::sleep(Duration::from_millis(250));
@@ -132,7 +137,7 @@ const server = Bun.serve({ hostname:'127.0.0.1', port:0, fetch(request) {
         let mut fixture = Fixture::new("handoff", "handoff");
         let control = Mutex::new(InstallState::Waiting);
         // No `idle` file: the idle admission would answer busy for ever.
-        assert!(stop_for_update(&fixture.directory, &control, || {}).unwrap());
+        assert!(stop_for_update(&fixture.directory, &control, false, || true, || {}).unwrap());
         assert_eq!(fixture.child.wait().unwrap().code(), Some(0));
         assert!(*control.lock().unwrap() == InstallState::Committed);
     }
@@ -142,7 +147,7 @@ const server = Bun.serve({ hostname:'127.0.0.1', port:0, fetch(request) {
         let mut fixture = Fixture::new("cancel", "current");
         let control = Arc::new(Mutex::new(InstallState::Waiting));
         let other = control.clone(); let directory = fixture.directory.clone();
-        let waiter = std::thread::spawn(move || stop_for_update(&directory, &other, || panic!("cancelled install committed")));
+        let waiter = std::thread::spawn(move || stop_for_update(&directory, &other, false, || true, || panic!("cancelled install committed")));
         std::thread::sleep(Duration::from_millis(100));
         *control.lock().unwrap() = InstallState::Cancelled;
         assert!(!waiter.join().unwrap().unwrap());
@@ -154,7 +159,7 @@ const server = Bun.serve({ hostname:'127.0.0.1', port:0, fetch(request) {
         let mut fixture = Fixture::new("finish", "current");
         let control = Arc::new(Mutex::new(InstallState::Waiting));
         let other = control.clone(); let directory = fixture.directory.clone();
-        let waiter = std::thread::spawn(move || stop_for_update(&directory, &other, || {}));
+        let waiter = std::thread::spawn(move || stop_for_update(&directory, &other, false, || true, || {}));
         std::thread::sleep(Duration::from_millis(100));
         assert!(fixture.child.try_wait().unwrap().is_none());
         std::fs::write(fixture.directory.join("idle"), "").unwrap();
@@ -163,11 +168,27 @@ const server = Bun.serve({ hostname:'127.0.0.1', port:0, fetch(request) {
         assert!(*control.lock().unwrap() == InstallState::Committed);
     }
     #[test]
+    fn an_install_nobody_asked_for_leaves_a_busy_core_running_and_stops_an_idle_one() {
+        let _guard = crate::process_test_guard();
+        let mut fixture = Fixture::new("quiet", "handoff");
+        let control = Mutex::new(InstallState::Waiting);
+        // The handoff would stop it at once: an automatic install never asks for it.
+        assert!(!stop_for_update(&fixture.directory, &control, true, || true, || panic!("a busy core was stopped")).unwrap());
+        assert!(fixture.child.try_wait().unwrap().is_none());
+        std::fs::write(fixture.directory.join("idle"), "").unwrap();
+        // The window came back while the install waited: an idle core keeps running too.
+        assert!(!stop_for_update(&fixture.directory, &control, true, || false, || panic!("a shown window was closed")).unwrap());
+        assert!(fixture.child.try_wait().unwrap().is_none());
+        assert!(stop_for_update(&fixture.directory, &control, true, || true, || {}).unwrap());
+        assert_eq!(fixture.child.wait().unwrap().code(), Some(0));
+        assert!(*control.lock().unwrap() == InstallState::Committed);
+    }
+    #[test]
     fn an_older_core_without_idle_admission_is_never_killed() {
         let _guard = crate::process_test_guard();
         let mut fixture = Fixture::new("legacy", "legacy");
         let control = Mutex::new(InstallState::Waiting);
-        assert!(stop_for_update(&fixture.directory, &control, || {}).unwrap_err().contains("404"));
+        assert!(stop_for_update(&fixture.directory, &control, false, || true, || {}).unwrap_err().contains("404"));
         assert!(fixture.child.try_wait().unwrap().is_none());
     }
 }

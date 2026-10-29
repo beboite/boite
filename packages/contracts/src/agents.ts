@@ -1,18 +1,42 @@
-import type { Attachment, DelegationConfig, DelegationProfile, MessagePart, PermissionMode, RequestId, TurnExecution } from './index';
+import type { DelegationConfig, DelegationProfile, PermissionMode, RequestId } from './index';
 import type { AgentSettingApplyParams, AgentSettingAsk, AgentSettingRequestParams, AgentSettingsReading, AgentSettingsReadParams } from './agent-setting-requests';
+import type { AgentCreateParams, AgentCreateResult } from './agent-create';
 
+/**
+ * A persistent agent is a thread with an identity. Its conversation is its own
+ * thread (`AgentSession.threadId`), drawn and driven like any thread: the
+ * user's messages are turns, the queue, steering, tool cards, questions,
+ * permissions, subagents and the side panel all work there. What the agent adds
+ * is a persona, a brain folder (AGENTS.md, MEMORY.md, skills/), a clock
+ * (routines), a desk of the threads it runs or watches, and wakes: turns the
+ * core starts on its thread when a routine is due or something happens in its
+ * projects. A wake that needs nothing from the user ends its answer with a line
+ * `[quiet] <what it checked>`; clients fold that turn and nothing is unread.
+ */
 export interface AgentRuntimeConfig {
   defaultRoute: AgentSelection;
   allowedRoutes: DelegationProfile[];
   subagents: DelegationConfig;
-  compactAfterTurns: number;
-  maxRunMinutes: number;
   /**
-   * After each finished piece of work in the direct conversation, a small
-   * subagent rewrites MEMORY.md from what was asked and answered. On unless
-   * the owner turns it off; missing on configurations saved before it existed.
+   * After a turn whose answer the user sees, a small subagent rewrites
+   * MEMORY.md from what was asked and answered, off the agent's path: the next
+   * turn never waits for it. On unless the owner turns it off.
    */
   autoMemory?: boolean;
+  /**
+   * Every project and desk fact wakes this bot. Default false: then only facts
+   * about threads it started, was entrusted or watches (`boite bot watch`), and
+   * outside events (`agents.event`), wake it; the rest wait for its next routine.
+   */
+  eventWakes?: boolean;
+  /**
+   * What the agent may spend in a day in API-equivalent dollars, counted from
+   * local midnight: its turns and its children's (subagents, workflow steps,
+   * memory pass), priced from usage the way `usage.history` prices them. Past
+   * it, wakes are skipped with a line in its thread; its children and the
+   * user's own messages still run. Null or missing: no cap.
+   */
+  dailyBudgetUsd?: number | null;
 }
 export interface AgentAccountGrant { accountId: string; agentIds: string[] | null }
 export interface AgentBrain {
@@ -22,6 +46,13 @@ export interface AgentBrain {
   memory: string;
   revision: string;
 }
+/** The size MEMORY.md is kept under: the memory pass consolidates to it, a turn reads at most this much. */
+export const AGENT_MEMORY_MAX = 16_000;
+/** Routines one agent may hold; a save past it is refused with the count. */
+export const AGENT_ROUTINES_MAX = 50;
+/** A routine's name and prompt, in characters. */
+export const AGENT_ROUTINE_NAME_MAX = 80;
+export const AGENT_ROUTINE_PROMPT_MAX = 4000;
 /**
  * A daily schedule with `days` runs only on those weekdays, numbered 0 (Sunday) to 6 in
  * its timezone. Absent means every day; the core drops a list of all seven.
@@ -34,8 +65,15 @@ export interface AgentRoutine extends AgentRecord {
   schedule: AgentSchedule;
   enabled: boolean;
   nextAt: number | null;
-  lastWorkId: string | null;
+  /** The turn the last occurrence started on the agent's thread. */
+  lastTurnId: string | null;
   lastScheduledAt: number | null;
+  /**
+   * How the last occurrence ended: `quiet` when it had nothing for the user,
+   * `skipped` when the budget or a pause held it. A failed occurrence never
+   * blocks the next one; only one still queued or running does.
+   */
+  lastOutcome?: 'done' | 'quiet' | 'error' | 'stopped' | 'skipped' | null;
 }
 
 /** Stable identities are independent of provider processes and native sessions. */
@@ -58,125 +96,25 @@ export interface AgentProfile extends AgentRecord {
   instructions: string;
   avatar: string;
   selection: AgentSelection;
+  /** Paused: no wakes, the user can still write to it. Archived: its thread is read-only. */
   status: 'active' | 'paused' | 'archived';
-  tools: string[];
   /**
-   * Projects the owner entrusted to this agent. Its direct conversation reads
-   * their threads, starts, steers, archives, moves and stops them, answers
-   * their questions, and hears when one fails, asks or waits. Missing on
-   * profiles saved before it existed: none.
+   * Projects the owner entrusted to this agent. It reads their threads, starts,
+   * steers, archives, moves and stops them, answers their questions, and is
+   * woken when one it runs ends, fails, asks, waits on a permission or stalls.
    */
   projectIds?: string[];
 }
-export interface AgentGroup extends AgentRecord {
-  name: string;
-  memberIds: string[];
-  mode: 'mentions' | 'round' | 'autonomous';
-  maxTurns: number;
-  maxTurnsPerAgent: number;
-  paused: boolean;
-}
-export interface AgentTeam extends AgentRecord {
-  name: string;
-  description: string;
-  members: { agentId: string; responsibility: string }[];
-  projectIds: string[];
-  groupId: string | null;
-  paused: boolean;
-}
-export type AgentScope = { kind: 'agent' | 'group' | 'team' | 'mission' | 'project'; id: string };
-export interface AgentMission extends AgentRecord {
-  title: string;
-  objective: string;
-  expectedResult: string;
-  teamId: string | null;
-  projectId: string | null;
-  agentIds: string[];
-  status: 'open' | 'active' | 'waiting' | 'paused' | 'review' | 'done' | 'cancelled';
-  maxTurns: number;
-  maxDurationMs: number;
-  maxTokens: number | null;
-  resourceIds: string[];
-}
-export interface AgentMissionTask extends AgentRecord {
-  missionId: string;
-  title: string;
-  instructions: string;
-  dependsOn: string[];
-  assigneeId: string | null;
-  status: 'open' | 'assigned' | 'running' | 'waiting' | 'review' | 'done' | 'cancelled';
-  generation: number;
-  leaseUntil: number | null;
-  workspace: { path: string; branch: string | null } | null;
-  result: string | null;
-}
+/** The agent's own thread. One per agent, created with it. */
 export interface AgentSession extends AgentRecord {
   agentId: string;
-  scope: AgentScope;
   threadId: string;
-}
-export interface AgentConversationMessage extends AgentRecord {
-  scope: AgentScope;
-  senderId: string | null;
-  text: string;
-  recipientIds: string[];
-  replyTo: string | null;
-  episodeId: string;
-  sourceRunId: string | null;
-  /**
-   * A message the agent posts about a thread entrusted to it: when it takes
-   * the thread over, and when the work there ends. `text` carries the
-   * thread's last answer (`done`, `blocked`) or why it stopped; clients
-   * write the sentence around it in their own language from `event`.
-   */
-  thread?: { id: string; title: string; event: 'entrusted' | 'done' | 'blocked' | 'stopped' };
-  /**
-   * Files the agent attached with `boite attach` while it worked: pictures,
-   * captures, documents. Each is read with `artifacts.read` on the agent's
-   * own thread and message.
-   */
-  files?: AgentMessageFile[];
-  /**
-   * What the user attached to this message, described: the bytes stay on
-   * the core and reach each recipient with its turn, never the snapshot.
-   */
-  attachments?: AgentMessageAttachment[];
-}
-export interface AgentMessageAttachment {
-  kind: Attachment['kind'];
-  mimeType: string;
-  name: string | null;
-  bytes: number;
-  /**
-   * Where the bytes live once an agent's turn took them: the prompt of that
-   * turn in the agent's thread, read with `messages.attachment` like a
-   * thread's own picture. Absent until a turn took the message.
-   */
-  source?: { threadId: string; messageId: string; partIndex: number };
-}
-export interface AgentMessageFile {
-  threadId: string;
-  messageId: string;
-  part: Extract<MessagePart, { type: 'artifact' }>;
-}
-/**
- * The memory pass after a finished piece of work: a small subagent of the
- * agent's thread reads what was asked and answered and rewrites MEMORY.md.
- * `summary` says in one line what it changed; null while it runs or when
- * nothing changed.
- */
-export interface AgentMemoryPass {
-  threadId: string;
-  status: 'running' | 'done' | 'unchanged' | 'error';
-  summary: string | null;
-  at: number;
 }
 /**
  * An ordinary thread the owner handed to a persistent agent. The thread keeps
  * its own model and session; the agent's name and instructions join its turns
- * and a goal keeps it working until the objective is met or it needs the
- * user. The agent tells its own conversation when it takes over and when the
- * work ends. One agent per thread; entrusting again replaces it.
+ * and a goal keeps it working. It sits on the agent's desk, and its outcome
+ * wakes the agent. One agent per thread; entrusting again replaces it.
  */
 export interface AgentEntrustment {
   threadId: string;
@@ -185,151 +123,86 @@ export interface AgentEntrustment {
   objective: string;
   at: number;
 }
-export interface AgentDelivery extends AgentRecord {
-  messageId: string;
-  agentId: string;
-  status: 'pending' | 'included' | 'processed' | 'failed' | 'cancelled' | 'limited';
-  workId: string | null;
+/** A pull request a desk thread opened, as its last watch saw it. */
+export interface AgentWatchPullRequest {
+  number: number;
+  url: string;
+  state: 'draft' | 'open' | 'merged' | 'closed';
+  checks: 'pending' | 'passing' | 'failing' | null;
 }
-export interface AgentWork extends AgentRecord {
-  /**
-   * `notice`: the core telling the agent what happened in threads of the
-   * projects entrusted to it. Notices that arrive before it starts join the
-   * same work item. An answer of `[quiet]` posts nothing.
-   */
-  purpose?: 'work' | 'compaction' | 'notice';
-  agentId: string;
-  scope: AgentScope;
-  taskId: string | null;
-  taskGeneration: number | null;
-  messageId: string | null;
-  episodeId: string;
-  prompt: string;
-  status: 'pending' | 'running' | 'waiting' | 'paused' | 'done' | 'cancelled' | 'interrupted' | 'error';
-  error: string | null;
-  runId: string | null;
-  notBefore: number;
-  /** The memory pass that followed this work, when one ran. */
-  memory?: AgentMemoryPass;
-}
-export interface AgentRun extends AgentRecord {
-  workId: string;
+/**
+ * A thread on an agent's desk: one it started, one entrusted to it, one it or
+ * the owner watches (`followed`), or one it only wrote to or answered for
+ * (`touched`, upgraded to `followed` by a watch). It stays while the thread is
+ * open and leaves a day after the thread is done or archived, or when the
+ * agent or the owner drops it.
+ */
+export interface AgentWatch {
   agentId: string;
   threadId: string;
-  turnId: string | null;
-  execution: AgentSelection;
-  profileRevision: number;
-  context: { memoryIds: { id: string; revision: number }[]; messageIds: string[]; resources: AgentResource[]; instructions: string };
-  status: 'accepted' | 'running' | 'done' | 'cancelled' | 'interrupted' | 'error';
-  startedAt: number | null;
-  finishedAt: number | null;
-  actualExecution: TurnExecution | null;
-}
-export interface AgentMemory extends AgentRecord {
-  scope: AgentScope;
   title: string;
-  text: string;
-  sourceScopes: AgentScope[];
-  sourceRunId: string | null;
-  expiresAt: number | null;
+  projectId: string | null;
+  origin: 'started' | 'entrusted' | 'followed' | 'touched';
+  since: number;
+  /** Read from the thread itself, never from what the agent said. */
+  state: 'working' | 'queued' | 'needs-you' | 'failed' | 'idle' | 'done' | 'archived';
+  /** Since when a running turn has produced nothing; set past the stall delay, when the agent was woken about it. */
+  stalledSince: number | null;
+  lastActivityAt: number;
+  pullRequest: AgentWatchPullRequest | null;
+  /** The pending question when `state` is `needs-you` on a question, answerable from the desk. */
+  question: { id: string; text: string; options: string[] } | null;
+  /**
+   * A thread of another machine of the group: its core id and its name as
+   * `--machine` takes it. The row is the one that machine last sent.
+   */
+  coreId?: string;
+  machine?: string;
+  /** Why that machine did not answer the last time it was asked; its events arrive once it is back. */
+  unreachable?: string;
 }
-export interface AgentResource extends AgentRecord {
-  scope: AgentScope;
-  name: string;
-  kind: 'directory' | 'url' | 'instructions';
-  value: string;
-  access: 'read' | 'write';
-}
-export interface AgentArtifact extends AgentRecord {
-  missionId: string;
-  taskId: string | null;
+/** How an agent stands, for its row, header and desk. */
+export interface AgentStatus {
   agentId: string;
-  runId: string;
-  title: string;
-  summary: string;
-  paths: string[];
-  commit: string | null;
-  verification: string;
+  threadId: string | null;
+  state: 'working' | 'queued' | 'waiting' | 'idle' | 'paused' | 'archived' | 'error';
+  /** The step it is on while working, in a few words (the running tool's title), else null. */
+  activity: string | null;
+  /** Why it cannot run (its provider or account is gone, its model left the catalog), else null. */
+  problem: string | null;
+  /** The next routine occurrence, when one is scheduled. */
+  nextWake: { at: number; routineId: string; label: string } | null;
+  /** Unread turns of its thread on this core, the way the thread list counts them. */
+  unread: number;
+  /** The last answer it gave the user (not a quiet one), for its row. */
+  last: { text: string; at: number } | null;
+  /**
+   * Its own turns since local midnight. `costUsd` is what its daily budget
+   * counts: priced from usage the way `usage.history` prices it, its
+   * subagents, workflow steps and memory pass included.
+   */
+  today: { turns: number; wakes: number; quiet: number; costUsd: number };
+  /**
+   * Its last memory pass: `threadId` is the core's own child conversation that
+   * ran it, housekeeping clients leave out of subagent lists and notification
+   * gates; `summary` says in one line what changed in MEMORY.md. Null before
+   * the first pass.
+   */
+  memory?: { threadId: string; status: 'running' | 'done' | 'unchanged' | 'error'; summary: string | null; at: number } | null;
 }
-export interface AgentDecision extends AgentRecord {
-  scope: AgentScope;
-  workId: string;
-  agentId: string;
-  prompt: string;
-  options: string[];
-  status: 'pending' | 'answered' | 'cancelled';
-  answer: string | null;
-}
-export interface AgentEntities {
-  routine: AgentRoutine;
-  profile: AgentProfile;
-  group: AgentGroup;
-  team: AgentTeam;
-  mission: AgentMission;
-  task: AgentMissionTask;
-  session: AgentSession;
-  message: AgentConversationMessage;
-  delivery: AgentDelivery;
-  work: AgentWork;
-  run: AgentRun;
-  memory: AgentMemory;
-  resource: AgentResource;
-  artifact: AgentArtifact;
-  decision: AgentDecision;
-}
-export type AgentEntityKind = keyof AgentEntities;
-export type AgentDraft<T extends AgentRecord> = Omit<T, keyof AgentRecord>;
-export type AgentSave<T extends AgentRecord> = { id?: string; expectedRevision?: number; value: AgentDraft<T> };
-/**
- * A run as snapshots and history pages carry it. The frozen instructions stay in
- * the core and in the run's thread, whose turn was started with them.
- */
-export type AgentRunSummary = Omit<AgentRun, 'context'> & { context: Omit<AgentRun['context'], 'instructions'> };
-/** The record kinds that grow with use. Snapshots carry their newest records; `agents.history` pages back. */
-export type AgentHistoryKind = 'message' | 'work' | 'memory';
-/** Records are ordered by their last change, newest first. A cursor is the oldest record a client already holds. */
-export interface AgentHistoryCursor { updatedAt: number; id: string }
-export interface AgentsHistoryPage {
-  messages: AgentConversationMessage[];
-  work: AgentWork[];
-  memories: AgentMemory[];
-  /** The deliveries, runs and decisions of the page's messages and work. */
-  deliveries: AgentDelivery[];
-  runs: AgentRunSummary[];
-  decisions: AgentDecision[];
-  /** True when records older than this page remain. */
-  more: boolean;
-}
-export const AGENT_HISTORY_PAGE = 50;
-export const AGENT_HISTORY_MAX_PAGE = 200;
 export interface AgentsSnapshot {
-  routines: AgentRoutine[];
-  accountGrants: AgentAccountGrant[];
   revision: number;
   profiles: AgentProfile[];
-  groups: AgentGroup[];
-  teams: AgentTeam[];
-  missions: AgentMission[];
-  tasks: AgentMissionTask[];
   sessions: AgentSession[];
-  /** The newest `AGENT_HISTORY_PAGE` messages. */
-  messages: AgentConversationMessage[];
-  deliveries: AgentDelivery[];
-  /** Every unfinished work item, then the newest `AGENT_HISTORY_PAGE` of any status. */
-  work: AgentWork[];
-  runs: AgentRunSummary[];
-  /** The newest `AGENT_HISTORY_PAGE` memories this caller may read. */
-  memories: AgentMemory[];
-  resources: AgentResource[];
-  artifacts: AgentArtifact[];
-  decisions: AgentDecision[];
-  /** Per kind, true when older records exist beyond this snapshot. */
-  more: Record<AgentHistoryKind, boolean>;
-  limits: { backgroundConcurrency: number; paused: boolean };
-  /** Threads entrusted to agents on this core. Missing on older cores. */
-  entrusted?: AgentEntrustment[];
-  /** Where agents' brains live on this core. Missing on older cores. */
-  brainRoot?: AgentBrainRoot;
+  routines: AgentRoutine[];
+  status: AgentStatus[];
+  /** Every agent's desk, open threads first, then the newest settled ones. */
+  watches: AgentWatch[];
+  accountGrants: AgentAccountGrant[];
+  /** `paused` holds every wake on this core. */
+  limits: { paused: boolean };
+  entrusted: AgentEntrustment[];
+  brainRoot: AgentBrainRoot;
 }
 /**
  * The folder every agent's brain lives under. `custom` is false for the
@@ -337,11 +210,36 @@ export interface AgentsSnapshot {
  * holds one folder per agent, named after it when it was first placed there.
  */
 export interface AgentBrainRoot { path: string; custom: boolean }
+export type AgentDraft<T extends AgentRecord> = Omit<T, keyof AgentRecord>;
+export type AgentSave<T extends AgentRecord> = { id?: string; expectedRevision?: number; value: AgentDraft<T> };
 export interface AgentsRpcMethods {
+  /**
+   * `desk` narrows `watches` to one agent's desk, or to none with null: the
+   * Agents page asks only the open agent's. Absent: every desk it may read.
+   * An agent's own thread always reads its own desk.
+   */
+  'agents.snapshot': { params: { threadId?: string; desk?: string | null }; result: AgentsSnapshot };
+  /**
+   * Creates or edits an identity. Creating one creates its thread and starts a
+   * first turn there: it introduces itself and schedules what its instructions
+   * call for. Editing the instructions wakes it once to review its routines.
+   */
+  'agents.profile.save': { params: AgentSave<AgentProfile>; result: AgentProfile };
+  /**
+   * A thread creates a bot the user asked for (`boite settings bot create`),
+   * as `agents.profile.save` creates one from the Bots page, with full access.
+   * The model resolves as for `boite delegate`; omitted, the bot runs on the
+   * calling thread's own route. Refused for a name a bot already holds, an
+   * unknown model or project, or drafts.
+   */
+  'agents.create': { params: AgentCreateParams; result: AgentCreateResult };
+  /** The agent's thread, created again if it was lost. */
+  'agents.open': { params: { agentId: string }; result: { threadId: string } };
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
   'agents.runtime.configure': { params: { agentId: string; expectedRevision: number; config: AgentRuntimeConfig }; result: AgentProfile };
   'agents.accounts.set': { params: { grants: AgentAccountGrant[] }; result: AgentAccountGrant[] };
-  'agents.brain.get': { params: { agentId: string }; result: AgentBrain };
+  /** `threadId`: an agent reads its own brain from its thread (`boite bot memory`). */
+  'agents.brain.get': { params: { agentId: string; threadId?: string }; result: AgentBrain };
   'agents.brain.save': { params: { agentId: string; expectedRevision: string; instructions: string; memory: string }; result: AgentBrain };
   /**
    * Choose the folder agents' brains live under, or null for the default.
@@ -349,36 +247,22 @@ export interface AgentsRpcMethods {
    * holds files refuses the whole change before anything moves. Owner only.
    */
   'agents.brain.root': { params: { path: string | null }; result: AgentBrainRoot };
+  /** Adds a line to the agent's MEMORY.md, from its own thread (`boite bot remember`) or the owner. */
+  'agents.memory.note': { params: { threadId?: string; agentId?: string; text: string }; result: AgentBrain };
   'agents.routine.save': { params: AgentSave<AgentRoutine> & { threadId?: string }; result: AgentRoutine };
-  'agents.routine.run': { params: { routineId: string; requestId: string }; result: AgentWork };
-  'agents.context.compact': { params: { sessionId: string; requestId: string }; result: AgentWork };
-  'agents.snapshot': { params: { threadId?: string }; result: AgentsSnapshot };
+  'agents.routine.remove': { params: { routineId: string; threadId?: string }; result: { removed: true } };
+  /** Runs a routine now, as a turn on the agent's thread. Refused while that thread has a turn in flight. */
+  'agents.routine.run': { params: { routineId: string; requestId: string }; result: { turnId: string } };
   /**
-   * Older records of one kind, newest first, strictly before `before`. `scopes`
-   * and `agentId` narrow the page; an agent session is held to its own context.
+   * An event from outside Boite (a CI job, a script) for a bot, named by id or
+   * name: an urgent fact keyed `external:<key>` (default `external`), which a
+   * second event with the same key replaces while it waits. `text` reaches the
+   * bot quoted as data, with the caller named. The owner or a paired device,
+   * never an agent token.
    */
-  'agents.history': {
-    params: { threadId?: string; kind: AgentHistoryKind; scopes?: AgentScope[]; agentId?: string; before?: AgentHistoryCursor; limit?: number };
-    result: AgentsHistoryPage;
-  };
-  'agents.profile.save': { params: AgentSave<AgentProfile>; result: AgentProfile };
-  'agents.group.save': { params: AgentSave<AgentGroup>; result: AgentGroup };
-  'agents.team.save': { params: AgentSave<AgentTeam>; result: AgentTeam };
-  'agents.mission.save': { params: AgentSave<AgentMission>; result: AgentMission };
-  'agents.task.save': { params: AgentSave<AgentMissionTask>; result: AgentMissionTask };
-  'agents.resource.save': { params: AgentSave<AgentResource>; result: AgentResource };
-  'agents.memory.save': { params: AgentSave<AgentMemory> & { threadId?: string }; result: AgentMemory };
-  'agents.message.send': {
-    /** `attachments` are the user's alone: an agent's own message refuses them. */
-    params: { threadId?: string; scope: AgentScope; text: string; recipientIds: string[]; replyTo?: string; requestId: string; attachments?: Attachment[] };
-    result: AgentConversationMessage;
-  };
-  'agents.task.acquire': { params: { threadId?: string; taskId: string; agentId: string; expectedRevision: number }; result: AgentMissionTask };
-  'agents.task.submit': { params: { threadId?: string; taskId: string; generation: number; result: string }; result: AgentMissionTask };
-  'agents.artifact.add': { params: { threadId: string; value: Omit<AgentDraft<AgentArtifact>, 'agentId' | 'runId'>; requestId: string }; result: AgentArtifact };
-  'agents.decision.request': { params: { threadId: string; prompt: string; options: string[]; requestId: string }; result: AgentDecision };
-  'agents.decision.answer': { params: { decisionId: string; expectedRevision: number; answer: string }; result: AgentDecision };
-  'agents.work.control': { params: { workId: string; expectedRevision: number; action: 'pause' | 'resume' | 'cancel' | 'reconcile'; note?: string }; result: AgentWork };
+  'agents.event': { params: { agent: string; key?: string; text: string }; result: { agentId: string; key: string } };
+  /** Puts a thread on the agent's desk or takes it off. From the agent's thread or the owner. */
+  'agents.watch': { params: { threadId?: string; agentId?: string; watchThreadId: string; watched: boolean; machine?: string }; result: AgentWatch | null };
   'agents.limits.set': { params: AgentsSnapshot['limits']; result: AgentsSnapshot['limits'] };
   /**
    * Hands an ordinary thread to an agent, or takes it back with `agentId: null`.
@@ -388,8 +272,8 @@ export interface AgentsRpcMethods {
   'agents.entrust': { params: { threadId: string; agentId: string | null; objective?: string }; result: AgentEntrustment | null };
   /**
    * An agent's settings a card may propose a change to, with their values and
-   * choices (`boite settings agent`). Any thread reads them; a persistent
-   * agent's conversation reads its own without naming it.
+   * choices (`boite settings bot`). Any thread reads them; a persistent
+   * agent's thread reads its own without naming it.
    */
   'agents.settings.read': { params: AgentSettingsReadParams; result: AgentSettingsReading };
   /**
@@ -405,6 +289,6 @@ export interface AgentsRpcMethods {
   'agents.settings.apply': { params: AgentSettingApplyParams; result: AgentProfile };
 }
 export interface AgentsRpcEvents {
-  /** Invalidation only: clients fetch an authorized snapshot, never another agent's private data. */
+  /** Invalidation only: clients fetch an authorized snapshot. Sent at most once a second while agents work. */
   'agents.changed': { revision: number };
 }

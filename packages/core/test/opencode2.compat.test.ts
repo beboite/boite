@@ -14,6 +14,7 @@ compat('OpenCode 2 runs tools, resumes cold, changes mode and stops beside a loc
   const captured: { model: string; messages?: { role: string; content: unknown }[]; tools?: { function: { name: string; parameters: unknown } }[] }[] = [];
   let hold = false;
   let toolAsked = false;
+  let steeringProbe = true;
   let projectDir = '';
   const gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
@@ -24,7 +25,9 @@ compat('OpenCode 2 runs tools, resumes cold, changes mode and stops beside a loc
     const interactive = (body.tools?.length ?? 0) > 0;
     if (hold && interactive) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     const chunk = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ id: 'compat', object: 'chat.completion.chunk', created: 1, model: route, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
-    const tool = interactive && !toolAsked;
+    const content = JSON.stringify(body.messages);
+    const receivedSteering = content.includes('boundary-marker') && content.includes('immediate-marker');
+    const tool = interactive && (!toolAsked || (steeringProbe && !receivedSteering));
     if (tool) toolAsked = true;
     return new Response(tool
       ? chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'read-probe', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: join(projectDir, 'probe.txt') }) } }] }) + chunk({}, 'tool_calls') + 'data: [DONE]\n\n'
@@ -49,6 +52,8 @@ compat('OpenCode 2 runs tools, resumes cold, changes mode and stops beside a loc
       profile.env = Object.fromEntries(Object.entries(profile.env ?? {}).map(([key, value]) => [key, value.split(homePath()).join(join(root, 'v2-home'))]));
     }
     const client = await harness.connect();
+    const logs: string[] = [];
+    client.on('core.log', entry => logs.push(`${entry.level}: ${entry.message}`));
     await client.call('providers.setEnabled', { providerId: provider.id, enabled: true });
     const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === provider.id)!;
     expect(account.status).toBe('ok');
@@ -62,10 +67,24 @@ compat('OpenCode 2 runs tools, resumes cold, changes mode and stops beside a loc
     const turn = async (prompt: string) => {
       const finished = client.next('turn.finished', done => done.threadId === thread.id, 45_000);
       await client.call('turns.start', { threadId: thread.id, prompt });
-      expect(await finished).toMatchObject({ status: 'done', error: null });
+      const result = await finished;
+      if (result.status !== 'done') console.error(logs.slice(-30).join('\n'));
+      expect(result).toMatchObject({ status: 'done', error: null });
       return client.call('threads.get', { threadId: thread.id });
     };
-    const first = await turn('Read probe.txt, then reply pong');
+    const boundary = client.next('turn.toolCompleted', event => event.threadId === thread.id, 45_000);
+    const finished = client.next('turn.finished', done => done.threadId === thread.id, 45_000);
+    const active = await client.call('turns.start', { threadId: thread.id, prompt: 'Read probe.txt, then reply pong' });
+    await boundary;
+    expect(await client.call('turns.steer', { threadId: thread.id, turnId: active.id, prompt: 'boundary-marker', clientRequestId: 'native_boundary_marker' })).toEqual({ accepted: true });
+    expect(await client.call('turns.steer', { threadId: thread.id, turnId: active.id, prompt: 'immediate-marker', clientRequestId: 'native_immediate_marker' })).toEqual({ accepted: true });
+    expect(await finished).toMatchObject({ status: 'done', error: null });
+    steeringProbe = false;
+    const first = await client.call('threads.get', { threadId: thread.id });
+    expect(first.turns).toHaveLength(1);
+    expect(captured.some(body => JSON.stringify(body.messages).includes('boundary-marker') && JSON.stringify(body.messages).includes('immediate-marker'))).toBe(true);
+    const read = first.messages.flatMap(message => message.parts).find(part => part.type === 'tool' && part.status === 'done');
+    expect(read).toMatchObject({ name: 'read', output: expect.stringContaining('compat-tool-ok') });
     expect(first.sessionId).not.toBeNull();
     expect(first.messages.some(message => message.parts.some(part => part.type === 'text' && part.text.includes('pong')))).toBe(true);
     expect(captured.some(body => body.messages?.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('compat-tool-ok')))).toBe(true);

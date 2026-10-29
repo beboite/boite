@@ -213,17 +213,30 @@ test('completed goals and tasks fade after the next prompt and new tasks return'
   }
 }, 30_000);
 
-test('a question open in the dock keeps the last answer readable above it', async () => {
+test('new questions keep the oldest open and the last answer readable on desktop and phone', async () => {
   await size(false);
   await command('Pick one [ask] for me');
   await page.waitFor(`document.querySelector('${id('activity-question')}:not([hidden])')`);
   await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);
+  const visibleQuestion = `${id('activity-question')}:not([hidden])`;
+  const oldest = await page.evaluate<string>(`document.querySelector('${visibleQuestion}').dataset.question`);
+  await page.evaluate(`(async () => {
+    const { store } = await import('/src/lib/store.svelte.ts');
+    await store.client.call('questions.ask', { threadId: store.openThread.id, text: 'Which module should come next?', options: ['Parser', 'Renderer'] });
+    await store.client.call('questions.ask', { threadId: store.openThread.id, text: 'Which checks should run afterwards?', options: ['Unit tests', 'Browser tests'] });
+  })()`);
+  await page.waitFor(`document.querySelector('${id('activity-questions')}').dataset.count === '3'`);
   const lastAboveDock = `(() => { const messages = document.querySelectorAll('[data-mid]'); const last = messages[messages.length-1].getBoundingClientRect(); const activity = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); return last.bottom <= activity.top; })()`;
   for (const phone of [false, true]) {
     await size(phone);
+    expect(await page.evaluate(`document.querySelector('${visibleQuestion}').dataset.question`)).toBe(oldest);
+    expect(await page.evaluate(`document.querySelector('${id('activity-question-index')}').textContent`)).toBe('1 of 3');
     await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = document.querySelector('${id('timeline')}').scrollHeight`);
     await capture(phone ? 'question-dock-latest-phone' : 'question-dock-latest-desktop');
     expect(await page.evaluate(lastAboveDock)).toBe(true);
   }
+  await page.click(`${visibleQuestion} ${id('question-skip')}`);
+  await page.waitFor(`document.querySelector('${id('activity-questions')}').dataset.count === '2'`);
+  expect(await page.evaluate(`document.querySelector('${visibleQuestion} ${id('question-text')}').textContent`)).toBe('Which module should come next?');
   await size(false);
 }, 30_000);

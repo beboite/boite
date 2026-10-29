@@ -13,11 +13,16 @@ import {
   type SettingAsk,
   type SettingRequestParams,
   checkSettingRequest,
+  isMachineSetting,
+  MACHINE_SETTINGS,
+  type SettingMachine,
   settledExperiment,
   type ClientPreferences,
   type ExperimentId,
   settingAnswerText,
   settledSetting,
+  settledMachineSetting,
+  type CoordinationPeer,
   type ThreadId,
   type ThreadSummary,
   type Turn,
@@ -26,11 +31,14 @@ import { checkSurface } from '../agent.ts';
 import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
-import { notFound, refused, RpcFailure } from '../errors.ts';
+import { PeerRefusal } from '../coordination-wire.ts';
+import { invalidParams, messageOf, notFound, refused, RpcFailure, unavailable } from '../errors.ts';
+import { memberNamed } from './group-spawn.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
-import { setThreadStatus, withLoad } from './records.ts';
+import { withLoad } from './records.ts';
+import { markRunning } from './lifecycle.ts';
 
 /** Why open cards were cleared, as the log says it. */
 export type CardClearReason = 'turn end' | 'stop' | 'mode change' | 'archive' | 'rewind';
@@ -66,6 +74,8 @@ interface PendingQuestion {
  */
 export class ThreadCards {
   private readonly permissions = new Map<RequestId, PendingPermission>();
+  private readonly announced = new Map<string, { seq: number; value: unknown }>();
+  private announcements = 0;
   readonly questions = new Map<RequestId, PendingQuestion>();
   /** Where each open asynchronous card is drawn, so its answer can be written back after its turn ended. */
   readonly asyncCards = new Map<RequestId, { threadId: ThreadId; messageId: MessageId; partIndex: number; part: Extract<MessagePart, { type: 'question' }> }>();
@@ -94,12 +104,12 @@ export class ThreadCards {
   /**
    * Is anything of this thread still waiting on the user? An agent can run two
    * tools at once and raise a card for each, so answering one does not mean the
-   * turn is running again.
+   * turn is running again. A secret card holds the turn the same way.
    */
-  private waitingOn(threadId: ThreadId): boolean {
+  waitingOn(threadId: ThreadId): boolean {
     for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
     for (const entry of this.questions.values()) if (entry.request.threadId === threadId && entry.request.async !== true) return true;
-    return false;
+    return this.core.secrets.waiting(threadId);
   }
 
   /** How many questions asked without stopping still wait on the user: the row says it needs them. */
@@ -126,7 +136,7 @@ export class ThreadCards {
       () => undefined,
     );
     this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
-    setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    markRunning(this.core, threadId);
     pending.resolve(params.decision);
   }
 
@@ -156,7 +166,7 @@ export class ThreadCards {
     );
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
     this.foldAsyncCard(request.id, null);
-    if (request.async !== true) setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    if (request.async !== true) markRunning(this.core, request.threadId);
     else this.asyncChanged(request.threadId);
     pending.resolve(null);
   }
@@ -201,6 +211,7 @@ export class ThreadCards {
     }
     const badFiles = answerAttachmentError(files);
     if (badFiles !== null) throw refused(badFiles.message, { questionId: request.id, ...badFiles.data });
+    this.core.sharedAccess.uploads(request.threadId, files);
     if (params.optionIds.length === 0 && text.length === 0 && files.length === 0) {
       throw refused('an answer needs an option or some text', { questionId: request.id });
     }
@@ -212,7 +223,7 @@ export class ThreadCards {
       return;
     }
     this.recordAnswer(request, answer, by);
-    setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    markRunning(this.core, request.threadId);
     pending.resolve(answer);
   }
 
@@ -248,11 +259,48 @@ export class ThreadCards {
    * Apply is `settings.set`, the owner's, and `settleSettings` closes the card
    * when the value moves, so a paired phone cannot answer "applied".
    */
-  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } {
+  requestSetting(params: SettingRequestParams): { questionId: RequestId; setting: SettingAsk } | Promise<{ questionId: RequestId; setting: SettingAsk }> {
+    if (params.machine !== undefined) return this.requestMachineSetting(params);
+    return this.drawSetting(params, this.core.settings.get(), null);
+  }
+
+  /**
+   * A card about another machine of the group: that machine says what it
+   * has now (`setting.read`), and says again when the owner changes it
+   * (`setting.changed`), which settles the card.
+   */
+  /**
+   * `setting.changed` from a member: the cards about that setting settle. The
+   * last value heard is kept, numbered, for a card whose read crossed it.
+   */
+  machineSettingChanged(peer: CoordinationPeer, key: string, value: unknown): void {
+    this.announced.set(`${peer.coreId}:${key}`, { seq: ++this.announcements, value });
+    this.settle(request => (request.setting === undefined ? null : settledMachineSetting(request.setting, peer.coreId, key, value)), `${peer.name}'s settings`);
+  }
+
+  private async requestMachineSetting(params: SettingRequestParams): Promise<{ questionId: RequestId; setting: SettingAsk }> {
+    this.threads.require(params.threadId);
+    if (typeof params.machine !== 'string' || params.machine.trim().length === 0 || params.machine.length > 128) throw invalidParams('settings.request.machine: expected a machine name or core id');
+    if (!isMachineSetting(params.key)) throw refused(`${String(params.key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, { field: 'key', expected: MACHINE_SETTINGS });
+    const peer = memberNamed(this.core, params.machine, 'settings.request');
+    const since = this.announcements;
+    let read: { value?: unknown };
+    try { read = (await this.core.coordination.request(peer, 'setting.read', { key: params.key })) as { value?: unknown }; }
+    catch (error) {
+      if (error instanceof PeerRefusal) throw refused(`Boite on ${peer.name} cannot answer about ${params.key}: ${error.message}; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
+      throw unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
+    }
+    // The owner flipped it while the read was on its way back: the announcement, newer, is what that machine has.
+    const late = this.announced.get(`${peer.coreId}:${params.key}`);
+    const value = late !== undefined && late.seq > since ? late.value : read?.value;
+    return this.drawSetting(params, { ...this.core.settings.get(), [params.key]: value as Settings[typeof params.key] }, { coreId: peer.coreId, name: peer.name });
+  }
+
+  private drawSetting(params: SettingRequestParams, settings: Settings, machine: SettingMachine | null): { questionId: RequestId; setting: SettingAsk } {
     const thread = this.threads.require(params.threadId);
     if (thread.archived) throw refused('cannot ask on an archived thread', { threadId: thread.id });
     const open = [...this.questions.values()].flatMap(entry => (entry.request.threadId === thread.id && entry.request.setting ? [entry.request.setting] : []));
-    const checked = checkSettingRequest(params, this.core.settings.get(), patch => {
+    const checked = checkSettingRequest(params, settings, patch => {
       try {
         return { ok: true, patch: this.core.settings.normalize(patch) };
       } catch (error) {
@@ -260,7 +308,7 @@ export class ThreadCards {
         const field = (error.data as { field?: unknown } | undefined)?.field;
         return { ok: false, message: error.message, field: typeof field === 'string' ? field : 'value' };
       }
-    }, open, this.core.clients.current());
+    }, open, this.core.clients.current(), machine);
     if (!checked.ok) throw refused(checked.message, checked.data);
     const { reason, setting, options } = checked;
     const { questionId } = this.drawAsync(thread, { text: reason, options, allowText: false, multiple: false, async: true, setting });
@@ -358,7 +406,11 @@ export class ThreadCards {
     input: unknown,
     description: string | null,
   ): PermissionTicket {
-    if (this.core.workforce.resident.isCompacting(thread.id)) return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
+    // A thread that must run no tool (a memory pass, `TOOL_FREE_CONTEXT`) gets none, whatever its driver let through.
+    if (thread.contextMode?.tools?.length === 0) {
+      this.core.logs.info(`Permission for ${toolName} denied: this conversation runs no tool`, { source: 'permissions', event: 'permission.denied', threadId: thread.id, turnId: turn.id, data: { tool: toolName } });
+      return Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
+    }
     const request: PermissionRequest = {
       id: newId('req_'),
       threadId: thread.id,
@@ -377,7 +429,7 @@ export class ThreadCards {
       { type: 'permission.requested', threadId: thread.id, version: 1, payload: request },
       () => undefined,
     );
-    setThreadStatus(this.core, thread.id, 'waiting');
+    markRunning(this.core, thread.id);
     this.core.bus.emit('permission.requested', request);
     this.core.logs.debug(`Permission requested for ${toolName}`, { source: 'permissions', event: 'permission.requested', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { tool: toolName, permissionMode: thread.permissionMode } });
     const withdraw = (): void => {
@@ -411,7 +463,7 @@ export class ThreadCards {
       () => undefined,
     );
     // Nobody waits on an asynchronous card: the thread keeps its status.
-    if (ask.async !== true) setThreadStatus(this.core, thread.id, 'waiting');
+    if (ask.async !== true) markRunning(this.core, thread.id);
     else this.asyncChanged(thread.id);
     this.core.bus.emit('question.asked', request);
     this.core.logs.debug(`Question asked with ${ask.options.length} options${ask.async === true ? ', without stopping the turn' : ''}`, { source: 'permissions', event: 'question.asked', threadId: thread.id, turnId: turn.id, requestId: request.id, data: { options: ask.options.length, async: ask.async === true, allowText: ask.allowText, multiple: ask.multiple } });
@@ -481,7 +533,7 @@ export class ThreadCards {
     this.asyncCards.delete(questionId);
     this.closeUnanswered(pending.request);
     this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
-    if (pending.request.async !== true) setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    if (pending.request.async !== true) markRunning(this.core, threadId);
     else this.asyncChanged(threadId);
     pending.resolve(null);
   }

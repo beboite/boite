@@ -2,13 +2,14 @@
   import type { Snippet } from 'svelte';
   import type { ConnectionGroup } from '../lib/connection-group.svelte';
   import type { GroupCore, GroupDevice } from '@boite/contracts';
-  import { Globe, LogOut, Plus, Smartphone, Trash2 } from '@lucide/svelte';
+  import { ChevronDown, Globe, LogOut, Plus, Smartphone, Trash2 } from '@lucide/svelte';
   import AddDevice from './AddDevice.svelte';
+  import Menu from './Menu.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { workspace, type Machine } from '../lib/workspace.svelte';
+  import { listedName, workspace } from '../lib/workspace.svelte';
   import InfoTip from './InfoTip.svelte';
   import MachineIcon from './MachineIcon.svelte';
 
@@ -25,7 +26,7 @@
 
   let name = $state('');
   let invitation = $state('');
-  let busy = $state<'join' | 'add' | 'rename' | null>(null);
+  let busy = $state<'join' | 'add' | 'rename' | 'home' | null>(null);
   let editing = $state(false);
   let editingId = $state<string | null>(null);
   let renameInput = $state<HTMLInputElement>();
@@ -71,28 +72,31 @@
     return self !== undefined && self.addresses.length > 0 && self.addresses.every((address) => LOOPBACK.test(address));
   });
 
-  let source = $derived(workspace.machines.find((machine) => machine.store === store) ?? null);
-  /** The other members this window is connected to as their owner: the ones a copy of the settings can reach. */
-  let others = $derived.by((): Machine[] => {
-    if (!group || !source) return [];
-    const self = group.self;
-    const listed = new Set(group.cores.map((core) => core.coreId));
-    return workspace.machines.filter((machine) => {
-      const coreId = GroupLinks.coreOf(machine);
-      return machine !== source && coreId !== undefined && coreId !== self && listed.has(coreId)
-        && machine.store.connection === 'ready' && machine.store.owner;
-    });
-  });
-  let targets = $derived(source ? others.filter((target) => sync.canEnable(source!, target) || sync.enabled(target)) : []);
-  let synced = $derived(targets.length > 0 && targets.every((target) => sync.source(target) === source));
-
-  function toggleSync(input: HTMLInputElement) {
-    for (const target of targets) sync.set(target, input.checked ? source : null);
-    // A link the sync refused leaves the box where the links are.
-    input.checked = synced;
+  /**
+   * The default machine: the member every other one takes its settings from,
+   * chosen once for the group, so every member and every window shows it.
+   */
+  const NONE = 'none';
+  let home = $derived(group?.settingsHome ?? null);
+  /** A member by the name this window gives it, "(you)" for this computer, else the one it gives itself. */
+  function memberName(core: GroupCore): string {
+    const machine = workspace.machines.find((candidate) => GroupLinks.coreOf(candidate) === core.coreId);
+    return machine ? listedName(machine) : core.name;
   }
+  /** A core before the choice cannot store one: its options stay shut, and the hint below says to update it. */
+  let homeReady = $derived(store.core?.features?.settingsHome === true);
+  let homeItems = $derived([
+    // Shut while another change of the card is on its way: `run` would drop the pick, the menu having closed already.
+    { id: NONE, label: strings.machines.homeNone, active: home === null, disabled: !homeReady || busy !== null },
+    ...members.map((core) => ({ id: core.coreId, label: memberName(core), active: core.coreId === home, disabled: !homeReady || busy !== null }))
+  ]);
+  let homeCore = $derived(members.find((core) => core.coreId === home));
+  /** Members connected here whose Boite predates the choice: they keep their own settings until updated. */
+  let behind = $derived(workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.core !== null
+    && members.some((core) => core.coreId === GroupLinks.coreOf(machine)) && machine.store.core.features?.settingsHome !== true));
+  const pickHome = (id: string) => void run('home', () => store.setSettingsHome(id === NONE ? null : id));
 
-  async function run(kind: 'join' | 'add' | 'rename', work: () => Promise<unknown>) {
+  async function run(kind: 'join' | 'add' | 'rename' | 'home', work: () => Promise<unknown>) {
     if (busy) return;
     busy = kind;
     try {
@@ -164,20 +168,24 @@
 
 {#if group}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
-    <h2>
-      {#if editing}
-        <form class="rename" onsubmit={(event) => { event.preventDefault(); void rename(); }}>
-          <input bind:this={renameInput} bind:value={name} data-testid="group-rename" aria-label={strings.group.name} maxlength="80" disabled={busy === 'rename'}
-            onblur={() => void rename()} onkeydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); editing = false; } else if (event.key === 'Enter') { event.preventDefault(); void rename(); } }} />
-        </form>
-      {:else if owner}
-        <button class="ghost group-name" data-testid="group-rename-start" title={strings.group.rename} onclick={() => { name = group!.name; editingId = group!.id; editing = true; }}>{group.name}</button>
-      {:else}{group.name}{/if}
-      <InfoTip topic={strings.group.heading} text={strings.group.intro} />
-    </h2>
+    <header>
+      <h2>
+        {#if editing}
+          <form class="rename" onsubmit={(event) => { event.preventDefault(); void rename(); }}>
+            <input bind:this={renameInput} bind:value={name} data-testid="group-rename" aria-label={strings.group.name} maxlength="80" disabled={busy === 'rename'}
+              onblur={() => void rename()} onkeydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); editing = false; } else if (event.key === 'Enter') { event.preventDefault(); void rename(); } }} />
+          </form>
+        {:else if owner}
+          <button class="ghost group-name" data-testid="group-rename-start" title={strings.group.rename} onclick={() => { name = group!.name; editingId = group!.id; editing = true; }}>{group.name}</button>
+        {:else}{group.name}{/if}
+        <InfoTip topic={strings.group.heading} text={strings.group.intro} />
+      </h2>
+      {#if owner}{@render addButton()}{/if}
+    </header>
     {@render children?.()}
     {#if children && loopback}<p class="hint">{strings.group.loopback}</p>{/if}
     {@render progress()}
+    {#if members.some(core => !children || !workspace.machines.some(machine => GroupLinks.coreOf(machine) === core.coreId))}
     <ul class="members" aria-label={strings.group.members}>
       {#each members.filter(core => !children || !workspace.machines.some(machine => GroupLinks.coreOf(machine) === core.coreId)) as core (core.coreId)}
         {@const state = status(core)}
@@ -185,7 +193,7 @@
           <div class="row">
             <span class="logo"><MachineIcon os={core.os} size={18} /></span>
             <span class="identity">
-              <span class="name">{core.name}</span>
+              <span class="name">{core.name}{#if core.coreId === home}<span class="badge">{strings.machines.homeBadge}</span>{/if}</span>
               {#if core.addresses[0]}<span class="address">{core.addresses[0]}</span>{/if}
             </span>
             {#if state.label}<span class="status" class:ready={state.ready}>{state.label}</span>{/if}
@@ -198,6 +206,7 @@
         </li>
       {/each}
     </ul>
+    {/if}
     {#if group.devices.length > 0}
       <ul class="members devices" aria-label={strings.group.devicesList} data-testid="group-devices">
         {#each group.devices as device (device.id)}
@@ -219,30 +228,38 @@
       </ul>
     {/if}
     {#if owner}
-      {#if source && others.length > 0}
-        <label class="sync">
-          <input type="checkbox" data-testid="group-sync" checked={synced} disabled={targets.length === 0}
-            onchange={(event) => toggleSync(event.currentTarget)} />
-          <span>{fill(strings.group.syncAll, { source: source.label })}</span>
-          <InfoTip topic={strings.group.heading} text={strings.group.syncAllHint} />
-        </label>
-      {/if}
-      {@render ways()}
-      {#if !alone}
-        <div class="buttons end">
-          <button type="button" class="ghost leave" data-testid="group-leave" onclick={() => void leave()}>
-            <LogOut size={14} />{strings.group.leave}
-          </button>
-        </div>
+      {@render invite()}
+      {#if members.length > 1 || !alone}
+        <footer>
+          {#if members.length > 1}
+            <div class="home" data-testid="group-home">
+              <span class="ui-label-box"><span class="ui-label">{strings.machines.home}</span><InfoTip topic={strings.machines.home} text={strings.machines.homeHint} /></span>
+              <Menu items={homeItems} label={strings.machines.home} placement="bottom" testid="group-home-pick" onpick={pickHome}>
+                <span class="current ui-label" class:chosen={homeCore !== undefined}>{homeCore ? memberName(homeCore) : strings.machines.homeNone}</span><ChevronDown size={13} />
+              </Menu>
+            </div>
+          {/if}
+          {#if !alone}
+            <button type="button" class="ghost leave" data-testid="group-leave" onclick={() => void leave()}>
+              <LogOut size={14} /><span class="ui-label">{strings.group.leave}</span>
+            </button>
+          {/if}
+        </footer>
+        {#if members.length > 1 && (!homeReady || behind.length > 0)}
+          <p class="hint" data-testid="group-home-older">{fill(strings.machines.homeOlder, { machines: (homeReady ? behind.map((machine) => listedName(machine)) : [store.core?.hostname ?? strings.machines.local]).join(', ') })}</p>
+        {/if}
       {/if}
     {/if}
   </section>
 {:else if owner}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
-    <h2>{strings.group.heading}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
+    <header>
+      <h2>{strings.group.heading}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
+      {@render addButton()}
+    </header>
     {@render children?.()}
     {@render progress()}
-    {@render ways()}
+    {@render invite()}
   </section>
 {:else if children}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
@@ -252,12 +269,13 @@
 {/if}
 
 <!-- The one way in: a device for this group, and for a machine alone, the link of another group to join. -->
-{#snippet ways()}
-  <div class="buttons">
-    <button type="button" class="primary" data-testid="group-add-device" disabled={busy !== null || older} onclick={() => void add()}>
-      <Plus size={14} />{busy === 'add' ? strings.group.adding : strings.group.addDevice}
-    </button>
-  </div>
+{#snippet addButton()}
+  <button type="button" class="primary small add" data-testid="group-add-device" disabled={busy !== null || older} onclick={() => void add()}>
+    <Plus size={14} /><span class="ui-label">{busy === 'add' ? strings.group.adding : strings.group.addDevice}</span>
+  </button>
+{/snippet}
+
+{#snippet invite()}
   {#if older}<p class="hint" data-testid="group-add-older">{fill(strings.group.addOlder, { machine: store.core?.hostname ?? strings.machines.local })}</p>{/if}
   <AddDevice {store} />
   {#if alone}
@@ -285,15 +303,29 @@
 
 <style>
   .group {
-    padding: var(--settings-padding, 18px);
+    padding: 16px 20px;
     margin-bottom: 20px;
   }
-  h2 {
-    font-size: var(--text-base);
-    margin: 0 0 12px;
-    display: flex; align-items: center; gap: 6px;
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--color-border);
   }
-  .group-name { font: inherit; font-weight: 600; height: auto; min-height: var(--control); padding: 0 6px; margin-left: -6px; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+  /* The settings pages give a card's title a bottom margin, which would lift the name off the button's line. */
+  :global(.settings .page .card.group > header > h2) { margin: 0; }
+  .group > header > h2,
+  .group > h2 {
+    font-size: var(--text-base);
+    margin: 0;
+    min-width: 0;
+    display: flex; align-items: center; gap: 6px;
+    color: var(--color-foreground);
+  }
+  .add { flex: none; }
+  .group-name { font: inherit; font-weight: 600; color: inherit; height: auto; min-height: var(--control); padding: 0 6px; margin-left: -6px; min-width: 0; overflow-wrap: anywhere; text-align: left; }
   form.rename { margin: 0; flex: 1; min-width: 0; }
   .rename input { width: 100%; font-weight: 600; }
   .migration-errors { color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -327,24 +359,27 @@
     height: var(--input);
   }
 
+  /* Machines this window does not reach and devices: rows like the machines' own, on the same grid. */
   .members {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: grid;
-    gap: 8px;
+  }
+  .members > li {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--color-border);
   }
   .row {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: var(--control);
+    min-height: 40px;
   }
   .logo {
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-md);
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
@@ -384,6 +419,7 @@
     flex: none;
     color: var(--color-muted-foreground);
   }
+  .icon-only:hover { color: var(--color-danger); }
   .hint {
     margin: 0;
     font-size: var(--text-sm);
@@ -391,64 +427,78 @@
     color: var(--color-muted-foreground);
   }
   li > .hint {
-    margin: 2px 0 0 44px;
+    margin: 2px 0 0 48px;
   }
-  .devices {
-    margin-top: 8px;
-  }
-  .tag {
+  .group > .hint { margin-top: 10px; }
+  .tag,
+  .badge {
     margin-left: 8px;
     padding: 1px 6px;
     border-radius: var(--radius-sm);
-    background: var(--color-surface-3);
     font-size: var(--text-xs);
     font-weight: 500;
+  }
+  .tag {
+    background: var(--color-surface-3);
     color: var(--color-muted-foreground);
   }
-  .join { margin-top: 18px; }
-  .end { justify-content: flex-end; margin-top: 8px; }
-  .sync {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: var(--control);
-    margin-top: 10px;
+  .badge {
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    color: var(--color-accent);
   }
-  .sync input {
-    flex: none;
-  }
-  .buttons {
+  .join { margin-top: 16px; }
+  footer {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-top: 14px;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding-top: 12px;
   }
+  .home {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+  }
+  .home .ui-label-box { display: inline-flex; align-items: center; }
+  .current {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 22ch;
+  }
+  .current.chosen { color: var(--color-accent); }
   .leave {
+    margin-left: auto;
     color: var(--color-danger);
   }
 
-  /* A phone, by the page it is on or by its width: rows wrap as the machine cards do, and a finger reaches every button. */
+  /* A phone, by the page it is on or by its width: rows wrap as the machine rows do, and a finger reaches every button. */
   .mobile .row { flex-wrap: wrap; }
-  .mobile .identity { flex-basis: calc(100% - 44px); }
-  .mobile .status { margin-left: 44px; flex: 1; }
+  .mobile .identity { flex-basis: calc(100% - 48px); }
+  .mobile .status { margin-left: 48px; flex: 1; }
   .mobile li > .hint { margin-left: 0; }
   .mobile .field { flex-wrap: wrap; }
   .mobile .field input { flex-basis: 100%; }
   .mobile button { min-height: var(--touch-target); }
   .mobile .icon-only { min-width: var(--touch-target); }
-  .mobile .field button,
-  .mobile .buttons button { flex: 1; }
+  .mobile .field button { flex: 1; }
   @media (max-width: 720px) {
+    .group { padding: 14px 16px; }
     .row { flex-wrap: wrap; }
-    .identity { flex-basis: calc(100% - 44px); }
-    .status { margin-left: 44px; flex: 1; }
+    .identity { flex-basis: calc(100% - 48px); }
+    .status { margin-left: 48px; flex: 1; }
     li > .hint { margin-left: 0; }
     .field { flex-wrap: wrap; }
     .field input { flex-basis: 100%; }
     button { min-height: var(--touch-target); }
     .icon-only { min-width: var(--touch-target); }
-    .field button,
-    .buttons button { flex: 1; }
+    .field button { flex: 1; }
+    footer { flex-direction: column; align-items: stretch; }
+    .home { justify-content: space-between; }
+    .leave { margin-left: 0; justify-content: center; }
   }
 </style>

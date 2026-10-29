@@ -5,6 +5,7 @@ export function registerGroupMethods(core: Core): void {
   core.router.register('group.get', (_params, ctx) => core.group.view(ctx.connection.identity.principal, core.group.clients.deviceOf(ctx.connection.identity.sessionId)));
   core.router.register('group.create', (params) => core.group.create(params?.name));
   core.router.register('group.rename', (params) => core.group.rename(params?.name));
+  core.router.register('group.settingsHome', (params) => core.group.settingsHome(params?.coreId));
   core.router.register('group.invite', () => core.group.invite());
   core.router.register('group.join', (params) => core.group.join(params?.invite));
   core.router.register('group.leave', () => core.group.leave());

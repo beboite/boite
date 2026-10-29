@@ -1,57 +1,45 @@
 <script lang="ts">
-  import { onMount, untrack, type Component } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, Bot, Brain, CalendarClock, Ellipsis, History, MessageSquare, Settings2, SquareArrowOutUpRight, Target, Users } from '@lucide/svelte';
-  import type { AgentScope } from '@boite/contracts';
-  import { AgentsView, agentsFilter, chatKey, chatsOf, missionHome, missionPreset, missionsOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentSelection } from '../../lib/agents.svelte';
+  import { ArrowLeft, Bot } from '@lucide/svelte';
+  import { AgentsView, agentOfThread, agentRows, agentsFilter, firstDeskVisit, lastOpenedAgent, openAgent, rememberAgent, statusOf, type AgentFocus } from '../../lib/agents.svelte';
+  import { agentDirectory } from '../../lib/agent-directory.svelte';
   import { mobileOverlay } from '../../lib/mobile-history';
+  import { mobileChrome } from '../../lib/mobile-chrome.svelte';
+  import type { AgentPane } from '../../lib/store/layout.svelte';
   import type { Store } from '../../lib/store.svelte';
   import { fill, strings } from '../../lib/strings';
-  import { avatarStatus } from '../../lib/thread-state';
-  import { workspace } from '../../lib/workspace.svelte';
-  import Menu from '../Menu.svelte';
-  import InfoTip from '../InfoTip.svelte';
+  import { workspace, type Machine } from '../../lib/workspace.svelte';
+  import ChatView from '../ChatView.svelte';
   import AgentsRail from './AgentsRail.svelte';
-  import AgentAvatar from './AgentAvatar.svelte';
+  import AgentHeader from './AgentHeader.svelte';
+  import AgentSheet from './AgentSheet.svelte';
   import AgentEditor from './AgentEditor.svelte';
-  import AgentConversation from './AgentConversation.svelte';
-  import AgentMembers from './AgentMembers.svelte';
-  import AgentMissions from './AgentMissions.svelte';
-  import AgentMissionView from './AgentMissionView.svelte';
-  import AgentWorkCard from './AgentWorkCard.svelte';
-  import AgentKnowledge from './AgentKnowledge.svelte';
-  import AgentRuntimeSettings from './AgentRuntimeSettings.svelte';
-  import AgentBrainEditor from './AgentBrainEditor.svelte';
-  import AgentRoutines from './AgentRoutines.svelte';
   import AgentEngineSettings from './AgentEngineSettings.svelte';
   import './agents.css';
 
-  type Pane = 'conversation' | 'members' | 'missions' | 'activity' | 'memory' | 'routines' | 'settings' | 'tasks';
-  type Creating = { kind: AgentEntryKind; preset?: { memberIds: string[]; teamId: string | null }; from?: AgentSelection | null };
-
+  /**
+   * The Agents page is the chat with the agents list for its column: an
+   * agent's conversation is its own thread, opened on the machine that owns
+   * it and drawn by the ordinary chat view with the ordinary composer, under
+   * the agent's header. The right panel beside it is that thread's, drawn by
+   * the app like any thread's. The card shows a form instead while a new agent
+   * is written, and the engine settings when asked.
+   *
+   * A phone shows the list, then the conversation full screen with a back
+   * arrow to the list.
+   */
   let { store }: { store: Store } = $props();
   const view = AgentsView.of(untrack(() => store));
   const narrow = new MediaQuery('(max-width: 720px)');
-  let chosen = $state<AgentFocus | null>(null);
-  let creating = $state<Creating | null>(null);
-  /** The pane the header opened; null is the record's first pane. */
-  let pane = $state<Pane | null>(null);
-  /**
-   * Each link from elsewhere draws the pane afresh: the page stays mounted
-   * behind a thread, and a settings form opened before a card applied would
-   * show the values it read then.
-   */
-  let visit = $state(0);
-  /** The conversation a mission was opened from: its back arrow returns there. */
-  let origin = $state<AgentSelection | null>(null);
-
   const labels = $derived(strings.agents);
-  const icons: Record<Pane, Component<{ size?: number; strokeWidth?: number }>> = { conversation: MessageSquare, members: Users, missions: Target, activity: History, memory: Brain, routines: CalendarClock, settings: Settings2, tasks: Target };
-  const paneLabel = (p: Pane) => (p === 'routines' ? labels.planned : p === 'conversation' ? labels.backToChat : labels[p]);
-  const snapshot = $derived(view.snapshot);
-  const own = $derived(chatsOf(view));
-  const chats = $derived(own.chats);
-  const live = $derived(own.live);
+  let focus = $state<AgentFocus | null>(null);
+  let pane = $state<AgentPane | null>(null);
+  /** A phone went back to the list: the thread stays open behind it. */
+  let listShown = $state(false);
+  /** The pane a link asked for, opened once its agent's thread is on screen. */
+  let wanted: { agentId: string; pane: AgentPane } | null = null;
+
   /**
    * The list shows every connected machine's agents, the way the thread list
    * shows every machine's threads. The page itself works on one machine at a
@@ -62,118 +50,22 @@
   const here = $derived(machines.find(m => m.store === store) ?? null);
   const filter = $derived(here && agentsFilter.machine === here.id ? here.id : null);
   const others = $derived(filter ? [] : machines.filter(m => m.store !== store).map(machine => ({ machine, view: AgentsView.of(machine.store) })));
-  const lists = $derived([
-    ...(here ? [{ machine: here, view, chats, live }] : []),
-    ...others.map(({ machine, view: other }) => ({ machine, view: other, ...chatsOf(other) }))
-  ]);
-  const elsewhere = $derived(lists.some(l => l.view !== view && l.chats.length > 0));
-  /**
-   * A team folded into its group opens as that group, and a record that is gone
-   * lets go. A desktop opens on the newest conversation, a phone on the list.
-   */
-  const focus = $derived.by<AgentFocus | null>(() => {
-    const next = chosen;
-    if (next?.kind === 'team') {
-      const host = chats.find(c => c.kind === 'group' && c.teamId === next.id);
-      if (host) return { kind: 'group', id: host.id };
-    }
-    if (next && (!('id' in next) || exists(next))) return next;
-    if (narrow.current) return null;
-    return chats[0] ? { kind: chats[0].kind, id: chats[0].id } : null;
-  });
-  function exists(next: AgentSelection): boolean {
-    const list: { id: string }[] = !snapshot ? [] : next.kind === 'profile' ? snapshot.profiles : next.kind === 'group' ? snapshot.groups : next.kind === 'team' ? snapshot.teams : snapshot.missions;
-    return !snapshot || list.some(r => r.id === next.id);
-  }
-  const selected = $derived(focus && 'id' in focus ? focus as AgentSelection : null);
-  const chat = $derived(selected && selected.kind !== 'mission' ? chats.find(c => c.kind === selected.kind && c.id === selected.id) ?? null : null);
-  const profile = $derived(selected?.kind === 'profile' ? snapshot?.profiles.find(a => a.id === selected.id) ?? null : null);
-  const group = $derived(selected?.kind === 'group' ? snapshot?.groups.find(g => g.id === selected.id) ?? null : null);
-  const team = $derived(selected?.kind === 'team' ? snapshot?.teams.find(t => t.id === selected.id) ?? null : group && chat?.teamId ? snapshot?.teams.find(t => t.id === chat.teamId) ?? null : null);
-  const mission = $derived(selected?.kind === 'mission' ? snapshot?.missions.find(m => m.id === selected.id) ?? null : null);
-  const record = $derived(profile ?? group ?? team ?? mission);
-  const title = $derived(profile?.name ?? group?.name ?? team?.name ?? mission?.title ?? '');
-  /** An archived agent, opened from a search, has no row: it reads as one of its own. */
-  const partner = $derived<Pick<AgentChat, 'kind' | 'id' | 'teamId' | 'members'> | null>(chat ?? (profile ? { kind: 'profile', id: profile.id, teamId: null, members: [profile.id] } : null));
-  const members = $derived((partner?.members ?? mission?.agentIds ?? []).flatMap(id => snapshot?.profiles.find(a => a.id === id) ?? []));
-  const liveHere = $derived(selected && selected.kind !== 'mission' ? live.get(chatKey(selected.kind === 'team' ? 'team' : selected.kind, selected.id)) ?? null : null);
-  const parent = $derived.by<AgentSelection | null>(() => {
-    if (!mission || !snapshot) return null;
-    if (origin) return origin;
-    const key = missionHome(snapshot, mission);
-    const home = chats.find(c => chatKey(c.kind, c.id) === key);
-    return home ? { kind: home.kind, id: home.id } : null;
-  });
-  const parentName = $derived(parent ? chats.find(c => c.kind === parent.kind && c.id === parent.id)?.name ?? snapshot?.profiles.find(a => a.id === parent.id)?.name ?? '' : '');
-  const active = $derived(
-    creating ? (creating.from ? `${creating.from.kind}:${creating.from.id}` : null)
-      : focus?.kind === 'engine' ? focus.kind
-        : selected?.kind === 'mission' ? (parent ? `${parent.kind}:${parent.id}` : null)
-          : selected ? `${selected.kind}:${selected.id}` : null
-  );
+  const lists = $derived([...(here ? [{ machine: here, view }] : []), ...others]);
+  const snapshot = $derived(view.snapshot);
+  const rows = $derived(agentRows(snapshot));
+  const elsewhere = $derived(others.some(o => agentRows(o.view.snapshot).length > 0));
 
-  /**
-   * A conversation is the page; everything else waits behind the header's
-   * menu. An agent's planned tasks also have a button of their own, with how
-   * many there are.
-   */
-  const layout = $derived.by<{ main: Pane[]; more: Pane[] }>(() => {
-    const keep = (list: Pane[]) => list.filter(p => p !== 'settings' || store.owner);
-    if (selected?.kind === 'profile') return { main: ['conversation'], more: keep(['routines', 'memory', 'settings', 'activity', 'missions']) };
-    if (selected?.kind === 'group') return { main: ['conversation'], more: keep(['members', 'missions', 'memory', 'settings', 'activity']) };
-    if (selected?.kind === 'team') return { main: ['members'], more: keep(['missions', 'memory', 'settings', 'activity']) };
-    return { main: ['tasks'], more: keep(['activity', 'memory', 'settings']) };
-  });
-  const panes = $derived([...layout.main, ...layout.more]);
-  const current = $derived(pane && panes.includes(pane) ? pane : panes[0]!);
-  const status = $derived.by<{ text: string; tone?: 'running' | 'waiting' }>(() => {
-    if (mission) return { text: labels[mission.status], tone: mission.status === 'active' ? 'running' : mission.status === 'review' || mission.status === 'waiting' ? 'waiting' : undefined };
-    if (liveHere?.status === 'waiting' || chat?.status === 'waiting') return { text: strings.sidebar.state.waiting, tone: 'waiting' };
-    if (liveHere || chat?.status === 'running') return { text: labels.running, tone: 'running' };
-    if (profile?.status === 'archived') return { text: labels.archived };
-    if (profile?.status === 'paused' || chat?.status === 'paused') return { text: labels.paused };
-    if (profile) return { text: [profile.domain || labels.idle, ...(entrusted.length ? [fill(labels.looksAfter, { names: entrusted.join(', ') })] : [])].join(' · ') };
-    return { text: members.map(a => a.name).join(', ') };
-  });
-
-  /** The projects the owner entrusted to this agent, by name, as this machine lists them. */
-  const entrusted = $derived(profile?.projectIds?.flatMap(id => store.projects.find(p => p.id === id)?.name ?? []) ?? []);
-  /**
-   * The thread of an agent's own conversation: what it did, tools and code
-   * included. The conversation itself shows none of it, so the menu opens it.
-   */
-  const workThread = $derived(profile ? snapshot?.sessions.find(s => s.agentId === profile.id && s.scope.kind === 'agent' && s.scope.id === profile.id)?.threadId ?? null : null);
-  const SEE_WORK = 'see-work';
-  const menuItems = $derived([
-    ...layout.more.filter(p => p !== 'routines').map(p => ({ id: p, label: paneLabel(p), glyph: icons[p], active: current === p })),
-    ...(workThread ? [{ id: SEE_WORK, label: labels.seeWork, glyph: SquareArrowOutUpRight }] : []),
-  ]);
-  function pick(id: string) {
-    if (id === SEE_WORK) { if (workThread) void store.open(workThread); return; }
-    toggle(id as Pane);
-  }
-  const missions = $derived(snapshot && partner ? missionsOf(snapshot, partner) : []);
-  const teamMissions = $derived(team && snapshot ? snapshot.missions.filter(m => m.teamId === team.id) : []);
-  const scopes = $derived<AgentScope[]>([
-    ...(group ? [{ kind: 'group' as const, id: group.id }] : []),
-    ...(mission ? [{ kind: 'mission' as const, id: mission.id }] : teamMissions.map(m => ({ kind: 'mission' as const, id: m.id })))
-  ]);
-  const work = $derived(view.seen.work.filter(w => profile ? w.agentId === profile.id : scopes.some(s => s.kind === w.scope.kind && s.id === w.scope.id)).reverse());
-  /** The history page the activity pane asks for: the same filter as `work`. */
-  const workHistory = $derived<{ kind: 'work'; agentId?: string; scopes?: AgentScope[] } | null>(profile ? { kind: 'work', agentId: profile.id } : scopes.length ? { kind: 'work', scopes } : null);
-  const workKey = $derived(selected ? `work:${selected.kind}:${selected.id}` : '');
-  const conversation = $derived<AgentScope | null>(chat?.scope ?? (profile ? { kind: 'agent', id: profile.id } : null));
-  const memoryScope = $derived<AgentScope | null>(profile ? { kind: 'agent', id: profile.id } : group ? { kind: 'group', id: group.id } : team ? { kind: 'team', id: team.id } : mission ? { kind: 'mission', id: mission.id } : null);
-  const backLabel = $derived(narrow.current && current !== panes[0] ? labels.backToChat : parent ? fill(labels.backTo, { name: parentName }) : labels.list);
-  const planned = $derived(profile ? snapshot?.routines.filter(r => r.agentId === profile.id && r.enabled && r.nextAt !== null).length ?? 0 : 0);
-
-  /**
-   * On a phone every level past the list holds one history entry: the
-   * conversation, a pane, a mission, a form. Back steps out one level, and the
-   * next level pushes its own entry.
-   */
-  const level = $derived(narrow.current && (chosen || creating) ? `${creating ? 'new' : ''}|${focus?.kind}:${focus && 'id' in focus ? focus.id : ''}|${current}` : '');
-  $effect(() => { if (level) return mobileOverlay(back); });
+  /** The agent thread on screen: an ordinary thread left open from the chat is not drawn here. */
+  const thread = $derived(store.openThread?.agentSessionId ? store.openThread : null);
+  const directory = $derived(agentDirectory(store));
+  const threadId = $derived(thread?.id ?? null);
+  const agent = $derived(thread ? agentOfThread(snapshot, thread.id) ?? directory.ownerOf(thread) : null);
+  /** The open agent's id: every snapshot brings a new profile object, the id moves only when another agent opens. */
+  const agentId = $derived(agent?.id ?? null);
+  const status = $derived(agent ? statusOf(snapshot, agent.id) : null);
+  /** The conversation of an archived agent reads, and takes nothing more. */
+  const locked = $derived(agent?.status === 'archived' ? labels.archivedNotice : null);
+  const detail = $derived(!!focus || (!!thread && !listShown));
 
   onMount(() => { view.start(); return () => view.pause(); });
   // The other machines' snapshots load while their rows are listed.
@@ -182,14 +74,10 @@
     untrack(() => { for (const other of shown) other.start(); });
     return () => { for (const other of shown) other.pause(); };
   });
-  // On a phone an open conversation hides the tab bar. The root carries it as a
-  // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
-  // subject, rechecked on every node mounted anywhere.
-  $effect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('agents-detail-open', !!chosen || !!creating);
-    return () => root.classList.remove('agents-detail-open');
-  });
+  // The snapshot carries the open agent's desk only.
+  $effect(() => { const id = agentId; untrack(() => view.showDesk(id)); });
+  // The directory names the agent of a thread the snapshot does not list yet, a new one.
+  $effect(() => { const target = directory; return untrack(() => target.watch()); });
   // A reconnect reads the snapshot again; the first visit already asked in `start`.
   let wasReady = untrack(() => store.connection === 'ready');
   $effect(() => {
@@ -197,130 +85,132 @@
     if (ready && !wasReady) void view.refresh();
     wasReady = ready;
   });
-  $effect(() => { if (current === 'activity' && workHistory) view.fill(workKey, workHistory, work); });
-  // A link from elsewhere (a thread an agent runs) names the agent to open.
+  // The agent on screen is the one this machine reopens next time; a new thread brings the conversation back on a phone.
+  $effect(() => {
+    const id = agentId;
+    void threadId;
+    untrack(() => {
+      if (id) rememberAgent(store, id);
+      listShown = false;
+      pane = wanted && wanted.agentId === id ? wanted.pane : null;
+      if (wanted?.agentId === id) wanted = null;
+    });
+  });
+  // The first time an agent opens on a wide window, its desk opens beside the conversation.
+  // A panel already in use keeps the visit unspent: the desk opens the next time it is free.
+  $effect(() => {
+    const id = agentId;
+    if (!id || !threadId || narrow.current) return;
+    untrack(() => { if (!store.panel.isOpen && store.panel.surfaces.length === 0 && firstDeskVisit(id)) store.panel.open('desk'); });
+  });
+  /** The desktop's default agent was opened, or gave way to one named on the way in. */
+  let tried = false;
+  /** The default agent could not be opened: the card offers a retry instead of loading. */
+  let openFailed = $state(false);
+  // A link from elsewhere (a thread an agent runs, a settings card) names the agent to open.
   $effect(() => {
     const target = store.agentsTarget;
     if (!target) return;
-    untrack(() => { open({ kind: target.kind ?? 'profile', id: target.agentId }); if (target.pane) pane = target.pane; visit++; store.agentsTarget = null; });
+    untrack(() => {
+      store.agentsTarget = null;
+      // The named agent is this visit's choice: the default below gives way to it.
+      tried = true;
+      focus = null;
+      listShown = false;
+      if (target.agentId === agent?.id && thread) { pane = target.pane ?? null; return; }
+      wanted = target.pane ? { agentId: target.agentId, pane: target.pane } : null;
+      void openAgent(store, target.agentId);
+    });
+  });
+  /**
+   * A desktop always has a conversation in the card: the agent shown last on
+   * this machine, else the one that spoke last. Asked once per visit, so an
+   * agent that cannot be opened leaves the card alone.
+   */
+  $effect(() => {
+    if (narrow.current || focus || thread || !snapshot || !rows.length || store.agentsTarget || tried) return;
+    tried = true;
+    untrack(openDefault);
+  });
+  function openDefault() {
+    openFailed = false;
+    const last = lastOpenedAgent(store);
+    void openAgent(store, rows.some(r => r.profile.id === last) ? last! : rows[0]!.profile.id).then(opened => { if (!opened) openFailed = true; });
+  }
+  // On a phone the open conversation hides the list; the root carries it as a class, as `.app:has(...)` would restyle every node.
+  $effect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('agents-detail-open', detail);
+    return () => root.classList.remove('agents-detail-open');
+  });
+  // On a phone every level past the list holds one history entry: Back steps out of it.
+  $effect(() => { if (narrow.current && detail) return mobileOverlay(back); });
+  // An agent's page on a phone is pushed over the list, as a thread is: the bottom bar steps aside.
+  $effect(() => {
+    if (!narrow.current || !detail) return;
+    mobileChrome.detail = true;
+    return () => { mobileChrome.detail = false; };
   });
 
-  function open(next: AgentFocus, from: AgentSelection | null = null) {
-    chosen = next;
-    creating = null;
-    pane = null;
-    origin = from;
+  function open(machine: Machine, agentId: string) {
+    // Read now: the page, and the row's values with it, is drawn again for the other machine.
+    const target = machine.store;
+    if (target !== store) { void workspace.select(target).then(() => target.showAgents(agentId)); return; }
+    focus = null; pane = null; listShown = false;
+    if (agentId === agent?.id && thread) return;
+    void openAgent(store, agentId);
   }
-  /** One step out: a form, a pane, a mission (back to the missions it was opened from), then the list. */
+  /** One step out: a form, then the conversation, then the list. */
   function back() {
-    if (creating) creating = null;
-    else if (current !== panes[0]) pane = null;
-    else if (parent) { const from = origin; open(parent); if (from) pane = 'missions'; }
-    else { chosen = null; origin = null; }
-  }
-  function toggle(next: Pane) { pane = current === next ? null : next; }
-  function startMission() {
-    if (!snapshot || !partner || !selected) return;
-    creating = { kind: 'mission', preset: missionPreset(snapshot, partner), from: selected };
+    if (focus) focus = null;
+    else listShown = true;
   }
 </script>
 
-{#snippet backButton(label: string)}
-  <button type="button" class="ghost icon agent-mobile-back" aria-label={label} title={label} onclick={back}><ArrowLeft size={18} strokeWidth={1.75} /></button>
-{/snippet}
+<AgentsRail {view} {lists} {filter} active={focus ? null : agent?.id ?? null} engine={focus?.kind === 'engine'}
+  onopen={open} oncreate={() => { focus = { kind: 'new' }; }} onengine={() => { focus = focus?.kind === 'engine' ? null : { kind: 'engine' }; }} />
 
-{#snippet simpleHead(heading: string, tip?: string)}
-  <header class="agents-detail-head">
-    {#if narrow.current}{@render backButton(labels.list)}{/if}
-    <h2 class="agents-detail-heading">{heading}{#if tip}<InfoTip topic={heading} text={tip} />{/if}</h2>
-  </header>
-{/snippet}
-
-<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length && !elsewhere} data-testid="agents-page">
-  <AgentsRail {view} {lists} {filter} {active} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
-
-  <main class="agents-main framed">
+<main class="agents-main" class:open={detail} data-testid="agents-page">
+  <div class="agents-card framed" class:chat={!focus && !!thread}>
     {#if view.error || view.loadError}
       <div class="agent-error" role="alert">{view.error || view.loadError}<button type="button" class="ghost small" onclick={() => { view.error = ''; void view.refresh(); }}>{labels.retry}</button></div>
     {/if}
     {#if snapshot && store.connection !== 'ready'}<p class="agent-error" role="status">{labels.stale}</p>{/if}
 
-    {#if !snapshot}
-      <p class="agent-empty">{view.error || view.loadError ? labels.offline : strings.app.loading}</p>
-    {:else if creating}
+    {#if focus}
       <header class="agents-detail-head">
-        {#if narrow.current || creating.from}{@render backButton(creating.from ? labels.backToChat : labels.list)}{/if}
-        <h2 class="agents-detail-heading">{labels.newTitle[creating.kind]}</h2>
+        <button type="button" class="ghost icon agent-mobile-back" aria-label={labels.backToChat} title={labels.backToChat} onclick={back}><ArrowLeft size={18} strokeWidth={1.75} /></button>
+        <h2 class="agents-detail-heading">{focus.kind === 'new' ? labels.newAgent : labels.engineSettings}</h2>
       </header>
       <div class="agents-body">
-        {#key creating}<AgentEditor {view} kind={creating.kind} preset={creating.preset} ondone={next => open(next, creating?.from ?? null)} oncancel={() => { creating = null; }} />{/key}
+        {#if focus.kind === 'new'}
+          <AgentEditor {view} ondone={created => { focus = null; void openAgent(store, created.id); }} oncancel={() => { focus = null; }} />
+        {:else}
+          <AgentEngineSettings {view} />
+        {/if}
       </div>
-    {:else if focus?.kind === 'engine'}
-      {@render simpleHead(labels.engineSettings, labels.engineSettingsHint)}
-      <div class="agents-body"><AgentEngineSettings {view} /></div>
-    {:else if selected && record}
-      <header class="agents-detail-head">
-        {#if narrow.current || parent}{@render backButton(backLabel)}{/if}
-        <button type="button" class="ghost agents-identity" onclick={() => { pane = null; }} aria-label={title}>
-          <AgentAvatar kind={selected.kind} id={selected.id} name={title} avatar={profile?.avatar} {members} status={avatarStatus(liveHere?.status)} size={32} />
-          <span class="agents-identity-text">
-            <strong>{title}</strong>
-            <small data-status={status.tone}>{status.text}</small>
-          </span>
-        </button>
-        <nav class="agents-actions" aria-label={title}>
-          {#if current !== panes[0] && !narrow.current}
-            <!-- On a phone the back arrow already returns to the conversation. -->
-            <button type="button" class="ghost small back-chat" onclick={() => { pane = null; }} data-testid="agent-back-chat"><MessageSquare size={14} strokeWidth={1.75} /><span class="ui-label">{paneLabel(panes[0]!)}</span></button>
-          {/if}
-          {#if profile}
-            <button type="button" class="ghost small planned" class:active={current === 'routines'} aria-pressed={current === 'routines'} title={labels.planned} aria-label={labels.planned} onclick={() => toggle('routines')} data-testid="agent-tab-routines">
-              <CalendarClock size={16} strokeWidth={1.75} />{#if planned}<span class="ui-label">{planned}</span>{/if}
-            </button>
-          {/if}
-          {#if menuItems.length}
-            <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agent-panes" items={menuItems} onpick={pick}>
-              <Ellipsis size={18} strokeWidth={1.75} />
-            </Menu>
-          {/if}
-        </nav>
-      </header>
-      {#key `${selected.kind}:${selected.id}:${current}:${visit}`}
-        <div class="agents-body" class:chat={current === 'conversation'}>
-          {#if current === 'conversation' && conversation}
-            <AgentConversation {view} scope={conversation} live={liveHere} />
-          {:else if current === 'members' && partner}
-            <AgentMembers {view} memberIds={partner.members} {group} {team} onopen={id => open({ kind: 'profile', id })} />
-          {:else if current === 'missions'}
-            <AgentMissions {view} {missions} onopen={id => open({ kind: 'mission', id }, selected)} oncreate={startMission} />
-          {:else if current === 'activity'}
-            {#each work as item (item.id)}<AgentWorkCard {view} work={item} />{:else}<p class="agent-empty">{labels.noWork}</p>{/each}
-            {#if workHistory && view.hasOlder(workKey, 'work')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === workKey} onclick={() => void view.loadOlder(workKey, workHistory, work)} data-testid="agent-work-older">{labels.loadEarlier}</button>{/if}
-          {:else if current === 'memory' && memoryScope}
-            {#if profile}<AgentBrainEditor {view} agentId={profile.id} />{/if}
-            <AgentKnowledge {view} scope={memoryScope} />
-            {#if group && team}
-              <h3 class="section-label">{team.name}</h3>
-              <AgentKnowledge {view} scope={{ kind: 'team', id: team.id }} />
-            {/if}
-          {:else if current === 'routines' && profile}
-            <AgentRoutines {view} agentId={profile.id} />
-          {:else if current === 'settings'}
-            <AgentEditor {view} kind={selected.kind} {record} embedded ondone={() => {}} oncancel={() => {}} />
-            {#if profile}<AgentRuntimeSettings {view} agent={profile} />{/if}
-            {#if group && team}{#key team.id}<AgentEditor {view} kind="team" record={team} heading={team.name} embedded ondone={() => {}} oncancel={() => {}} />{/key}{/if}
-          {:else if current === 'tasks' && mission}
-            <AgentMissionView {view} {mission} />
-          {/if}
-        </div>
-      {/key}
-    {:else}
+    {:else if thread && agent}
+      <AgentHeader {store} {view} {agent} {status} {thread} onpane={next => { pane = pane === next ? null : next; }} onback={narrow.current ? back : undefined} />
+      <div class="agents-chat">
+        <ChatView {store} {locked} />
+      </div>
+      <AgentSheet {view} {agent} {pane} onclose={() => { pane = null; }} />
+    {:else if thread}
+      <!-- A thread the snapshot does not name yet, a moment after the agent was created. -->
+      <div class="agents-chat"><ChatView {store} /></div>
+    {:else if !snapshot}
+      <p class="agent-empty">{view.loadError ? labels.offline : strings.app.loading}</p>
+    {:else if !rows.length}
       <div class="agent-welcome" data-testid="agents-empty">
         <Bot size={32} strokeWidth={1.5} />
         <p>{elsewhere && here ? fill(labels.noAgentsOn, { machine: here.label }) : labels.noAgents}</p>
         <p class="hint">{labels.welcomeHint}</p>
-        {#if store.owner}<button type="button" class="primary" onclick={() => { creating = { kind: 'profile' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
+        {#if store.owner}<button type="button" class="primary" onclick={() => { focus = { kind: 'new' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
       </div>
+    {:else if openFailed}
+      <div class="agent-error" role="alert">{labels.openFailed}<button type="button" class="ghost small" onclick={openDefault} data-testid="agents-open-retry">{labels.retry}</button></div>
+    {:else}
+      <p class="agent-empty">{strings.app.loading}</p>
     {/if}
-  </main>
-</section>
+  </div>
+</main>

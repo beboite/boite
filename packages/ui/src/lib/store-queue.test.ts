@@ -6,13 +6,16 @@ import { RpcErrorCode, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { strings } from './strings';
 
+// The frontend delivers these queues itself only for a core without composer records.
+const OLD_CORE = { delayMs: 0, missing: ['composer.list'] };
+
 const queued = (text: string, paused = false) => ({
   text: '', attachments: [], queued: [{ text, attachments: [] }], sending: false, paused
 });
 
 test('queues belong to their Store even when another machine has the same thread id', async ({ ready }) => {
-  const first = await ready();
-  const second = await ready();
+  const first = await ready(OLD_CORE);
+  const second = await ready(OLD_CORE);
   const firstCalls = vi.spyOn(first.client, 'call');
   const secondCalls = vi.spyOn(second.client, 'call');
   first.store.composerStates['t-trace'] = queued('First machine');
@@ -34,7 +37,7 @@ test('queues belong to their Store even when another machine has the same thread
 });
 
 test('paused, archived and detached queues never send automatically', async ({ ready }) => {
-  const { store, client } = await ready();
+  const { store, client } = await ready(OLD_CORE);
   const calls = vi.spyOn(client, 'call');
   store.composerStates['t-trace'] = queued('Restored queue', true);
   store.threads.find(row => row.id === 't-descriptors')!.archived = true;
@@ -51,8 +54,8 @@ test('paused, archived and detached queues never send automatically', async ({ r
 });
 
 test.for([['replacement', 'busy'], ['restored', 'busy'], ['replacement', 'error'], ['restored', 'error']] as const)('a late refusal from the former client cannot populate the %s session: %s', async ([owner, refusal], { ready, resources }) => {
-  const { store, client } = await ready();
-  const replacement = new FakeClient({ delayMs: 0 });
+  const { store, client } = await ready(OLD_CORE);
+  const replacement = new FakeClient(OLD_CORE);
   resources.push(() => replacement.close());
   let rejectSend!: (error: unknown) => void;
   const pending = new Promise<never>((_resolve, reject) => { rejectSend = reject; });
@@ -87,8 +90,8 @@ test.for([['replacement', 'busy'], ['restored', 'busy'], ['replacement', 'error'
 });
 
 test.for(['replacement', 'restored'] as const)('a late accepted batch stays sent after switching to the %s client lease', async (owner, { ready, resources }) => {
-  const { store, client } = await ready();
-  const replacement = new FakeClient({ delayMs: 0 });
+  const { store, client } = await ready(OLD_CORE);
+  const replacement = new FakeClient(OLD_CORE);
   resources.push(() => replacement.close());
   let acceptSend!: (result: RpcResult<'turns.start'>) => void;
   const pending = new Promise<RpcResult<'turns.start'>>(resolve => { acceptSend = resolve; });
@@ -131,8 +134,8 @@ test.for(['replacement', 'restored'] as const)('a late accepted batch stays sent
 });
 
 test.for(['replacement', 'restored'] as const)('a late accepted activity command cannot update the %s thread lease', async (owner, { ready, resources }) => {
-  const { store, client } = await ready();
-  const replacement = new FakeClient({ delayMs: 0 });
+  const { store, client } = await ready(OLD_CORE);
+  const replacement = new FakeClient(OLD_CORE);
   resources.push(() => replacement.close());
   let acceptCommand!: (result: RpcResult<'threads.activity.set'>) => void;
   const pending = new Promise<RpcResult<'threads.activity.set'>>(resolve => { acceptCommand = resolve; });
@@ -167,8 +170,8 @@ test.for(['replacement', 'restored'] as const)('a late accepted activity command
 
 
 test.for(['prepare', 'update'] as const)('a stale selection %s continuation cannot start a turn after A-B-A attachment', async (phase, { ready, resources }) => {
-  const { store, client } = await ready();
-  const replacement = new FakeClient({ delayMs: 0 });
+  const { store, client } = await ready(OLD_CORE);
+  const replacement = new FakeClient(OLD_CORE);
   resources.push(() => replacement.close());
   const gate = deferred(), started = deferred();
   const call = vi.spyOn(client, 'call');
@@ -202,8 +205,8 @@ test.for(['prepare', 'update'] as const)('a stale selection %s continuation cann
 });
 
 test.for(['accepted', 'unsupported', 'refused'] as const)('a late steer %s response cannot publish into a restored client lease', async (result, { ready, resources }) => {
-  const { store, client } = await ready();
-  const replacement = new FakeClient({ delayMs: 0 });
+  const { store, client } = await ready(OLD_CORE);
+  const replacement = new FakeClient(OLD_CORE);
   resources.push(() => replacement.close());
   let resolve!: (value: { accepted: boolean }) => void, reject!: (error: Error) => void;
   const pending = new Promise<{ accepted: boolean }>((yes, no) => { resolve = yes; reject = no; });
@@ -243,7 +246,7 @@ function deferred() {
 }
 
 test('a completed tool sends queued input into the running turn even off screen', async ({ ready }) => {
-  const { store, client } = await ready({ delayMs: 40 });
+  const { store, client } = await ready({ ...OLD_CORE, delayMs: 40 });
   const calls = vi.spyOn(client, 'call');
   await store.send('[tools] Keep working', 't-trace');
   store.composerStates['t-trace'] = queued('Use the new instructions');
@@ -261,7 +264,7 @@ test('a completed tool sends queued input into the running turn even off screen'
 });
 
 test('unsupported steering holds the queue until the running turn finishes', async ({ ready }) => {
-  const { store, client } = await ready({ delayMs: 20 });
+  const { store, client } = await ready({ ...OLD_CORE, delayMs: 20 });
   const call = client.call.bind(client);
   const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
     method === 'turns.steer' ? Promise.resolve({ accepted: false }) as ReturnType<typeof call> : call(method, params));
@@ -275,7 +278,7 @@ test('unsupported steering holds the queue until the running turn finishes', asy
 });
 
 test('Send now explains an unsupported turn while retaining the queued input', async ({ ready }) => {
-  const { store, client } = await ready({ delayMs: 40 });
+  const { store, client } = await ready({ ...OLD_CORE, delayMs: 40 });
   await store.open('t-trace');
   const call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation((method, params) =>

@@ -11,7 +11,7 @@ let approvedModels: ModelInfo[];
 beforeEach(async () => {
   h = await startTestCore();
   client = await h.connect();
-  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
+  h.core.workforce.setLimits({ paused: true });
   const provider = h.core.providers.require('echo');
   const original = provider.models[0]!;
   provider.models = [
@@ -20,7 +20,7 @@ beforeEach(async () => {
   ];
   const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
   agent = await client.call('agents.profile.save', { value: {
-    name: 'Ada', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'],
+    name: 'Ada', domain: '', instructions: '', avatar: '', status: 'active',
     selection: { providerId: 'echo', accountId: account.id, model: 'echo', effort: 'high', permissionMode: 'default' },
   } });
   config = {
@@ -29,7 +29,7 @@ beforeEach(async () => {
     subagents: { enabled: true, paused: false, profiles: [{
       providerId: 'echo', accountId: account.id, model: 'old-helper', effort: null, id: 'helper', name: 'Helper',
     }] },
-    compactAfterTurns: 8, maxRunMinutes: 10,
+    autoMemory: false, dailyBudgetUsd: null,
   };
   agent = await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config });
   approvedModels = provider.models;
@@ -46,10 +46,9 @@ test('runtime settings keep approved models and effort after the provider replac
   const provider = h.core.providers.require('echo');
   const currentModels = provider.models;
   provider.models = approvedModels;
-  h.core.workforce.setLimits({ paused: false, backgroundConcurrency: 2 });
-  await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: 'Hello', requestId: 'approved-model-session' });
-  await waitFor(() => h.core.workforce.records.list('work').some(work => work.status === 'done'));
-  h.core.workforce.setLimits({ paused: true, backgroundConcurrency: 2 });
+  const threadId = h.core.workforce.sessionOf(agent.id)!.threadId;
+  await client.call('turns.start', { threadId, prompt: 'Hello' });
+  await waitFor(() => h.core.journal.listTurns(threadId).some(turn => turn.status === 'done'));
   provider.models = currentModels;
   config.defaultRoute = { ...agent.selection, permissionMode: 'yolo' };
   agent = await save(config);

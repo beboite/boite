@@ -8,9 +8,10 @@ const SLOP_PX = 10;
  * click does with a mouse: the same `contextmenu` handler runs, at the finger.
  * Android may fire its own `contextmenu` for the same press; the first one wins
  * and the timer stops. The click that ends a long press is swallowed, so the
- * row does not also open.
+ * row does not also open. `accepts` keeps the press to the elements that have
+ * a menu, so holding text elsewhere in a block is left to the platform.
  */
-export function longPress(node: HTMLElement): { destroy: () => void } {
+export function longPress(node: HTMLElement, accepts?: (target: Element) => boolean): { update: (next?: (target: Element) => boolean) => void; destroy: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** The finger holding the row: a second finger neither starts nor ends its press. */
   let pointer: number | null = null;
@@ -28,6 +29,7 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
     pointer = event.pointerId;
     start = { x: event.clientX, y: event.clientY };
     const target = event.target instanceof Element ? event.target : node;
+    if (accepts && !accepts(target)) return;
     timer = setTimeout(() => {
       if (!start) return;
       fired = true;
@@ -63,6 +65,7 @@ export function longPress(node: HTMLElement): { destroy: () => void } {
   node.addEventListener('contextmenu', native, true);
   node.addEventListener('click', click, true);
   return {
+    update(next) { accepts = next; },
     destroy() {
       cancel();
       node.removeEventListener('pointerdown', down);

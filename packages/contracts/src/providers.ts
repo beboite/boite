@@ -443,6 +443,18 @@ export function providerEnabled(summary: Pick<ProviderSummary, 'enabled'> | null
   return summary !== null && summary !== undefined && summary.enabled !== false;
 }
 
+/**
+ * An ACP agent described by the command that starts it: the program, by name
+ * on PATH or by absolute path, its arguments one per entry, taken literally,
+ * and the environment variables it adds. `name` is what the picker shows.
+ */
+export interface LocalAcpCommand {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
 /** A descriptor that did not load. Always shown, never silent. */
 export interface ProviderRejected {
   file: string;
@@ -470,7 +482,9 @@ export interface ProvidersRpcMethods {
    * Claude, ACP, Codex and pi list models through a temporary agent process.
    * Results are kept until refresh, a `providers.reload` that changes a
    * descriptor, or an account whose status or login changes: an unchanged
-   * reload or `accounts.check` keeps them.
+   * reload or `accounts.check` keeps them. An account with no list read since
+   * then gets the one saved under the same descriptor, executable, gateway and
+   * login at once, and the fresh read arrives as `providers.probed`.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
@@ -531,6 +545,30 @@ export interface ProvidersRpcMethods {
    */
   'providers.setEnabled': {
     params: { providerId: ProviderId; enabled: boolean };
+    result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  };
+  /**
+   * Write a user descriptor for an ACP agent from a command: `protocol: "acp"`,
+   * one profile for this machine's OS, `args` passed one by one with no shell,
+   * `env` added to the agent's environment. The agent keeps its own login and
+   * configuration, and its models come from its ACP answers. The id is the
+   * name's `localAcpId`; refused with the field when `checkLocalAcpCommand`
+   * refuses, when another provider or file already has that id, or when the
+   * program cannot be found on this machine. The answer and `providers.updated`
+   * carry the new list. Owner only: it decides what the machine runs.
+   */
+  'providers.addLocal': {
+    params: LocalAcpCommand;
+    result: { providerId: ProviderId; loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  };
+  /**
+   * Delete a user descriptor, whether `providers.addLocal` or a hand wrote it.
+   * Refused for a shipped provider and while a turn of that provider is queued
+   * or running; its warm processes are released first. Its accounts and threads
+   * stay, and come back when a descriptor with the same id loads again.
+   */
+  'providers.removeLocal': {
+    params: { providerId: ProviderId };
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
   };
   /** Validate a user descriptor and show what it would do. Writes nothing. */

@@ -2,9 +2,9 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Prose from './Prose.svelte';
 import type { Store } from '../lib/store.svelte';
-import { writeExperiments } from '../lib/experiments';
 import { resetFeatures, setFeature } from '../lib/features';
 import { installExternalLinks } from '../lib/links';
+import { contextMenu } from '../lib/context-menu.svelte';
 
 /** `files.locate` for a file that is there as written. */
 const asWritten = async (_threadId: string, path: string) => ({ ok: true, value: [path] });
@@ -15,7 +15,6 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
-  writeExperiments([]);
   resetFeatures();
   delete window.__TAURI_INTERNALS__;
 });
@@ -121,7 +120,7 @@ test.each([false, true])('selecting external link text skips navigation, then a 
   } finally { stopLinks(); opened.mockRestore(); }
 });
 
-test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {
+test('the open-chat-links switch opens a desktop shortcut and text outside the checkout only on a click', async () => {
   setFeature('chat-artifacts', false);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
@@ -131,7 +130,7 @@ test('the direct-link experiment opens a desktop shortcut and text outside the c
   } });
   flushSync();
   expect(document.querySelector('a[data-file-path]')).toBeNull();
-  writeExperiments(['open-chat-links']); flushSync();
+  setFeature('open-chat-links', true); flushSync();
   expect(invoke).not.toHaveBeenCalled();
   const links = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
   links[0]!.click();
@@ -139,12 +138,12 @@ test('the direct-link experiment opens a desktop shortcut and text outside the c
   await tick(); links[1]!.click();
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_chat_file', { directory: 'E:/project', path: 'E:/reports/test result.txt' }, undefined));
   expect(store.readFile).not.toHaveBeenCalled();
-  writeExperiments([]); flushSync();
+  setFeature('open-chat-links', false); flushSync();
   expect(document.querySelector('a[data-file-path]')).toBeNull();
 });
 
-test('a remote machine file is never opened by the desktop experiment', async () => {
-  writeExperiments(['open-chat-links']);
+test('a remote machine file is never opened by the open-chat-links switch', async () => {
+  setFeature('open-chat-links', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const readFile = vi.fn(async () => ({ ok: false, error: 'Remote file unavailable' }));
@@ -185,6 +184,32 @@ test('a fenced block carries a copy button that writes the code to the clipboard
   expect(button.textContent).toBe('Copy');
 });
 
+test('tilde and longer backtick fences render as code with a copy button, blank lines and inner fences included', async () => {
+  running = mount(Prose, {
+    target: document.body,
+    props: { text: 'One:\n\n~~~ts\nconst a = 1;\n\nconst b = 2;\n~~~\n\nTwo:\n\n````md\n```sh\nls\n```\n\nend\n````\n' }
+  });
+  flushSync();
+  await tick();
+
+  const code = [...document.querySelectorAll('pre code')].map(node => node.textContent);
+  expect(code).toEqual(['const a = 1;\n\nconst b = 2;', '```sh\nls\n```\n\nend']);
+  expect(document.querySelectorAll('[data-testid=code-copy]')).toHaveLength(2);
+});
+
+test('fenced code inside a quote carries its copy button too', async () => {
+  running = mount(Prose, {
+    target: document.body,
+    props: { text: 'Quoted:\n\n> ```sh\n> echo hello\n> ```\n\n> ~~~\n> echo tilde\n> ~~~\n' }
+  });
+  flushSync();
+  await tick();
+
+  const code = [...document.querySelectorAll('pre code')].map(node => node.textContent);
+  expect(code).toEqual(['echo hello', 'echo tilde']);
+  expect(document.querySelectorAll('blockquote [data-testid=code-copy]')).toHaveLength(2);
+});
+
 test('a block that is still being written carries no button yet', async () => {
   // The pass that hangs them walks every block of the answer, and it ran every
   // 48 ms while the part streamed, for a button on code nobody can copy yet.
@@ -219,7 +244,7 @@ test('plain text preserves its rendered content and gets no copy button', async 
 });
 
 test('a file named by its tail opens where the core finds it, and two candidates are reported', async () => {
-  writeExperiments(['open-chat-links']);
+  setFeature('open-chat-links', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const reportError = vi.fn();
@@ -233,4 +258,36 @@ test('a file named by its tail opens where the core finds it, and two candidates
   await tick(); links[1]!.click();
   await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(new Error('index.ts names several files: a/index.ts, b/index.ts'), 'minor'));
   expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+test('a file link\'s menu copies the whole path, not the #file placeholder, and still opens it', async () => {
+  setFeature('chat-artifacts', true);
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, locateFile: asWritten, threads: [{ id: 'hex', cwd: 'E:\\Hexalife' }], reportError: vi.fn() } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: 'See `addons/printer.qc:12`, `E:\\Hexalife\\models\\` and `thr_abcdefabcdef12`.', store, threadId: 'hex' } });
+  flushSync();
+  const [file, folder] = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
+
+  const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+  file!.dispatchEvent(menu);
+  expect(menu.defaultPrevented).toBe(true);
+  expect(contextMenu.current?.items.map(item => item.id)).toEqual(['open', 'copy']);
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('E:\\Hexalife\\addons\\printer.qc'));
+
+  folder!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('E:\\Hexalife\\models\\'));
+
+  file!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('open');
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=chat-file]')).not.toBeNull());
+
+  query<HTMLAnchorElement>('a[data-thread-address]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  contextMenu.current!.onpick('copy');
+  await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('thr_abcdefabcdef12'));
+  contextMenu.close();
 });

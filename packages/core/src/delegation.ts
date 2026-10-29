@@ -1,8 +1,10 @@
+import { markStartFailed } from './threads/lifecycle.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, delegationAnswerable as answerable, delegationNeeds as needsOf, delegationReply, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, threadBusy, type RpcEvents } from '@boite/contracts';
-import type { AgentLetter, BackgroundWait, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationResumed, DelegationView, PauseOrigin, PermissionMode, PermissionRequest, Principal, QuestionRequest, RequestId, RpcParams, ThreadContextMode, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, requiredText as text } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { checkContext } from './context-mode.ts';
 import { checkSavedSelection, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
@@ -12,14 +14,18 @@ import { assertDriverRunnable } from './drivers/index.ts';
 import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
 import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
-import { INTERRUPTION_TEXT } from './delegation/interruption.ts';
+import { INTERRUPTION_TEXT, parentListens, tellInterrupted } from './delegation/interruption.ts';
+import { askFinal, childEnd, closeQuestions, taskTurn, unwoken } from './delegation/completion.ts';
 import { permissionWake, questionWake, worktreeLine } from './delegation/messages.ts';
 import { ChildWorktrees } from './delegation/worktrees.ts';
+import { childProject } from './delegation/projects.ts';
 import { Retirements } from './delegation/retirement.ts';
 import { pauseHold, pauseOver } from './delegation/pauses.ts';
 import { dropRestartCuts, recordRestartCut, resumeRestartCuts } from './delegation/restart.ts';
 import { DELEGATION_WORDS, delegationPrompt, subagentGuide } from './delegation/guide.ts';
 import type { Connection } from './router.ts';
+import { usageGroups } from './journal/usage-sums.ts';
+import { usageTotal } from './usage.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -179,10 +185,7 @@ export class Delegation {
     return true;
   }
   private rows(rootId: string): AgentRow[] { return this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? ORDER BY rowid').all(rootId) as AgentRow[]; }
-  private lastTurn(threadId: string): Turn | null {
-    const row = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId) as { id: string } | null;
-    return row ? this.core.journal.getTurn(row.id) : null;
-  }
+  private lastTurn(threadId: string): Turn | null { return taskTurn(this.core, threadId); }
   /** The bounded final answer of a finished turn, or its error. */
   result(turn: Turn | null): string | null {
     if (!turn || turn.status === 'queued' || turn.status === 'running') return null;
@@ -215,13 +218,8 @@ export class Delegation {
   get(threadId: string): DelegationView {
     const root = this.root(threadId);
     const agents = this.rows(root.id).map(row => this.member(row));
-    const totals = this.core.journal.db.query(`SELECT
-      SUM(json_extract(usage, '$.inputTokens')) AS inputTokens, SUM(json_extract(usage, '$.outputTokens')) AS outputTokens,
-      SUM(json_extract(usage, '$.cacheReadTokens')) AS cacheReadTokens, SUM(json_extract(usage, '$.cacheWriteTokens')) AS cacheWriteTokens,
-      SUM(json_extract(usage, '$.costUsdEquivalent')) AS costUsdEquivalent
-      FROM turns WHERE thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
-      OR (thread_id = ? AND json_extract(execution, '$.operation') = 'delegation')` ).get(root.id, root.id) as Usage;
-    const usage: Usage = { inputTokens: totals.inputTokens ?? 0, outputTokens: totals.outputTokens ?? 0, cacheReadTokens: totals.cacheReadTokens ?? 0, cacheWriteTokens: totals.cacheWriteTokens ?? 0, costUsdEquivalent: totals.costUsdEquivalent ?? null };
+    const usage = usageTotal(this.core, usageGroups(this.core.journal.db, { where: `t.thread_id IN (SELECT thread_id FROM delegated_agents WHERE root_id = ?)
+      OR (t.thread_id = ? AND json_extract(t.execution, '$.operation') = 'delegation')` }, root.id, root.id));
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
@@ -283,7 +281,6 @@ export class Delegation {
   }
 
   spawn(params: RpcParams<'delegation.spawn'>): DelegatedAgent {
-    if (this.core.workforce.resident.isCompacting(params.threadId)) throw refused('compaction cannot start subagents');
     const parent = this.core.threads.require(params.threadId);
     if (parent.parentThreadId) throw refused('delegation supports one level; ask the parent to delegate another task');
     const requestId = text(params.requestId, 'requestId', 128);
@@ -291,10 +288,11 @@ export class Delegation {
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
     if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('worktree: expected true, false or absent');
     const worktree = params.worktree === true;
+    const project = params.project === undefined ? undefined : text(params.project, 'project', 4096);
     const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }), ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64) }) };
     // A request id from before routes keeps its fingerprint: profile, task and title only.
     // A spawn that names a context mode adds it, so a request id from before keeps its fingerprint.
-    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context]), ...(worktree ? ['worktree'] : [])]);
+    const fingerprint = hash([...(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]), ...(params.context === undefined ? [] : [params.context]), ...(worktree ? ['worktree'] : []), ...(project === undefined ? [] : [{ project }])]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -303,7 +301,7 @@ export class Delegation {
     const config = this.available(parent);
     const profile = resolveRoute(this.core, parent, config, request);
     const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
-    if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
+    if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this bot');
     const provider = this.core.providers.require(profile.providerId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
     const row: AgentRow = { thread_id: '', root_id: parent.id, request_id: requestId, fingerprint, profile_id: profile.id, task };
@@ -312,18 +310,17 @@ export class Delegation {
     const id = this.createChild(parent, profile, title, childId => {
       row.thread_id = childId;
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
-    }, params.context, worktree);
+    }, params.context, worktree, undefined, project);
     const own = this.worktrees.get(id);
+    const child = this.core.threads.require(id);
     const checkout = own
-      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from the parent's HEAD; the parent's uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
-      : 'You share its checkout: change only the files your task names and never undo another agent\'s edits.';
+      ? `You work in a git worktree of your own at ${own.path} on branch ${own.branch}, made from ${parent.projectId === child.projectId ? "the parent's" : "the project's"} HEAD; uncommitted edits are not in it. Commit your work on that branch before your final answer: the parent merges the branch.`
+      : `You work in ${child.cwd}. You share that checkout: change only the files your task names and never undo another agent's edits.`;
     try {
-      this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
+      this.core.threads.startTurn(id, { prompt: `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. ${checkout} You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, display: task }, { kind: 'delegation' });
     } catch (error) {
       this.core.logs.warn(`Subagent ${id} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: parent.id, providerId: profile.providerId, model: profile.model ?? null, profile: profile.id } });
-      const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, status: 'error' });
-      this.core.bus.emit('thread.updated', withLoad(this.core, { ...child, status: 'error' }));
+      markStartFailed(this.core, id);
       this.changed(parent.id);
       throw error;
     }
@@ -371,33 +368,40 @@ export class Delegation {
 
   /**
    * An ordinary child thread on a profile, or on the parent's own route for a
-   * workflow step that names none, in the parent's checkout and permission
-   * mode, on the route's speed tier or none: never the parent's. The tier is
+   * workflow step that names none, in the parent's permission mode and its
+   * checkout, or a bot's entrusted project. It uses the route's speed tier or
+   * none: never the parent's. The tier is
    * checked here, whoever built the route. `record` runs in the same
    * transaction. `worktree` gives it a git worktree of its own instead of the
    * parent's checkout: its branch and folder now, the worktree itself before
-   * its first turn ([worktrees](./delegation/worktrees.ts)).
+   * its first turn ([worktrees](./delegation/worktrees.ts)). `fixed` is a
+   * context mode and a permission mode the core sets itself, such as a memory
+   * pass that runs no tool; each driver honours what it can of the mode.
    */
-  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false): string {
+  createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void, context?: unknown, worktree = false,
+    fixed?: { contextMode: ThreadContextMode; permissionMode: PermissionMode }, project?: string): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
-    const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
-    const contextMode = checkContext(this.core.providers.require(route.providerId), context);
-    const planned = worktree ? this.worktrees.plan(parent, id) : null;
+    const provider = this.core.providers.require(route.providerId);
+    const speed = checkSpeed(provider, route.accountId, route.model, asked ?? null);
+    const contextMode = fixed ? { ...fixed.contextMode, tools: fixed.contextMode.tools === null ? null : [...fixed.contextMode.tools] } : checkContext(provider, context);
+    // Fixed memory passes keep the bot's personal workspace, even with one entrusted project.
+    const workspace = fixed ? parent : childProject(this.core, parent, project);
+    const planned = worktree ? this.worktrees.plan(workspace, id) : null;
     this.core.journal.db.transaction(() => {
-      if (parent.projectId === null) {
+      if (workspace.projectId === null) {
         const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode,
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id, contextMode, ...(fixed ? { permissionMode: fixed.permissionMode } : {}),
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: planned?.path ?? parent.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: planned?.branch ?? parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: workspace.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: planned?.path ?? workspace.cwd, permissionMode: parent.permissionMode, ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }) }, { id, branch: planned?.branch ?? workspace.branch, parentThreadId: parent.id });
       if (planned) this.worktrees.record(id, planned);
       record(id);
       const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, titleSource: 'user' });
+      this.core.journal.putThread({ ...child, titleSource: 'user', ...(fixed ? { contextMode, permissionMode: fixed.permissionMode } : {}) });
     })();
     return id;
   }
@@ -423,7 +427,7 @@ export class Delegation {
    * one, and its answer never comes back as mail.
    */
   private stepOwned(threadId: string): boolean {
-    return this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.activity.ownsTracker(threadId) || this.core.workforce.memory.owns(threadId);
+    return !!this.core.sharedCompute?.journal.worker(threadId) || this.core.workflows.owns(threadId) || this.core.activity.ownsReviewer(threadId) || this.core.activity.ownsTracker(threadId) || this.core.workforce.memory.owns(threadId);
   }
   /**
    * Whether a child's team lets its turn start. The scheduler passes the parent it
@@ -431,6 +435,7 @@ export class Delegation {
    * and each team's setting once.
    */
   canRun(threadId: string, parentThreadId?: string | null, configs?: Map<string, DelegationConfig>): boolean {
+    if (this.core.sharedCompute && !this.core.sharedCompute.canRun(threadId)) return false;
     const parentId = parentThreadId === undefined ? this.core.journal.getThread(threadId)?.parentThreadId : parentThreadId;
     if (!parentId) return true;
     let config = configs?.get(parentId);
@@ -441,6 +446,7 @@ export class Delegation {
     return !this.held(config, this.stepOwned(threadId));
   }
   prepareTurn(turn: Turn): boolean {
+    if (this.core.sharedCompute && !this.core.sharedCompute.canRun(turn.threadId)) return false;
     const thread = this.core.threads.require(turn.threadId);
     if (!thread.parentThreadId && turn.execution?.operation !== 'delegation') return true;
     const root = this.root(thread.id), config = this.config(root.id);
@@ -569,26 +575,19 @@ export class Delegation {
           if (!this.closed) for (const letter of letters) this.update(letter, 'uncertain', messageOf(error));
         }
       } else {
-        if (thread.agentSessionId) {
-          const session = this.core.workforce.session(threadId);
-          this.core.workforce.records.transaction(() => {
-            this.reserveTurn(threadId, 'delegation');
-            const episodeId = this.core.journal.getSetting(`delegation-episode:${threadId}`) as string | undefined;
-            const work = this.core.workforce.resident.enqueue(session.agentId, prompt, session.scope, episodeId);
-            for (const letter of letters) this.update(letter, 'delivered', `Durably queued as work ${work.id}`);
-          });
-          this.core.workforce.changed();
-          return;
-        }
-        const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation');
+        const turn = this.core.threads.startTurn(threadId, prompt, { kind: 'delegation' });
         // The scheduler may have started it synchronously before startTurn returns.
         for (const letter of letters) this.update(letter, 'uncertain', `${turn.status === 'queued' && this.core.journal.getTurn(turn.id)?.status === 'queued' ? 'Queued for' : 'Awaiting'} provider turn ${turn.id}`);
       }
     } catch (error) {
+      // A persistent agent that is paused or out of budget: the results wait in its inbox.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'delegation', () => this.kick(threadId)); return; }
       for (const letter of letters) this.update(letter, 'rejected', messageOf(error));
     } finally { this.delivering.delete(threadId); }
   }
   private finished(turn: Turn): void {
+    const end = childEnd(this.core, turn);
+    if (end.kind === 'maintenance') return;
     const thread = this.core.journal.getThread(turn.threadId);
     if (!thread) return;
     // A parent's own turn ending badly (a provider error, an agent update, a restart) is no
@@ -601,8 +600,7 @@ export class Delegation {
       recordRestartCut(this.core, turn);
       return;
     }
-    // Ended to wait on its own background work: it is not done, and its worktree is still in use.
-    const live = turn.status === 'done' ? this.core.threads.agentState.background.get(thread.id) ?? [] : [];
+    const live = end.kind === 'checkpoint' ? end.live : [];
     const settling = live.length > 0 ? null : this.worktrees.settle(thread.id);
     // A workflow step's answer goes to its run, and a goal reviewer's to its goal, never to the parent as mail.
     if (this.stepOwned(thread.id)) return;
@@ -617,7 +615,7 @@ export class Delegation {
     // Stopping a child is final until an explicit new instruction, and ends its pull request watches; no failure retry loop.
     if (turn.status !== 'done') { this.stopped.add(thread.id); this.core.pullRequestWatches.endThread(thread.id); }
     // A child that is over leaves no question behind for its parent to find.
-    if (live.length === 0) this.closeQuestions(thread.id, `the core, since the subagent's turn ended ${turn.status}`);
+    if (live.length === 0) closeQuestions(this.core, thread.id, `the core, since the subagent's turn ended ${turn.status}`);
     const config = this.config(root.id);
     if (!config.enabled || config.paused || root.archived) return;
     const result = this.result(turn);
@@ -638,9 +636,7 @@ export class Delegation {
     else deliver();
   }
   /** Is this thread a delegated agent the parent spawned, rather than a workflow step or a reviewer? */
-  delegated(threadId: string): boolean {
-    return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null;
-  }
+  delegated(threadId: string): boolean { return this.core.journal.db.query('SELECT 1 FROM delegated_agents WHERE thread_id = ?').get(threadId) !== null; }
   /** A delegated agent asked something: its parent learns at once. */
   private asked(request: QuestionRequest): void {
     const child = this.core.journal.getThread(request.threadId);
@@ -669,46 +665,34 @@ export class Delegation {
     const letter = JSON.parse(row.data) as AgentLetter;
     if (letter.status === 'received') this.update(letter, 'expired', 'The question closed before it was delivered');
   }
-  /** The open asynchronous questions of a delegated agent that is over or stopped. */
-  private closeQuestions(threadId: string, by: string): void {
-    for (const question of this.core.threads.listQuestions(threadId)) {
-      // A blocking one goes with its turn; only an asynchronous card outlives it.
-      if (!answerable(question) || question.async !== true) continue;
-      try { this.core.threads.skipQuestion({ threadId, questionId: question.id }, by); } catch { /* Already closed by a nested settle. */ }
-    }
-  }
   /**
-   * A delegated agent's background work changed. Once it ended, the agent gets
-   * a moment to wake; the tick looks again when that moment is over.
+   * A delegated agent's or a workflow step's background work changed. Once it
+   * ended, the agent gets a moment to wake; the tick looks again when that moment is over.
    */
   private backgroundChanged(threadId: string): void {
     const thread = this.core.journal.getThread(threadId);
-    if (!thread?.parentThreadId || this.stepOwned(threadId)) return;
+    if (!thread?.parentThreadId || (!this.core.workflows.owns(threadId) && this.stepOwned(threadId))) return;
     this.changed(thread.parentThreadId);
     this.settleWait(thread);
   }
-  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent once it is interrupted. */
+  /** Re-reads a child's wait: keeps watching it while a wake is expected, tells its parent or its run once it is interrupted. */
   private settleWait(thread: ThreadSummary): void {
     const wait = withLoad(this.core, thread).backgroundWait ?? null;
     if (wait?.state === 'waiting' && wait.until !== null) this.wakeDeadlines.set(thread.id, wait.until);
     else this.wakeDeadlines.delete(thread.id);
-    if (wait?.state === 'interrupted') this.interrupted(thread, wait);
-  }
-  /** The parent learns once per turn that the wait it was told about ended without a result. */
-  private interrupted(thread: ThreadSummary, wait: Extract<BackgroundWait, { state: 'interrupted' }>): void {
-    const root = this.core.journal.getThread(thread.parentThreadId!);
-    const turn = this.lastTurn(thread.id);
-    if (!root || !turn || this.stopped.has(thread.id)) return;
-    const config = this.config(root.id);
-    if (!config.enabled || config.paused || root.archived || thread.archived) return;
-    const requestId = `result:interrupted:${turn.id}`;
-    if (this.core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(thread.id, requestId)) return;
-    this.core.logs.warn(`Subagent ${thread.id} of ${root.id} was waiting on ${wait.for}; it ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`, {
-      source: 'delegation', event: 'delegation.interrupted', threadId: thread.id, turnId: turn.id, data: { parent: root.id, reason: wait.reason },
-    });
-    try {
-      this.send({ threadId: thread.id, toThreadId: root.id, requestId, text: `${thread.title}: interrupted\nIt was waiting on its background work (${wait.for}), which ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}. Its last message was a checkpoint, not its final result. boite delegate resume ${thread.id} continues it; boite delegate send ${thread.id} "<instruction>" steers it.`.slice(0, 4000) }, 'result');
-    } catch (error) { this.core.log('warn', `delegation interruption ${thread.id}: ${messageOf(error)}`); }
+    const step = this.core.workflows.owns(thread.id);
+    // Its work completed with no turn after it: the checkpoint is still all it said, so it is asked for its result.
+    const quiet = wait === null && !this.stopped.has(thread.id) ? unwoken(this.core, thread.id) : null;
+    if (quiet !== null && step) this.core.workflows.unwoken(thread.id, quiet);
+    else if (quiet !== null && parentListens(this.core, thread)) {
+      const error = askFinal(this.core, thread.id, quiet);
+      if (error) tellInterrupted(this.core, thread, quiet, `completed without waking it, and asking for its final result failed: ${error}`, 'final-request');
+    }
+    if (wait?.state !== 'interrupted') return;
+    const how = `ended without waking it: ${INTERRUPTION_TEXT[wait.reason]}`;
+    if (step && this.stopped.has(thread.id)) this.core.workflows.stepStopped(thread.id);
+    else if (step) this.core.workflows.waitLost(thread.id, how, wait.for);
+    else if (!this.stopped.has(thread.id)) tellInterrupted(this.core, thread, wait.for, how, wait.reason);
   }
   /**
    * `by` is who asked, recorded on the pause it may leave: the owner's Stop
@@ -743,8 +727,10 @@ export class Delegation {
       this.core.activity.pauseAll(id);
       this.core.coordination.pause(id);
       if (this.core.scheduler.stop(id) || waiting) stopped++;
-      this.closeQuestions(id, 'the core, since the subagent was stopped');
+      closeQuestions(this.core, id, 'the core, since the subagent was stopped');
       this.core.threads.releaseAgent(id);
+      // A step at rest on its checkpoint has no turn whose end would settle it, even when its work already completed.
+      this.core.workflows.stepStopped(id);
       for (const letter of this.letters(id, 'received')) this.update(letter, 'rejected', 'Agent stopped');
       for (const letter of this.letters(id, 'uncertain')) {
         if (letter.error?.startsWith('Queued for provider turn ')) this.update(letter, 'rejected', 'Agent stopped before provider delivery');
@@ -777,7 +763,7 @@ export class Delegation {
       const child = this.core.journal.getThread(row.thread_id);
       const turn = this.lastTurn(row.thread_id);
       if (!child || child.archived || !turn || this.busy(child)) continue;
-      const lost = withLoad(this.core, child).backgroundWait?.state === 'interrupted';
+      const lost = withLoad(this.core, child).backgroundWait?.state === 'interrupted' || unwoken(this.core, child.id) !== null;
       if (turn.status === 'done' && !lost) continue;
       const why = turn.status === 'done' ? 'its background work ended without waking it' : `it ended ${turn.status}${turn.error ? `: ${turn.error}` : ''}`;
       // One continuation per stopped turn, whoever asks: a second resume finds it on its way; one a Stop rejected goes again.

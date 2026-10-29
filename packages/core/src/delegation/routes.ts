@@ -36,6 +36,11 @@ export function accountFor(core: Core, parent: ThreadSummary, providerId: Provid
     const own = accounts.find(account => account.id === parent.accountId);
     if (own) return own;
   }
+  return loggedInAccount(accounts);
+}
+
+/** A provider's logged-in login, the default location first; undefined when none is signed in. */
+export function loggedInAccount(accounts: readonly Account[]): Account | undefined {
   const usable = accounts.filter(account => account.status !== 'unauthenticated');
   return usable.find(a => a.isolationDir === null && a.status === 'ok') ?? usable.find(a => a.status === 'ok')
     ?? usable.find(a => a.isolationDir === null) ?? usable[0];

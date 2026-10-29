@@ -22,6 +22,7 @@
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import DeviceSurface from './DeviceSurface.svelte';
+  import WindowSurface from './WindowSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
@@ -31,6 +32,7 @@
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
+  import AgentDesk from './agents/AgentDesk.svelte';
 
   let {
     store,
@@ -262,7 +264,10 @@
   }
 
 
+  /** A persistent agent's own thread has a desk, offered first. */
+  const agentThread = $derived(!!store.openThread?.agentSessionId);
   let menuItems = $derived([
+    ...(agentThread ? [{ id: 'desk', label: kindName('desk'), glyph: surfaceGlyph('desk') }] : []),
     ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
@@ -457,7 +462,11 @@
          than swapping it in one frame, the way a settings page arrives. -->
     {#key active?.id}
     <div class="surface" use:arrive>
-    {#if active?.kind === 'agents'}
+    {#if active?.kind === 'desk'}
+      {#if store.openThread?.agentSessionId}
+        {#key store.threadKey(store.openThread.id)}<AgentDesk {store} />{/key}
+      {/if}
+    {:else if active?.kind === 'agents'}
       <DelegationSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'messages'}
       <AgentMessagesSurface {store} surface={active} {panel} />
@@ -474,12 +483,17 @@
     {:else if active?.kind === 'files'}
       <FilesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'file'}
-      {#key active.id}
+      <!-- One editor per document: the same path open in another thread is another file's tab. -->
+      {#key `${panel.threadId}\n${active.id}`}
         <FileSurface {store} surface={active} {panel} />
       {/key}
     {:else if active?.kind === 'device'}
       {#if store.openThread}
         {#key store.threadKey(store.openThread.id)}<DeviceSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
+    {:else if active?.kind === 'window'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<WindowSurface {store} threadId={store.openThread.id} />{/key}
       {/if}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
@@ -775,10 +789,17 @@
       width: auto;
       min-width: 0;
       background: var(--color-surface);
-      box-shadow: none;
+      box-shadow: var(--shadow-screen);
       /* The sheet covers the whole screen, the status bar and the home indicator included. */
       box-sizing: border-box;
       padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      /* A screen of its own: it slides in over the conversation and back out, opaque all the way, as the conversation does over the list. */
+      animation: screen-in var(--dur-3) var(--ease-slide);
+    }
+
+    .panel.closing,
+    .panel.maximized.closing {
+      animation: screen-out var(--dur-3) var(--ease-slide);
     }
 
     .sheet-scrim {

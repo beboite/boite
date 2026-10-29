@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ToolDocument } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  import DiffView from './DiffView.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import Prose from './Prose.svelte';
   import type { Store } from '../lib/store.svelte';
 
@@ -11,7 +11,7 @@
 
 <div class="document" data-testid="tool-document" data-kind={doc.kind}>
   {#if doc.kind === 'diff'}
-    <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />
+    <Deferred part={parts.DiffView}>{#snippet children(DiffView)}<DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {doc} />{/snippet}</Deferred>
   {:else if doc.kind === 'markdown'}
     {#if doc.title !== null}
       <div class="section-label">{doc.title}</div>

@@ -1,7 +1,7 @@
-import { RpcErrorCode } from '@boite/contracts';
+import { checkRpcParams, RpcErrorCode } from '@boite/contracts';
 import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, SentFrom, ThreadId, TransportOptions } from '@boite/contracts';
 import { assertAllowed } from './access.ts';
-import { RpcFailure } from './errors.ts';
+import { invalidParams, RpcFailure } from './errors.ts';
 import type { Identity } from './sessions.ts';
 
 /** What a handler is allowed to know about the socket it was called on. */
@@ -16,6 +16,12 @@ export interface Connection {
   readonly sentFrom?: SentFrom | null;
   /** Reached by a name other than this machine's loopback: a phone, a laptop, a tunnel. Unset counts as remote. */
   readonly remote?: boolean;
+  /**
+   * The bytes cannot be read on the way: this machine's own loopback, a
+   * Tailscale peer, or HTTPS terminated on this machine. Unset counts as plain;
+   * a secret is answered or deleted only where it is true.
+   */
+  readonly encrypted?: boolean;
   /** The client name hello gave (`shell`, `pwa`, `plugin`, `cli`); unset for tests that build a connection by hand. */
   readonly clientName?: string;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
@@ -36,6 +42,8 @@ export type Handler<M extends RpcMethodName> = (
 type ErasedHandler = (params: never, ctx: RpcContext) => unknown;
 
 export class Router {
+  /** Host execution policy, in addition to the static caller-role map. Local sessions have no shared binding. */
+  guard?: (method: RpcMethodName, params: unknown, ctx: RpcContext) => void;
   private readonly handlers = new Map<RpcMethodName, ErasedHandler>();
   private accepting = true;
   private active = 0;
@@ -74,6 +82,10 @@ export class Router {
     // until `DEVICE_METHODS` or `AGENT_METHODS` says otherwise. The params go
     // with it: an agent is held to the thread its token was minted for.
     assertAllowed(method as RpcMethodName, ctx.connection, params);
-    return await this.trackRequest(() => handler(params as never, ctx));
+    // A method with rules in contracts gets only params they accepted, as they normalized them.
+    const checked = checkRpcParams(method, params);
+    if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    this.guard?.(method as RpcMethodName, checked.params, ctx);
+    return await this.trackRequest(() => handler(checked.params as never, ctx));
   }
 }

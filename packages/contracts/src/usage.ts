@@ -1,10 +1,29 @@
 import type { ProjectId, ProviderId, ThreadId, Timestamp } from './ids';
 
+/**
+ * Tokens as four disjoint buckets, whatever the provider counts: `inputTokens`
+ * holds neither the cache reads nor the cache writes, so the four add up to
+ * what the model processed. The driver normalises them and the turn keeps
+ * them as stored (`buckets`); nothing downstream depends on the provider that
+ * ran it.
+ */
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /**
+   * Of `cacheWriteTokens`, those written to a one-hour cache, which Anthropic
+   * bills at twice the input rate. Absent when none were, and on turns an
+   * older core recorded with no cache writes.
+   */
+  cacheWriteHourTokens?: number;
+  /**
+   * 1 on a turn's usage whose core normalised it into the buckets above.
+   * Absent on a turn an older core recorded, whose split followed its
+   * provider (Codex's input then held the cache), and on sums of turns.
+   */
+  buckets?: 1;
   /** API-equivalent cost. On a subscription this is not money spent; the UI says so. */
   costUsdEquivalent: number | null;
 }
@@ -43,9 +62,15 @@ export interface UsageHistoryRow {
    */
   priced: number;
   /**
-   * Sums over the reported turns. `inputTokens` never includes the cache reads,
-   * whatever the provider counts, so the four token fields add up to the tokens
-   * processed. `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
+   * Reported turns among them that an older core recorded (`Usage.buckets`
+   * absent). Their split and hour writes are estimated from the protocol the
+   * provider has now, so editing or removing it can change them. Absent when
+   * none, and from an older core.
+   */
+  estimated?: number;
+  /**
+   * Sums over the reported turns, in the buckets each turn stored.
+   * `costUsdEquivalent` is the tokens at `price`'s rates, or the sum
    * of the costs the agent reported when no rate matched the model; null when
    * neither gave one.
    */

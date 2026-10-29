@@ -6,10 +6,15 @@
   import StatusMark from './StatusMark.svelte';
   import { threadTone } from '../lib/thread-state';
   import Elapsed from './Elapsed.svelte';
+  import { upkeepOf } from '../lib/agent-upkeep';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
-  /** At work in a turn, or waiting on its own background work: either way its result has not come back. */
-  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread)));
+  /**
+   * At work in a turn, or waiting on its own background work: either way its
+   * result has not come back. A persistent agent's memory pass is the core's
+   * upkeep, not a subagent it sent.
+   */
+  let active = $derived((store.delegation?.agents ?? []).filter(agent => threadBusy(agent.thread) && !upkeepOf(store).has(agent.thread.id)));
   let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
   let runs = $derived(store.workflowsOf(threadId).filter(run => run.status === 'running'));
   let count = $derived(active.length + native.length);
@@ -41,7 +46,8 @@
 {/if}
 
 <style>
-  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto 8px; }
+  /* The air above the bar matches the composer's: the band of tasks floats there, clear of the bar. */
+  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto; padding: 8px 0; }
   .activity { max-width: 100%; min-height: 32px; height: auto; gap: 6px; font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
   .counts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; text-align: left; }
   .activity :global(.elapsed) { flex: none; color: var(--color-muted-foreground); }

@@ -3,6 +3,7 @@ import type { Client, EventHandler } from '../client';
 import { noteThisComputer } from '../device';
 import { noteQuestionAsked } from '../question-reply.svelte';
 import { finishNotifies } from '../notify';
+import { upkeepOf } from '../agent-upkeep';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
 import { appUpdateRequested } from '../desktop-update.svelte';
@@ -14,6 +15,7 @@ import { needsUser } from '../thread-state';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
 import { reportPreferences } from '../client-preferences.svelte';
+import { heardDesktop } from '../experiments';
 import { lightPage } from './reading-pages.svelte';
 import type { StoreContext } from './context';
 import { probeKey } from './models.svelte';
@@ -53,6 +55,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
+          ctx.connection.clockOffset = client.clockOffset ?? 0;
           if (ctx.connection.localCore) noteThisComputer(s.core?.hostname);
           undo.discardExpired(s, s.core?.startedAt);
           // `WsClient` writes its principal from the hello answer before it
@@ -61,18 +64,25 @@ export function listen(ctx: StoreContext, client: Client): void {
           // first load, and what refreshes it after a reconnect.
           s.principal = client.principal;
           ctx.serverUpdater.reset();
-          if (s.owner && !s.localCore) { void ctx.serverUpdater.load(); void ctx.serverUpdater.loadDesktop(); }
+          if (s.owner && !s.localCore) { void ctx.serverUpdater.freshen(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
+          // A reconnect lists the composer records again; the first connection does once the journal is read.
+          void ctx.sync.resync();
+          ctx.shared.reconnected();
           ctx.terminals.reconnected(client);
+          if (!s.owner) layout.checkPushKinds(client);
         }
       })
     );
   }
 
   // After the state handler above, so a reconnect has its principal and core first.
-  if (observable(client)) ctx.off.push(reportPreferences(client, current));
+  if (observable(client) && client.onClockOffset) ctx.off.push(client.onClockOffset((offset) => { if (current()) ctx.connection.clockOffset = offset; }));
+  if (observable(client)) ctx.off.push(reportPreferences(client, current, experiments => heardDesktop(s, experiments, s.core?.coreId ?? null)));
+  on('client.desktopExperiments', ({ experiments }) => heardDesktop(s, experiments, s.core?.coreId ?? null));
 
   on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
+  on('composer.updated', record => ctx.sync.receive(record));
   on('core.desktopUpdateChanged', ({ status }) => { if (!s.localCore) ctx.serverUpdater.applyDesktop(status); });
   on('ui.appUpdate', ({ version }) => appUpdateRequested(s, version));
 
@@ -82,7 +92,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('terminal.exited', ({ id }) => ctx.terminals.shellEnded(id));
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
-    const held = threads.threads.find(t => t.id === summary.id);
+    if (summary.archived) requests.dropSecretsOf(summary.id);
+    const held = threads.rowOf(summary.id);
     const turnedToUser = needsUser(summary) && !(held && needsUser(held));
     threads.upsertThread(summary);
     ctx.delegation.patchThread(summary);
@@ -132,6 +143,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     const preloaded = threads.preloads.thread(threadId);
     if (preloaded) preloaded.activity = activity;
   });
+  on('sharedProjects.changed', scope => ctx.shared.changed(scope));
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
   });
@@ -172,11 +184,13 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('turn.started', (turn) => threads.upsertTurn(turn.threadId, turn));
+  // A subscription window crossed the alert set on its account.
+  on('quotas.alerted', (alert) => layout.notifyLimit(alert));
   on('turn.finished', (turn) => {
     threads.upsertTurn(turn.threadId, turn);
     // A stop is the user's own doing, and a delegated agent's result or a
     // persistent agent's routine work is not news of its own.
-    if (!finishNotifies(s.threads, turn)) return;
+    if (!finishNotifies(s.threads, turn, upkeepOf(s))) return;
     // The start of the reply, as the core's push says it. An error's own text
     // is often a stack or a provider's JSON: the thread shows it, not the toast.
     if (turn.status === 'done') layout.notify('finished', turn.threadId, () => lastReply(turn.threadId, turn.id));
@@ -257,6 +271,11 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('question.answered', ({ questionId }) => {
     requests.resolveQuestion(questionId);
   });
+  on('secret.requested', request => requests.mergeSecret(request));
+  on('secret.resolved', ({ requestId, threadId }) => {
+    threads.invalidateSync(threadId);
+    requests.resolveSecret(requestId);
+  });
 
   // An agent's shell loop starts and ends dozens of processes a second. Only
   // the trace surface draws them, and it reads `trace.get` whenever it shows,
@@ -316,12 +335,16 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.logins = rest;
     models.dropProbes(accountId);
   });
+  on('brain.configured', () => { void s.loadBrainCommands(); });
+  on('subscriptionProxy.quotasUpdated', quotas => accounts.acceptProxyQuotas(quotas));
   on('settings.updated', (settings) => {
     ctx.metadataRevision.settings++;
     if (JSON.stringify(s.settings?.subscriptionProxy) !== JSON.stringify(settings.subscriptionProxy)) {
+      accounts.proxyQuotas = null;
       for (const account of s.accounts) models.dropProbes(account.id);
     }
     s.settings = settings;
+    void accounts.readProxyQuotas(client);
     void s.refreshMemory();
   });
   on('keybindings.updated', (keybindings) => {

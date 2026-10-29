@@ -15,7 +15,7 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * The experiments this build ships, in the order Settings lists them. Each
  * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
  */
-export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'edge-scrollbars', 'press-preload', 'contacts'] as const;
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'goal2', 'contacts', 'pinned-quotas'] as const;
 export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
 
 export function isExperimentId(id: unknown): id is ExperimentId {
@@ -119,13 +119,19 @@ export const REQUESTABLE_SETTINGS = {
   memoryReserveMb: { page: 'resources', section: 'limits', sensitive: false },
   memoryProtection: { page: 'resources', section: 'limits', sensitive: true },
   reapOrphans: { page: 'resources', section: 'tasks', sensitive: false },
-  autoUpdateHarnesses: { page: 'machines', section: 'machines', sensitive: false },
-  listenOnLan: { page: 'machines', section: 'phone', sensitive: true },
-  publicUrl: { page: 'machines', section: 'phone', sensitive: true },
+  autoUpdateHarnesses: { page: 'accounts', section: 'agent-updates', sensitive: false },
+  autoInstallUpdates: { page: 'machines', section: 'updates', sensitive: false },
+  listenOnLan: { page: 'advanced', section: 'phone', sensitive: true },
+  publicUrl: { page: 'advanced', section: 'phone', sensitive: true },
   browserOrigins: { page: 'advanced', section: 'origins', sensitive: true },
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },
   autoCompact: { page: 'advanced', section: 'auto-compact', sensitive: false },
+  compactionByType: { page: 'advanced', section: 'auto-compact', sensitive: false },
   autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
+  backgroundCompaction: { page: 'experiments', section: 'background-compaction', sensitive: false },
+  deviceStream: { page: 'experiments', section: 'device-stream', sensitive: false },
+  groupThreads: { page: 'machines', section: 'machines', sensitive: false },
+  groupBots: { page: 'machines', section: 'machines', sensitive: false },
 } as const satisfies Partial<Record<keyof Settings, SettingPlace>>;
 
 export type RequestableSetting = keyof typeof REQUESTABLE_SETTINGS;
@@ -133,6 +139,24 @@ export const REQUESTABLE_SETTING_KEYS = Object.keys(REQUESTABLE_SETTINGS) as Req
 
 export function isRequestableSetting(key: unknown): key is RequestableSetting {
   return typeof key === 'string' && Object.hasOwn(REQUESTABLE_SETTINGS, key);
+}
+
+/**
+ * The settings a card may ask about on another machine of the group
+ * (`boite settings request <key> <value> --machine <name>`): what that machine
+ * lets the others do there. Apply writes it on that machine.
+ */
+export const MACHINE_SETTINGS = ['groupThreads', 'groupBots'] as const satisfies readonly RequestableSetting[];
+export type MachineSetting = (typeof MACHINE_SETTINGS)[number];
+
+export function isMachineSetting(key: unknown): key is MachineSetting {
+  return typeof key === 'string' && (MACHINE_SETTINGS as readonly string[]).includes(key);
+}
+
+/** The other machine of the group a card is about: its core id, and its name when the card was asked. */
+export interface SettingMachine {
+  coreId: string;
+  name: string;
 }
 
 export function isSettingsPage(page: unknown): page is SettingsPage {
@@ -148,6 +172,15 @@ export type RequestableKey = RequestableSetting | ExperimentSettingKey;
 export function experimentOf(key: string): ExperimentId | null {
   const id = key.startsWith('experiment.') ? key.slice('experiment.'.length) : null;
   return isExperimentId(id) ? id : null;
+}
+
+/**
+ * True for any `experiment.<id>` key, shipped or since graduated: a card
+ * asked about a switch this build no longer lists is still a device's switch,
+ * which a core setting never settles and `settings.set` never writes.
+ */
+export function isExperimentKey(key: string): boolean {
+  return key.startsWith('experiment.');
 }
 
 /** One readable setting, as `agent.settings` lists it. */
@@ -185,6 +218,8 @@ export type SettingAsk =
       sensitive: boolean;
       /** An experiment's card: the app whose switch it was asked from (`ClientPreferences.app`). */
       app?: string;
+      /** A card about another machine of the group: Apply writes it there (`MACHINE_SETTINGS`). */
+      machine?: SettingMachine;
     }
   | { kind: 'open'; page: SettingsPage; section: string | null };
 
@@ -197,20 +232,30 @@ export type SettingOutcome = 'applied' | 'changed' | 'refuse' | 'open';
 
 export const SETTING_REASON_MAX = 500;
 
-/** Params of `settings.request`: a change of one key, or a page to open. */
+/**
+ * Params of `settings.request`: a change of one key, or a page to open.
+ * `machine` names another machine of the group, by its name or a core id
+ * prefix, for a key of `MACHINE_SETTINGS`.
+ */
 export type SettingRequestParams = { threadId: ThreadId; reason: string } & (
-  | { key: string; value: unknown; page?: never; section?: never }
-  | { page: string; section?: string | null; key?: never; value?: never }
+  | { key: string; value: unknown; machine?: string; page?: never; section?: never }
+  | { page: string; section?: string | null; key?: never; value?: never; machine?: never }
 );
 
 /** What a missing key means, for the keys the core's defaults leave out. */
 const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   asyncQuestions: true,
+  autoInstallUpdates: false,
   autoResumeLimitedThreads: false,
+  backgroundCompaction: false,
+  deviceStream: false,
+  groupThreads: false,
+  groupBots: false,
   shortAnswers: true,
   toolSummaries: false,
   titleModel: null,
   autoCompact: null,
+  compactionByType: {},
   publicUrl: null,
   browserOrigins: [],
 };
@@ -270,9 +315,11 @@ export type SettingNormalizer = (patch: Partial<Settings>) => { ok: true; patch:
 /**
  * `settings.request` checked, by the core and the in-memory client alike.
  * `normalize` is the store's own validation; `open` lists the change cards
- * the thread already has open, one per key at most.
+ * the thread already has open, one per key and machine at most. For a card
+ * about another machine, `machine` names it and `settings` holds the value
+ * that machine reported for the key.
  */
-export function checkSettingRequest(params: SettingRequestParams, settings: Settings, normalize: SettingNormalizer, open: readonly SettingAsk[], client: ClientPreferences | null = null): SettingRequestCheck {
+export function checkSettingRequest(params: SettingRequestParams, settings: Settings, normalize: SettingNormalizer, open: readonly SettingAsk[], client: ClientPreferences | null = null, machine: SettingMachine | null = null): SettingRequestCheck {
   const reason = typeof params.reason === 'string' ? params.reason.trim() : '';
   if (reason.length === 0 || reason.length > SETTING_REASON_MAX) return { ok: false, message: `reason must hold 1 to ${SETTING_REASON_MAX} characters`, data: { field: 'reason' } };
   const hasKey = params.key !== undefined;
@@ -289,6 +336,9 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
     };
   }
   const { key, value } = params;
+  if (machine !== null && !isMachineSetting(key)) {
+    return { ok: false, message: `${String(key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, data: { field: 'key', expected: MACHINE_SETTINGS } };
+  }
   const experiment = typeof key === 'string' ? experimentOf(key) : null;
   if (!isRequestableSetting(key) && experiment === null) {
     const keys = [...REQUESTABLE_SETTING_KEYS, ...EXPERIMENT_IDS.map(id => `experiment.${id}`)];
@@ -310,10 +360,14 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
   }
   const settingKey = key as RequestableKey;
   const previous = currentSetting(settingKey, settings, client);
-  if (sameSetting(proposed, previous)) return { ok: false, message: `${key} is already ${JSON.stringify(previous)}`, data: { field: 'value', key } };
-  if (open.some(card => card.kind === 'change' && card.key === key)) return { ok: false, message: `a card asking about ${key} is already open in this thread`, data: { field: 'key', key } };
+  const where = machine === null ? '' : ` on ${machine.name}`;
+  if (sameSetting(proposed, previous)) return { ok: false, message: `${key} is already ${JSON.stringify(previous)}${where}`, data: { field: 'value', key } };
+  if (open.some(card => card.kind === 'change' && card.key === key && (card.machine?.coreId ?? null) === (machine?.coreId ?? null))) {
+    return { ok: false, message: `a card asking about ${key}${where} is already open in this thread`, data: { field: 'key', key } };
+  }
   return {
-    ok: true, reason, setting: { kind: 'change', key: settingKey, value: proposed, previous, ...place, ...(experiment !== null && client !== null ? { app: client.app } : {}) },
+    ok: true, reason,
+    setting: { kind: 'change', key: settingKey, value: proposed, previous, ...place, ...(experiment !== null && client !== null ? { app: client.app } : {}), ...(machine === null ? {} : { machine: { ...machine } }) },
     // Applied is never an answer: the core says it when the value moves.
     options: [{ id: 'refuse', label: 'Refuse' }],
   };
@@ -326,10 +380,21 @@ export function checkSettingRequest(params: SettingRequestParams, settings: Sett
  * flips no switch (`settledExperiment`).
  */
 export function settledSetting(setting: SettingAsk, settings: Settings): QuestionAnswer | null {
-  if (setting.kind !== 'change' || experimentOf(setting.key) !== null) return null;
+  if (setting.kind !== 'change' || isExperimentKey(setting.key) || setting.machine !== undefined) return null;
   const now = effectiveSetting(settings, setting.key as RequestableSetting);
   if (sameSetting(now, setting.previous)) return null;
   return { optionIds: [sameSetting(now, setting.value) ? 'applied' : 'changed'], value: now };
+}
+
+/**
+ * The answer a card about another machine settles with once that machine
+ * said its setting changed (`value`), or null while it holds the value the
+ * card was asked from, or the card is about another machine or key.
+ */
+export function settledMachineSetting(setting: SettingAsk, coreId: string, key: string, value: unknown): QuestionAnswer | null {
+  if (setting.kind !== 'change' || setting.machine?.coreId !== coreId || setting.key !== key) return null;
+  if (sameSetting(value, setting.previous)) return null;
+  return { optionIds: [sameSetting(value, setting.value) ? 'applied' : 'changed'], value };
 }
 
 /**
@@ -359,7 +424,8 @@ export function settingAnswerText(setting: SettingAsk, answer: QuestionAnswer): 
     return outcome === 'open' ? `opened: the user opened Settings at ${where}` : `dismissed: the user did not open Settings at ${where}`;
   }
   const json = (value: unknown): string => JSON.stringify(value ?? null);
-  if (outcome === 'applied') return `applied: ${setting.key} is now ${json(answer.value)}`;
-  if (outcome === 'changed') return `changed: the user set ${setting.key} to ${json(answer.value)}, not ${json(setting.value)}`;
-  return `refused: ${setting.key} stays ${json(setting.previous)}`;
+  const where = setting.machine === undefined ? '' : ` on ${setting.machine.name}`;
+  if (outcome === 'applied') return `applied: ${setting.key} is now ${json(answer.value)}${where}`;
+  if (outcome === 'changed') return `changed: the user set ${setting.key} to ${json(answer.value)}${where}, not ${json(setting.value)}`;
+  return `refused: ${setting.key} stays ${json(setting.previous)}${where}`;
 }

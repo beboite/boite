@@ -38,7 +38,11 @@ function storeFile(dataDir: string, file: FileAttachment | Extract<MessagePart, 
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     // Agents can edit files. Preserve their edits, but never present changed bytes as a new upload.
-    const unchanged = untouched(path) || (lstatSync(path).isFile() && readFileSync(path).equals(body));
+    let unchanged = untouched(path);
+    if (!unchanged) {
+      const stat = lstatSync(path);
+      unchanged = stat.isFile() && stat.size === body.length && readFileSync(path).equals(body);
+    }
     if (!unchanged) {
       path = join(directory, `${randomUUID()}-${name}`);
       writeFileSync(path, body, { flag: 'wx', mode: 0o600 });

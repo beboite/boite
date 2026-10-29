@@ -19,7 +19,19 @@ beforeAll(() => {
   sameSite = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => new Response(CARD(new URL(request.url).searchParams.get('who') ?? 'billing'), { headers: { 'content-type': 'text/html' } }) });
   checkout = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
     const { pathname, port, searchParams } = new URL(request.url);
-    const html = (body: string) => new Response(`<!doctype html><title>Placed</title><style>body{margin:0}</style>${body}<script>addEventListener('message', event => { window.result = event.data })</script>`, { headers: { 'content-type': 'text/html' } });
+    const html = (body: string) => new Response(`<!doctype html><title>Placed</title><style>body{margin:0}</style>${body}<script>
+window.inputs = [];
+addEventListener('message', event => {
+  if (event.data?.kind === 'input') window.inputs.push(event.data);
+  else { window.result = event.data; window.clicks = (window.clicks ?? 0) + 1; }
+});
+for (const type of ['pointerdown', 'pointerup', 'click']) addEventListener(type, event => {
+  const button = document.querySelector('button');
+  top.postMessage({ kind: 'input', type, url: location.href, x: event.clientX, y: event.clientY,
+    target: event.target.tagName, trusted: event.isTrusted, dpr: devicePixelRatio,
+    button: button?.getBoundingClientRect().toJSON() }, '*');
+}, true);
+</script>`, { headers: { 'content-type': 'text/html' } });
     // A button whose message says whether the click was native, in frames placed every way a page places them.
     const foreign = (style: string) => `<iframe title="Foreign" src="http://localhost:${port}/placed/button" style="border:0;position:absolute;left:260px;top:180px;width:400px;height:120px;${style}"></iframe>`;
     if (pathname === '/placed/button') return html(`<button style="position:absolute;left:160px;top:30px;width:60px;height:30px" onclick="top.postMessage('clicked ' + event.isTrusted, '*')">Pay</button>`);
@@ -123,16 +135,40 @@ real('a click in a frame lands where the frame is drawn, and goes through the DO
     const clicked = await command({ kind: 'click', selector: `@${pay![1]}` });
     let result: unknown;
     for (const end = Date.now() + 3000; Date.now() < end && !(result = await command({ kind: 'evaluate', expression: 'window.result ?? null' }) as unknown);) await Bun.sleep(50);
-    return { note: clicked.note, result };
+    if (!result) {
+      const diagnostics = await command({ kind: 'evaluate', expression: `({ inputs: window.inputs, width: innerWidth, height: innerHeight,
+        frames: [...document.querySelectorAll('iframe')].map(frame => ({ url: frame.src, rect: frame.getBoundingClientRect().toJSON(),
+          width: frame.offsetWidth, height: frame.offsetHeight })) })` });
+      console.error(`missed frame click ${path}: ${JSON.stringify(diagnostics)}`);
+    }
+    const clicks = await command({ kind: 'evaluate', expression: 'window.clicks ?? 0' }) as unknown;
+    return { note: clicked.note, result, clicks };
   };
   // A frame of another site inside an offset frame of the page's own origin.
-  expect(await clickPay('/placed/nested')).toEqual({ note: undefined, result: 'clicked true' });
+  expect(await clickPay('/placed/nested')).toEqual({ note: undefined, result: 'clicked true', clicks: 1 });
   // An iframe scaled to half its size takes its points scaled too.
-  expect(await clickPay('/placed/scaled')).toEqual({ note: undefined, result: 'clicked true' });
+  expect(await clickPay('/placed/scaled')).toEqual({ note: undefined, result: 'clicked true', clicks: 1 });
   // A button drawn over the frame would take a native click: the frame's button is clicked through the DOM instead.
   for (const path of ['/placed/covered', '/placed/covered-foreign']) {
     const covered = await clickPay(path);
     expect(covered.result).toBe('clicked false');
+    expect(covered.clicks).toBe(1);
     expect(String(covered.note)).toContain('covered by button Overlay');
   }
+  // A frame can move after its button receives the pointer: its local hit-test
+  // still succeeds, but pressing at the old page coordinates would miss it.
+  await command({ kind: 'open', url: `http://127.0.0.1:${checkout.port}/placed/covered` });
+  await command({ kind: 'wait', load: 'load' });
+  await command({ kind: 'evaluate', expression: `document.querySelector('button').remove();
+    const frame = document.querySelector('iframe');
+    frame.contentDocument.querySelector('button').addEventListener('pointermove', event => {
+      if (event.isTrusted) frame.style.left = '660px';
+    }); true` });
+  const tree = String((await command({ kind: 'snapshot', interactive: true })).text);
+  const moved = `@${/button "Pay" \[ref=(e\d+)\]/.exec(tree)![1]}`;
+  expect(await thrown(command({ kind: 'click', selector: moved }))).toThrow('did not receive native pointer movement');
+  expect(await command({ kind: 'evaluate', expression: 'inputs.filter(event => event.type === "pointerdown").length' }) as unknown).toBe(0);
+  expect((await command({ kind: 'click', selector: moved })).note).toBeUndefined();
+  expect(await command({ kind: 'evaluate', expression: 'window.result' }) as unknown).toBe('clicked true');
+  expect(await command({ kind: 'evaluate', expression: 'window.clicks' }) as unknown).toBe(1);
 }, 120_000);

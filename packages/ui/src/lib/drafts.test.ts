@@ -5,6 +5,8 @@ import { Store } from './store.svelte';
 import { strings } from './strings';
 import { readDraftJournal, writeDraftJournal } from './draft-journal';
 import { webcrypto } from 'node:crypto';
+import { ATTACHMENTS_PER_TURN } from '@boite/contracts';
+import { unresolvedAssetId } from './draft-attachments';
 
 // jsdom has no IndexedDB: the durable journal is a recorder here, and reads come back empty.
 vi.mock('./draft-journal', () => ({ readDraftJournal: vi.fn(async () => null), writeDraftJournal: vi.fn(async () => {}) }));
@@ -55,6 +57,30 @@ test('storage failures keep the text in memory and explain that it could not be 
     expect(await store.flushDrafts()).toBe(false);
     expect(store.composerStates['t-trace']?.text).toBe('Still here');
   } finally { write.mockRestore(); }
+});
+
+test('a 60k-character draft whose images overflow the backup keeps every word through a crash before the journal lands', async () => {
+  vi.stubGlobal('indexedDB', {});
+  vi.mocked(writeDraftJournal).mockImplementation(() => new Promise(() => {}));
+  const setItem = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (value.length > 5_000_000) throw new DOMException('Full', 'QuotaExceededError');
+    setItem.call(this, key, value);
+  });
+  const store = await ready('quota');
+  const text = 'every problem described at once. '.repeat(1820);
+  store.editComposerText('t-trace', text);
+  store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: String(index).padEnd(Math.ceil(6_000_000 / ATTACHMENTS_PER_TURN), 'A') }));
+  flushSync();
+  store.editComposerText('t-trace', text + 'and the last words');
+  expect(store.error).toBeNull();
+  const restored = await ready('quota');
+  const input = restored.composerStates['t-trace']!;
+  expect(input.text.length).toBeGreaterThan(60_000);
+  expect(input.text).toBe(text + 'and the last words');
+  expect(input.attachments.map(file => file.name)).toEqual(Array.from({ length: ATTACHMENTS_PER_TURN }, (_, index) => `shot-${index}.png`));
+  expect(input.attachments.every(file => unresolvedAssetId(file))).toBe(true);
 });
 
 test('a real journal checkpoint recovers input when the synchronous backup is denied', async () => {
@@ -556,8 +582,8 @@ test('a project holds several drafts: each reopens by id and a new Store restore
   const two = store.draft!.id!;
   expect(two).not.toBe(one);
   expect(store.draftEntries).toEqual([
-    { id: two, projectId: a!.id, text: 'Two', active: true },
-    { id: one, projectId: a!.id, text: 'One', active: false }
+    { id: two, projectId: a!.id, text: 'Two', active: true, queued: null },
+    { id: one, projectId: a!.id, text: 'One', active: false, queued: null }
   ]);
   store.startDraft(undefined, { draftId: one });
   expect(store.draft?.id).toBe(one);
@@ -634,7 +660,7 @@ test('a journal entry keyed by its project restores with that key as its id and 
     '"p-boite"': { draft: { projectId: 'p-boite', worktree: false }, input: { text: 'Legacy draft', attachments: [], queued: [] } }
   } });
   const store = await ready('legacy-key');
-  expect(store.draftEntries).toEqual([{ id: '"p-boite"', projectId: 'p-boite', text: 'Legacy draft', active: expect.any(Boolean) }]);
+  expect(store.draftEntries).toEqual([{ id: '"p-boite"', projectId: 'p-boite', text: 'Legacy draft', active: expect.any(Boolean), queued: null }]);
   store.startDraft('p-boite');
   expect(store.draft?.id).toBe('"p-boite"');
   store.editComposerText('draft', 'Legacy draft, edited');

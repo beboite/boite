@@ -271,6 +271,57 @@ test('a tool call still running after the grace is stopped, and its thread resum
   } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }
 });
 
+test('a tool call already running longer than the grace when the restart starts is not waited for', async () => {
+  // An update waited its whole 30 seconds on a nine minute script (2026-10-23).
+  HANDOFF.graceMs = 10_000;
+  HANDOFF.longToolMs = 200;
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.subscribe', { threadId });
+    const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running');
+    const turn = await client.call('turns.start', { threadId, prompt: '[tool:60000] long command' });
+    await running;
+    await Bun.sleep(300);
+    const asked = Date.now();
+    expect((await ask(h)).status).toBe(202);
+    await waitFor(() => stops === 1);
+    expect(Date.now() - asked).toBeLessThan(5_000);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    expect(h.core.journal.getSetting('restart-handoff')).toMatchObject({ turns: [{ turnId: turn.id, was: 'running' }] });
+    client.close();
+  } finally { await h.stop(); }
+});
+
+// About five seconds by design: an aged call, then the whole grace.
+test('a turn that also runs a fresh tool call still waits for it, even beside an old one', async () => {
+  // The old call is aged well past the threshold, the fresh one far below it however slow the runner.
+  HANDOFF.graceMs = 3_000;
+  HANDOFF.longToolMs = 1_500;
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.subscribe', { threadId });
+    const running = client.next('message.part', event => event.threadId === threadId && event.part.type === 'tool' && event.part.status === 'running');
+    const turn = await client.call('turns.start', { threadId, prompt: '[tool:60000] long command' });
+    const old = await running;
+    await Bun.sleep(1_700);
+    // A second call of the same turn, started just now: the one a polling loop runs beside.
+    h.core.bus.emit('message.part', { threadId, messageId: old.messageId, partIndex: old.partIndex + 1,
+      part: { type: 'tool', toolId: 'fresh', name: 'Bash', input: {}, output: null, status: 'running', startedAt: Date.now() } });
+    const asked = Date.now();
+    expect((await ask(h)).status).toBe(202);
+    await waitFor(() => stops === 1);
+    expect(Date.now() - asked).toBeGreaterThanOrEqual(2_900);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    client.close();
+  } finally { await h.stop(); }
+}, 15_000);
+
 test('a queued turn runs once on the next core, and a turn the user stopped does not resume', async () => {
   let stops = 0;
   const h = await startTestCore({ onShutdown: () => { stops += 1; } });
@@ -326,6 +377,8 @@ test('a core killed during the grace still hands its turn over, closed without a
     expect(left.status).toBe('stopped');
     expect(left.error).toBeNull();
     expect(messagesOf(core, left).every(message => message.state !== 'streaming' && !message.parts.some(part => part.type === 'error'))).toBe(true);
+    // Nothing answers the cut call any more: it closes like one a live stop cut.
+    expect(messagesOf(core, left).flatMap(message => message.parts).flatMap(part => part.type === 'tool' ? [part.status] : [])).toEqual(['error']);
     await waitFor(() => core.journal.listTurns(threadId).length === 2);
     expect(core.journal.listTurns(threadId)[1]!.execution?.operation).toBe('resume');
   } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }

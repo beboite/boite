@@ -42,6 +42,24 @@ afterEach(() => {
 const sent = (message: Message): Message => message;
 
 describe('journal', () => {
+  test.each([38, 39, 43])('schema %i retains history and initializes composer alongside shared tables', (version) => {
+    journal.putProject({ id: 'kept-project', name: 'Existing project', path: dir, createdAt: 1 });
+    journal.putMessage({ ...sampleMessage('kept-message'), state: 'complete', parts: [{ type: 'text', text: 'Existing message' }] });
+    const history = () => JSON.stringify(['projects', 'messages'].map(table => journal.db.query(`SELECT * FROM ${table}`).all()));
+    const before = history();
+    if (version !== 39) journal.db.exec('DROP TABLE composer_records; DROP TABLE composer_assets; DROP TABLE composer_deliveries');
+    else journal.db.query('INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)').run('drafts', 'kept-draft', 1, 1, '{"input":{"text":"Existing draft"}}');
+    journal.db.exec(`PRAGMA user_version = ${version}`);
+    journal.close(); journal = new Journal(file);
+    expect(journal.schema).toEqual({ from: version, to: SCHEMA_VERSION });
+    expect(history()).toBe(before);
+    expect(journal.db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'composer_%'").all()).toHaveLength(3);
+    expect(journal.db.query('SELECT count(*) AS n FROM composer_records').get()).toEqual({ n: version === 39 ? 1 : 0 });
+    journal.close(); journal = new Journal(file);
+    expect(journal.schema).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION });
+    expect(history()).toBe(before);
+  });
+
   test('legacy input receipts bind only exact unique messages and ambiguous cuts retain replay protection after reopen', () => {
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
     const input = (id: string, text: string): Message => ({ ...sampleMessage(id), role: 'user', state: 'complete', parts: [{ type: 'text', text }] });
@@ -456,8 +474,12 @@ describe('journal', () => {
       journal.db.query('INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(id, `thr_${id}`, 'stopped', 1, 1, '{"task":"workflow prompt"}');
       journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(`step_${id}`, id, 'step');
       journal.db.query('INSERT INTO workflow_requests VALUES (?, ?, ?, ?)').run(`thr_${id}`, id, id, id);
+      journal.db.query('INSERT INTO composer_assets VALUES (?, ?, ?, ?, ?, ?)').run(`asset_${id}`, '{}', 'file', 'text/plain', 'notes.txt', 0);
+      journal.db.query('INSERT INTO composer_records VALUES (?, ?, ?, ?, ?)').run('inputs', `thr_${id}`, 1, 1, JSON.stringify({ input: { text: 'unsent words', attachments: [{ assetId: `asset_${id}` }], queued: [], paused: false } }));
+      journal.db.query('INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, 'inputs', `thr_${id}`, 'delivered', `thr_${id}`, id, 'fingerprint');
+      journal.db.query('INSERT INTO composer_deliveries VALUES (?, ?, ?, ?, ?, ?, ?)').run(`draft_${id}`, 'drafts', `draft_${id}`, 'delivered', `thr_${id}`, `launch_${id}`, 'draft fingerprint');
     }
-    const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests']
+    const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests', 'composer_records', 'composer_deliveries', 'composer_assets']
       .map(table => (journal.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
     // Refuse the last delete to prove earlier dependent deletes cannot commit alone.
     journal.setSetting('spawn-origin:thr_gone', { reported: false });
@@ -465,13 +487,15 @@ describe('journal', () => {
     journal.setSetting('spawn-origin:thr_keep', { reported: true });
     journal.db.exec("CREATE TRIGGER interrupt_delete BEFORE DELETE ON threads BEGIN SELECT RAISE(ABORT, 'interrupted removal'); END");
     expect(() => journal.deleteThreads(['thr_gone'])).toThrow('interrupted removal');
-    expect(counts()).toEqual([2, 2, 2, 2, 2, 2]);
+    expect(counts()).toEqual([2, 2, 2, 2, 2, 2, 2, 4, 2]);
+    expect(journal.db.query("SELECT thread_id, fingerprint FROM composer_deliveries WHERE id = 'draft_gone'").get()).toEqual({ thread_id: 'thr_gone', fingerprint: 'draft fingerprint' });
     expect(journal.getSetting('spawn-origin:thr_gone')).toEqual({ reported: false });
     journal.db.exec('DROP TRIGGER interrupt_delete');
     journal.deleteThreads(['thr_gone']);
     journal.close();
     journal = new Journal(file);
-    expect(counts()).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(counts()).toEqual([1, 1, 1, 1, 1, 1, 1, 3, 1]);
+    expect(journal.db.query("SELECT thread_id, fingerprint FROM composer_deliveries WHERE id = 'draft_gone'").get()).toEqual({ thread_id: null, fingerprint: '' });
     expect(journal.getThread('thr_gone')).toBeNull();
     expect(journal.getThread('thr_keep')).not.toBeNull();
     expect(journal.getSetting('spawn-origin:thr_gone')).toBeUndefined();
@@ -545,8 +569,9 @@ test('single-turn reads and the session sum pick what a scan of every turn picke
       scanned.costUsd += turn.usage.costUsdEquivalent ?? 0;
       scanned.tokens += turn.usage.inputTokens + turn.usage.outputTokens + turn.usage.cacheReadTokens + turn.usage.cacheWriteTokens;
     }
-    const summed = journal.sessionUsage('thr_many', generation, except);
-    expect(summed.tokens).toBe(scanned.tokens);
-    expect(summed.costUsd).toBeCloseTo(scanned.costUsd, 12);
+    const { reported, groups } = journal.sessionUsage('thr_many', generation, except);
+    expect(reported).toBeNull();
+    expect(groups.reduce((sum, group) => sum + group.input_tokens + group.output_tokens + group.cache_read_tokens + group.cache_write_tokens, 0)).toBe(scanned.tokens);
+    expect(groups.reduce((sum, group) => sum + (group.cost ?? 0), 0)).toBeCloseTo(scanned.costUsd, 12);
   }
 });

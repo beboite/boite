@@ -9,12 +9,12 @@
  * of that member's own. docs/groups.md describes both.
  */
 import { randomUUID, verify } from 'node:crypto';
-import { hostname } from 'node:os';
 import { deviceAdmitInput, deviceHelloInput, DEVICE_LINK_JOIN, GROUP_TICKET_TTL_MS, PAIRING_ROLES, ungroupedInput } from '@boite/contracts';
 import type { DeviceHello, DeviceInvite, Group, GroupTicket, PairingRole, UngroupedData } from '@boite/contracts';
 import { invalidParams, messageOf, refused, unauthorized, unavailable } from '../errors.ts';
 import type { GroupStore } from '../group.ts';
 import { newToken } from '../ids.ts';
+import { machineName } from '../paths.ts';
 import { principalOf as principalOfRole, type ClientIdentity, type Identity } from '../sessions.ts';
 import { ticketAddresses } from './addresses.ts';
 import { deviceAdmissionInput, deviceId, deviceKey, deviceSigned, LEGACY_MAX, type DeviceKeyEntry } from './device-keys.ts';
@@ -41,7 +41,7 @@ export class GroupClients {
 
   /** A core in no group starts one named after itself: a device is always a device of a group. */
   private async ensureGroup(): Promise<Roster> {
-    if (this.group.roster === null) await this.group.create((hostname() || 'Boite').slice(0, 80));
+    if (this.group.roster === null) await this.group.create((machineName() || 'Boite').slice(0, 80));
     return this.group.require();
   }
 

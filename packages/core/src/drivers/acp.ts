@@ -199,13 +199,14 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       running.attach(turn, warmMs);
       return {
         done: turn.done,
-        ...(isGrok(ctx.provider) ? {} : { setPermissionMode: (mode: TurnContext['thread']['permissionMode']) => running.setPermissionMode(turn, mode) }),
+        ...(isGrok(ctx.provider) || ctx.protectedExecution ? {} : { setPermissionMode: (mode: TurnContext['thread']['permissionMode']) => running.setPermissionMode(turn, mode) }),
         ...(isGrok(ctx.provider) ? {} : { applySettings: (change: LiveTurnSettings) => running.applySettings(turn, change) }),
         stop: (): void => {
           running.stopTurn(turn);
         },
         // Plain ACP has no input while a prompt runs; Grok adds one.
         ...(isGrok(ctx.provider) ? { steer: (text: string) => running.steer(turn, text) } : {}),
+        ...(ctx.provider.id === 'opencode-v2' ? { steer: (text, attachments, onAccepted) => running.steerOpenCode(turn, text, attachments, onAccepted) } : {}),
       };
     },
 

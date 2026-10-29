@@ -404,7 +404,7 @@ test(
         }, 'image/png'));
       })()`,
     );
-    await page.waitFor(`document.querySelectorAll('${testid('composer-attachment')}').length === 1`, 10_000);
+    await page.waitFor(`document.querySelectorAll('${testid('composer-attachment')}:not([data-loading])').length === 1`, 10_000);
     await page.screenshot(ATTACHMENT_SCREENSHOT);
 
     await page.type(testid('composer-input'), 'what is this square');
@@ -625,8 +625,11 @@ test(
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
     await page.click(testid('settings-tab-machines'));
-    await page.waitFor(`document.querySelector('${testid('machine-card')}')`);
-    expect(await page.evaluate<string>(textOf('machine-card'))).toContain(core.url);
+    await page.waitFor(`document.querySelector('${testid('machine-card')} ${testid('machine-version')}')`);
+    // Its row names the machine and the version of the core it runs; the address stays under Advanced.
+    expect(await page.evaluate<string>(textOf('machine-version'))).toBe(corePackage.version);
+    expect(await page.evaluate<string>(textOf('machine-card-status'))).toBe('Connected');
+    expect(await page.evaluate<string>(`document.querySelector('${testid('machine-rename')}').value`)).not.toBe('');
 
     await page.click(testid('settings-back'));
     await page.waitFor(`document.querySelector('${testid('chat')}')`);

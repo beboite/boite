@@ -1,6 +1,7 @@
 // Boite telemetry Worker
 // =========================
 // Endpoints:
+//   POST /consent           - Anonymous explicit choice receipt
 //   POST /track             - Mode A or B events (batch)
 //   POST /forget            - GDPR art. 17, Mode B only
 //   POST /export            - GDPR art. 20, Mode B only
@@ -53,7 +54,7 @@ export interface Env {
 }
 
 // ─── Payload types ───────────────────────────────────────────────
-import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, subagentDetails, type EnhancedDetails } from '../../packages/contracts/src/telemetry.ts';
 
 export interface TelemetryEvent extends EnhancedDetails {
   name: string;
@@ -68,7 +69,7 @@ export interface TelemetryEvent extends EnhancedDetails {
   provider?: string;
 }
 
-const ALLOWED_EVENTS = new Set(["ping", "first_run", "app_launched", "session_ended", "thread_spawned", "project_added", "turn_finished"]);
+const ALLOWED_EVENTS = new Set(["ping", "first_run", "app_launched", "session_ended", "thread_spawned", "project_added", "turn_finished", "subagent_started"]);
 
 interface TrackPayload {
   mode: "A" | "B";
@@ -89,6 +90,10 @@ export default {
       switch (url.pathname) {
         case "/":
           response = json({ ok: true, service: "boite-telemetry" });
+          break;
+        case "/consent":
+          response =
+            request.method === "POST" ? await handleConsent(request, env, ctx) : methodNotAllowed();
           break;
         case "/track":
           response =
@@ -209,6 +214,30 @@ async function handleTrack(request: Request, env: Env, ctx: ExecutionContext): P
   return json({ ok: true, accepted: batch.length });
 }
 
+// /consent shares the usage endpoint's abuse controls, but no usage identity.
+async function handleConsent(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const uaErr = checkUa(request, env);
+  if (uaErr) return uaErr;
+  const blocked = await enforceRateLimit(env, env.RL_TRACK, clientIp(request), "/consent", ctx, true);
+  if (blocked) return blocked;
+  const payload = await readJsonCapped<{ mode?: unknown; receipt_id?: unknown }>(request, TRACK_BODY_MAX_BYTES);
+  if (payload instanceof Response) return payload;
+  if (!payload || typeof payload.mode !== "string" || !["off", "basic", "enhanced"].includes(payload.mode)) return json({ error: "bad_mode" }, 400);
+  if (!isUuidV4(payload.receipt_id)) return json({ error: "bad_receipt_id" }, 400);
+  const overGlobal = await enforceGlobalLimit(env, "/consent", ctx);
+  if (overGlobal) return overGlobal;
+  const sent = await posthogCapture(env, [{
+    event: "consent_choice", distinct_id: "anonymous-consent", uuid: payload.receipt_id,
+    timestamp: new Date().toISOString(),
+    properties: {
+      distinct_id: "anonymous-consent", $process_person_profile: false, ...privacyProperties(),
+      choice: payload.mode, receipt_id: payload.receipt_id,
+    },
+  }]);
+  if (!sent.ok) return json({ error: "upstream_unavailable" }, 502);
+  return json({ ok: true, accepted: 1 });
+}
+
 // ─── /forget (Mode B, GDPR art. 17) ──────────────────────────────
 
 const RGPD_BODY_MAX_BYTES = 4 * 1024;
@@ -316,6 +345,7 @@ const POSTHOG_BATCH_PATH = "/batch/";
 const POSTHOG_TIMEOUT_MS = 10000;
 
 export interface PostHogBatchItem {
+  uuid?: string;
   event: string;
   distinct_id: string;
   timestamp: string;
@@ -405,7 +435,7 @@ export function buildBatch(
   timestamp: string,
 ): PostHogBatchItem[] {
   const isModeB = mode === "B";
-  return events.filter(ev => ALLOWED_EVENTS.has(ev.name)).map((ev) => {
+  return events.filter(ev => ALLOWED_EVENTS.has(ev.name) && (isModeB || ev.name !== "subagent_started")).map((ev) => {
     const distinctId = ev.name === "ping" ? ids.pingIdentifier : ids.eventIdentifier;
     const providers = ["claude", "codex", "opencode", "opencode-v2", "pi", "grok", "antigravity", "antigravity-cli", "muse"];
     const properties: Record<string, unknown> = {
@@ -419,13 +449,14 @@ export function buildBatch(
     // Hosts older than the field send none; leave it absent rather than "other".
     const osVersion = publicOsVersion(ev.os_version);
     if (osVersion) properties.os_version = osVersion;
-    if (ev.name === "thread_spawned" || ev.name === "turn_finished") {
+    if (ev.name === "thread_spawned" || ev.name === "turn_finished" || ev.name === "subagent_started") {
       properties.provider = providers.includes(ev.provider ?? "") ? ev.provider : "other";
     }
     if (ev.name === "turn_finished") {
       properties.outcome = ["done", "error", "stopped"].includes(ev.outcome ?? "") ? ev.outcome : "other";
       if (isModeB) Object.assign(properties, enhancedDetails(ev as unknown as Record<string, unknown>));
     }
+    if (ev.name === "subagent_started") Object.assign(properties, subagentDetails(ev as unknown as Record<string, unknown>));
     if (["app_launched", "session_ended", "turn_finished"].includes(ev.name)) {
       const duration = count(ev.duration_ms);
       if (duration !== undefined) properties.duration_ms = Math.min(604800000, Math.round(duration));

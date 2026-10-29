@@ -438,6 +438,12 @@ test('fake inline views store the page with its bootstrap and open only for a vi
   });
   try {
     await client.call('files.write', { threadId: 't-trace', path: 'orbit.html', text: '<title>Orbit</title><svg viewBox="0 0 10 10"></svg>' });
+    const before = (await client.call('threads.get', { threadId: 't-trace' })).messages;
+    const draft = await client.call('artifacts.viewCheck', { threadId: 't-trace', path: 'orbit.html', script: 'throw new Error("never run outside an isolated browser")' });
+    expect(draft).toMatchObject({ checked: false, captures: [] });
+    expect(draft.errors.join(' ')).toContain('no available browser');
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before);
+    expect(createObjectURL).not.toHaveBeenCalled();
     const { message, checked } = await client.call('artifacts.view', { threadId: 't-trace', path: 'orbit.html' });
     expect(checked).toBe(false);
     const part = message.parts[0]!;
@@ -463,6 +469,24 @@ test('fake inline views store the page with its bootstrap and open only for a vi
     client.close();
     vi.stubGlobal('URL', OriginalURL);
   }
+});
+
+test('fake child compaction uses its type policy and preserves its task result', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('settings.set', { autoCompact: null, compactionByType: {
+    subagent: { autoCompact: { tokens: 1000, moments: [] }, backgroundCompaction: false },
+  } });
+  await client.call('delegation.configure', { threadId: 't-trace', config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+    profiles: [{ id: 'echo', name: 'Echo reviewer', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }],
+  } });
+  const child = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Review the boundary', requestId: 'compact-child' });
+  await vi.waitFor(async () => {
+    const thread = await client.call('threads.get', { threadId: child.thread.id });
+    expect(thread.turns.at(-1)).toMatchObject({ status: 'done', execution: { operation: 'compact' } });
+  });
+  const view = await client.call('delegation.get', { threadId: 't-trace' });
+  expect(view.agents[0]?.lastTurn?.execution?.operation).toBe('delegation');
+  expect(view.agents[0]?.result).toContain('Review the boundary');
 });
 
 test('fake delegation enforces family access and keeps request IDs idempotent', async ({ createClient }) => {
@@ -1338,6 +1362,37 @@ test('fake retention keeps indefinite deletions and applies a shorter saved dela
   await expect(client.call('threads.restore', { threadId: 't-trace' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
 });
 
+test('the fake token limit compacts independently of idle moments without simulating a prompt cache', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-trace';
+  const finished: Turn[] = [];
+  client.on('turn.finished', turn => { if (turn.threadId === threadId) finished.push(turn); });
+  const run = async (prompt: string) => {
+    const count = finished.length;
+    await client.call('turns.start', { threadId, prompt });
+    await vi.waitFor(() => expect(finished.length).toBeGreaterThan(count));
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+  };
+  const compactions = () => finished.filter(turn => turn.execution?.operation === 'compact');
+
+  await client.call('settings.set', { autoCompact: { tokens: null, moments: ['cache-expiry'] } });
+  await run('no fake cache');
+  expect(compactions()).toHaveLength(0);
+
+  await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['cache-expiry'] } });
+  await run('below the limit');
+  expect(compactions()).toHaveLength(0);
+
+  await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['cache-expiry'] } });
+  const preTokens = (await client.call('threads.get', { threadId })).context!.tokens;
+  await run('reached the independent limit');
+  expect(compactions()).toHaveLength(1);
+  expect(compactions()[0]).toMatchObject({ status: 'done', execution: { automatic: true } });
+  const thread = await client.call('threads.get', { threadId });
+  expect(thread.context!.tokens).toBeLessThan(preTokens);
+  expect(thread.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'compaction', trigger: 'auto' });
+});
+
 test('the fake core compacts by itself at the end of a turn once the threshold is reached', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const threadId = 't-trace';
@@ -1377,6 +1432,15 @@ test('the fake core compacts by itself at the end of a turn once the threshold i
   await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
   await client.connect();
   expect(await count()).toBe(1);
+
+  // With no token limit, opting into turn-end still compacts a small conversation.
+  await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
+  const unlimited = finished('compact');
+  done = finished();
+  await client.call('turns.start', { threadId, prompt: 'fifth' });
+  await done;
+  expect((await unlimited).execution?.automatic).toBe(true);
+  expect(await count()).toBe(2);
 });
 
 test('fake /btw admission, duplicate refusal and cancellation match the core without changing history', async ({ createClient }) => {

@@ -169,7 +169,14 @@ test('dropping URL text keeps the app open and still inserts text in the compose
     })()`);
     for (const phone of [false, true]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      // CDP's resize reply precedes the rendered frame used by native drag hit testing.
+      await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       for (const target of ['timeline', 'composer-input']) {
+        await page.waitFor(`(() => {
+          const element = document.querySelector('${id(target)}');
+          const r = element.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && element.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+        })()`);
         const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${id(target)}').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
         const data = { items: [{ mimeType: 'text/uri-list', data: text }, { mimeType: 'text/plain', data: text }], dragOperationsMask: 1 };
         for (const type of ['dragEnter', 'dragOver']) await page.send('Input.dispatchDragEvent', { type, ...point, data });
@@ -239,6 +246,29 @@ test('projects sink after losing recent threads and the sidebar follows a select
     await page.waitFor(`document.querySelector('${id('project')}')?.dataset.projectId === ${state}.openThread.projectId`);
     await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop === 0`);
     await capture(page, 'project-promotion-after.png');
+    // With projects at work on top, taller than the list, a prompt leads the open cards under them: its card comes into view.
+    // The Working section needs working grouping, off by default.
+    await page.click(id('grouping-options'));
+    await page.click(`${id('grouping-options-menu')} [data-value=working]`);
+    await page.click(id('grouping-options'));
+    // Conversation 5 and 7 to 23, named in the page: a test value never becomes code there.
+    const busy = `[5, ...Array.from({ length: 17 }, (_, i) => i + 7)].map(i => 'Conversation ' + i)`;
+    await page.evaluate(`(() => {
+      const s = ${state}, busy = ${busy};
+      s.threads = s.threads.map(t => busy.includes(t.title) ? {...t, status:'running'} : t.title === 'Conversation 6' ? {...t, lastUserMessageAt:Date.now() + 2000000} : t);
+    })()`);
+    await page.waitFor(`document.querySelector('${id('working-projects')} ${id('project')}') && document.querySelector('${id('project')}:not(${id('working-projects')} *)')?.dataset.projectId !== ${state}.openThread.projectId`);
+    await page.evaluate(`document.querySelector('${id('sidebar')} .scroll').scrollTop = 500`);
+    await page.waitFor(`document.querySelector('${id('sidebar')} .scroll').scrollTop >= 400`);
+    await page.evaluate(`(() => { const s = ${state}; s.threads = s.threads.map(t => t.id === s.openThread.id ? {...t, lastUserMessageAt:Date.now() + 3000000} : t); })()`);
+    const leader = `document.querySelector('${id('project')}:not(${id('working-projects')} *)')`;
+    await page.waitFor(`${leader}?.dataset.projectId === ${state}.openThread.projectId`);
+    await page.waitFor(`(() => {
+      const box = document.querySelector('${id('sidebar')} .scroll').getBoundingClientRect(), card = ${leader}.getBoundingClientRect();
+      return card.top >= box.top - 1 && card.bottom <= box.bottom + 1;
+    })()`);
+    await page.evaluate(`(() => { const s = ${state}, busy = ${busy}; s.threads = s.threads.map(t => busy.includes(t.title) ? {...t, status:'idle'} : t); })()`);
+    await page.waitFor(`!document.querySelector('${id('working-projects')}')`);
     await page.evaluate(`${state}.archive(${state}.openThread.id)`);
     await page.waitFor(`${state}.draft`);
     expect(await page.evaluate(`document.querySelector('${id('project')}').dataset.projectId === ${state}.draft.projectId`)).toBe(false);

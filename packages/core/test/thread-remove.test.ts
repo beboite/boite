@@ -108,7 +108,7 @@ test('a paired device deletes and restores a conversation, the deleted list stay
   const thread = harness.core.threads.require(threadId);
   harness.core.journal.putThread({ ...thread, agentSessionId: 'session-owned-by-agent' });
   await expect(await client.call('threads.remove', { threadId }).catch(error => error)).toMatchObject({
-    rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('persistent agent sessions'),
+    rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining("a bot's thread goes when the bot is archived"),
       data: { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' } },
   });
   expect(harness.core.journal.getThread(threadId)).not.toBeNull();

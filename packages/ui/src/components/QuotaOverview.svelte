@@ -11,7 +11,7 @@
   import { shownWindows } from '../lib/quota-display';
 
   let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
-    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
+    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect?: () => void;
     order?: string[]; onreorder?: (order: string[]) => Promise<boolean>;
   } = $props();
 
@@ -144,7 +144,7 @@
   {#if rows.length === 0}
     <div class="empty" data-testid="quota-empty">
       <p>{strings.quotas.empty}</p>
-      <button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>
+      {#if connect}<button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>
   {/if}
   <!-- The headline is the primary window, never the lowest one; credits still take over once any window runs dry. -->
@@ -227,9 +227,10 @@
   .summary.reorderable { cursor: grab; }
   .summary.reorderable .name { touch-action: none; }
   .dragging .summary { cursor: grabbing; }
-  /* Two windows a line on one grid, whatever the account: the bars of every row start and end together. */
+  /* Two windows per line; a lone window uses the full row. */
   .meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
   .mini-window { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
+  .mini-window:only-child { grid-column: 1 / -1; }
   .mini-label { width: 4.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
   /* The window the headline reads. */

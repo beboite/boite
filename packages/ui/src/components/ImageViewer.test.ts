@@ -242,3 +242,23 @@ test('a deferred picture drawn from its light copy opens its original in the vie
   expect(loadMessageAttachment).toHaveBeenCalledWith('t1', 'm2', 0);
   expect(query<HTMLImageElement>('[data-testid=image-viewer] img').alt).toBe('screen.png');
 });
+
+test('a cancelled deferred file download neither saves empty bytes nor reports an error', async () => {
+  const message: Message = {
+    id: 'cancelled-file', threadId: 't1', turnId: 'u1', role: 'user', createdAt: 1_790_000_000_000, state: 'complete',
+    parts: [{ type: 'file', name: 'notes.txt', mimeType: 'text/plain', data: '', dataDeferred: true, bytes: 12 }]
+  };
+  const reportError = vi.fn();
+  const loadMessageAttachment = vi.fn(async () => null);
+  const store = { loadMessageAttachment, reportError } as unknown as Store;
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  try {
+    mounted.push(mount(UserMessage, { target: document.body, props: { store, message, turn: undefined, accepted: false, responded: false } }));
+    flushSync();
+    query<HTMLAnchorElement>('[data-testid=file-part]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(loadMessageAttachment).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(download).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  } finally { download.mockRestore(); }
+});

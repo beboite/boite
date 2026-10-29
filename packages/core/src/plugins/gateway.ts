@@ -18,6 +18,7 @@ import { AGENT_ENV } from '@boite/contracts';
 import type { PluginGatewayState } from '@boite/contracts';
 import { stripAnsi } from '../ansi.ts';
 import { messageOf } from '../errors.ts';
+import { currentOs } from '../paths.ts';
 import type { SpawnedProcess } from '../procs.ts';
 import { CRASH_WINDOW_MS, RELAUNCH_DELAYS_MS, readRunChoice, writeRunChoice, type AppClock } from './apps.ts';
 
@@ -195,9 +196,9 @@ export class PluginGateways {
     return this.entries.get(id)?.status === 'running';
   }
 
-  /** The program run: the development one for Douane when set, else the installed binary. */
-  private executable(id: string): { binary: string; executable: string } | null {
-    const installed = this.host.installed(id);
+  /** The program run: the development one for Douane when set, else `candidate` or the installed binary. */
+  private executable(id: string, candidate?: { binary: string; executable: string }): { binary: string; executable: string } | null {
+    const installed = candidate ?? this.host.installed(id);
     const development = id === DOUANE_PLUGIN ? process.env[DOUANE_BINARY_ENV] : undefined;
     if (installed !== null && development) return { binary: development, executable: installed.executable };
     return installed;
@@ -214,17 +215,24 @@ export class PluginGateways {
     return port;
   }
 
-  /** Writes the configuration once, then only moves its `listen` line: Douane saves its own settings into the same file. */
-  private writeConfig(id: string, executable: string, port: number): string {
+  /**
+   * Writes the configuration once, then only moves its `listen` line: Douane
+   * saves its own settings into the same file. A release that renames the
+   * executable starts each attempt from the file of the one it `replaces`,
+   * which stays for a rollback to that release.
+   */
+  private writeConfig(id: string, executable: string, port: number, replaces: string | null): string {
     const dir = this.dataDir(id);
     mkdirSync(join(dir, 'auth'), { recursive: true });
     const file = join(dir, `${executable}.toml`);
-    if (!existsSync(file)) writeFileSync(file, configText(port));
+    const previous = replaces === null || replaces === executable ? null : join(dir, `${replaces}.toml`);
+    const source = previous !== null && existsSync(previous) ? previous : existsSync(file) ? file : null;
+    if (source === null) writeFileSync(file, configText(port));
     else {
-      const text = readFileSync(file, 'utf8');
+      const text = readFileSync(source, 'utf8');
       const listen = `listen = "127.0.0.1:${port}"`;
       const next = /^listen\s*=.*$/m.test(text) ? text.replace(/^listen\s*=.*$/m, listen) : text.replace(/^\[server\]\s*$/m, `[server]\n${listen}`);
-      if (next !== text) writeFileSync(file, next);
+      if (next !== text || source !== file) writeFileSync(file, next);
     }
     return file;
   }
@@ -241,7 +249,7 @@ export class PluginGateways {
     try { pid = (JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid; }
     catch { return; }
     rmSync(file, { force: true });
-    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 1 || process.platform !== 'linux') return;
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 1 || currentOs() !== 'linux') return;
     try {
       if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(config)) return;
       process.kill(pid, 'SIGTERM');
@@ -278,14 +286,16 @@ export class PluginGateways {
    * reason on its state and a relaunch scheduled like a crash). With
    * `relaunch` false a failure only leaves it `crashed`: a relaunch would
    * start it again while the caller reads why, and clear that reason.
+   * `candidate` is the program an update tries before its record names it,
+   * with the executable name of the release it `replaces`.
    */
-  async launch(id: string, relaunch = true): Promise<boolean> {
+  async launch(id: string, relaunch = true, candidate?: { binary: string; executable: string; replaces: string | null }): Promise<boolean> {
     if (this.closing) return false;
     const entry = this.entry(id);
     if (entry.running !== null) return entry.status === 'running';
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
-    const program = this.executable(id);
+    const program = this.executable(id, candidate);
     if (program === null) {
       Object.assign(entry, { status: 'stopped', error: null });
       this.host.changed(id);
@@ -295,7 +305,7 @@ export class PluginGateways {
     await this.stopOrphan(id, config);
     if (this.closing || entry.running !== null) return entry.status === 'running';
     const port = this.choosePort(id);
-    this.writeConfig(id, program.executable, port);
+    this.writeConfig(id, program.executable, port, candidate?.replaces ?? null);
     const threadId = `plugin:${id}:gateway`;
     let spawned: SpawnedProcess;
     try {

@@ -2,38 +2,42 @@
   import { tick, untrack } from 'svelte';
   import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
-  import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
-  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
-  import { attachFiles, receiveDroppedFiles } from '../lib/composer-attachments';
+  import { runCommand } from '../lib/commands.svelte';
+  import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { AgentsView, agentOfThread } from '../lib/agents.svelte';
+  import { composerPlaceholder } from '../lib/composer-placeholder';
+  import { receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
+  import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editComposerInput, insertImageReference, removeImageReferences, touchesImageReference, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, sameSend, sendShape, touchesImageReference, trackImageSend, type SendShape } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
-  import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
+  import { boxSelection, closeDraftUndo, copySelection, offerDraftUndo, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
-  import { unresolvedAssetId } from '../lib/draft-attachments';
-  import { focusWithin } from '../lib/focus';
+  import { isLoading, unresolvedAssetId } from '../lib/draft-attachments';
+  import { focusInitial, focusWithin } from '../lib/focus';
   import { touchScreen } from '../lib/device';
   import { ignoreQuestions, noteTyping, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { emptyBox, returnPrompt, sentPrompts, textEntries, type ComposerState, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
-  import { fill, strings } from '../lib/strings';
+  import { strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
-  import { workspace } from '../lib/workspace.svelte';
+  import { machineName, workspace } from '../lib/workspace.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
   import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
   import ComposerIntent from './ComposerIntent.svelte';
   import ComposerQueue from './ComposerQueue.svelte';
+  import ComposerSpeechPreview from './ComposerSpeechPreview.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
   import SideAnswer from './SideAnswer.svelte';
   import { ComposerSide } from '../lib/composer-side.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
-  import { chipChoice, sendToTarget, type ComposerTarget } from '../lib/composer-target';
+  import { chipChoice, queuedChoice, sendToTarget, type ComposerTarget } from '../lib/composer-target';
 
   /** A centred draft drops the bottom padding so its heading and input form one block. A `target` makes it an agent's box. */
   let { store, centered = false, target = null }: { store: Store; centered?: boolean; target?: ComposerTarget | null } = $props();
@@ -42,6 +46,7 @@
   const side = new ComposerSide();
   $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(target?.key ?? store.openThread?.id ?? DRAFT_STASH_KEY);
+  $effect(() => { const left = key; if (left === DRAFT_STASH_KEY) void store.draft?.id; return () => closeDraftUndo(left); }); // A phone's Undo toast ends as the box moves to another draft, new conversations included.
   /** The thread this box sends to: none when it speaks to an agent, whatever thread is open behind it. */
   let thread = $derived(target ? null : store.openThread);
   let composer = $derived(store.composerStates[key]);
@@ -53,7 +58,11 @@
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
   let previewReferences = $derived(composer?.previewReferences ?? []);
   let choice = $state<Choice | null>(null);
-  let picking = $state(false), readingFiles = $state(0);
+  let picking = $state(false);
+  /** Files still being read into this prompt: their tiles show, Send waits for them. */
+  let loadingFiles = $derived(attachments.some(isLoading));
+  /** Send pressed while files were still being read: it goes once they are ready, unless the user types on. */
+  let sendWhenLoaded = $state.raw<{ store: Store; key: string; state: ComposerState; shape: SendShape; nextDraft: boolean } | null>(null);
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
@@ -64,6 +73,8 @@
   let highlightedImage = $state<Attachment | null>(null);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
+  let recallRead = $state<Promise<boolean> | null>(null);
+  $effect(() => { if (recall === null) recallRead = null; });
   /** The box has the keyboard: one of the two things that open the slash menu. */
   let focused = $state(false);
   /** Escape shuts the menu on text it keeps, until that text changes again. */
@@ -90,12 +101,12 @@
     choice = chipChoice(store, thread, target);
   });
 
-  /** A new draft or thread gets the keyboard; reloading the same thread preserves focus. */
+  /** Desktop drafts take the keyboard; touch navigation leaves it closed. */
   $effect(() => {
     key;
     store.draft;
     recall = null;
-    box?.focus({ preventScroll: true });
+    focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
@@ -116,12 +127,12 @@
     }
   });
   /**
-   * A thread whose machine dropped still takes prompts: they wait in its queue,
-   * which the store keeps on the device and sends once the machine is back.
-   * A new thread needs the core to exist, so a draft waits for the machine.
+   * A thread whose machine dropped still takes prompts: they wait in its queue on the device and go out
+   * once the machine is back. A draft's queue starts its conversation then (`launchQueuedDrafts`); an
+   * incognito draft is never kept on the device, so it waits for the machine.
    */
-  let offline = $derived(store.connection !== 'ready' && thread !== null && !store.draft);
-  let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
+  let offline = $derived(!target && store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
+  let machineLabel = $derived.by(() => { const found = workspace.machines.find((machine) => machine.store === store); return found ? machineName(found) : strings.machines.local; });
   /**
    * A question waiting for a written answer makes the box its free field: Send
    * answers it with the card's picks, the text and the attachments
@@ -129,9 +140,9 @@
    */
   let reply = $derived(target ? null : replyTarget(store));
   // An answer counts the card's picks, needs no model and cannot wait in the outbox.
-  let canSend = $derived(
+  let sendable = $derived(
     (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&
-      readingFiles === 0 &&
+      recallRead === null &&
       !attachments.some(unresolvedAssetId) &&
       (reply !== null || choice !== null || target !== null) &&
       (store.connection === 'ready' || (offline && !reply)) &&
@@ -140,21 +151,19 @@
       // A prompt on its way holds back an edit, an answer and a draft's second prompt; on a thread the next one queues.
       !(composer?.sending && (composer.editing || reply !== null || !thread))
   );
+  let canSend = $derived(sendable && !loadingFiles);
+  $effect(() => {
+    const waiting = sendWhenLoaded;
+    if (waiting && !loadingFiles) untrack(() => { sendWhenLoaded = null; if (waiting.store === store && waiting.key === key && waiting.state === store.composerStates[key] && sameSend(waiting.shape, sendShape(text, attachments))) void submit(waiting.nextDraft); });
+  });
+  // Another conversation or machine on screen: the waiting send stays with the box it was pressed in, unsent.
+  $effect(() => { void key; void store; untrack(() => { sendWhenLoaded = null; }); });
 
-  // A new conversation asks what the user wants done; one under way names who reads the message.
-  let placeholder = $derived(
-    target
-      ? target.placeholder
-      : reply
-      ? strings.composer.replyPlaceholder
-      : offline
-      ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
-      : !thread && store.draft
-      ? strings.composer.placeholderNew
-      : store.openProject && provider
-        ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
-        : strings.composer.placeholderNoProject
-  );
+  /** A persistent agent's own thread: the box is addressed to it by name, and its model, effort and mode live in its settings, not on chips. */
+  const bot = $derived(thread?.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, thread.id)?.name ?? null : null);
+
+  let placeholder = $derived(composerPlaceholder({ target, replying: !!reply, bot, offline, onThread: !!thread, draft: !!store.draft,
+    machine: machineLabel, project: store.openProject?.name ?? null, provider: provider?.name ?? null }));
 
   // -- the slash menu -----------------------------------------------------------
   // `/` on an empty box, then the word being typed: nothing else opens it, and a
@@ -187,15 +196,20 @@
   $effect(() => mentions.follow(mentionQuery, mentionProject, store.client));
 
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(thread?.commands ?? []));
+  let skillItems = $derived(skillSlashItems(store.brainCommands, thread?.commands ?? [], Object.keys(CHIP_COMMANDS)));
+
+  $effect(() => {
+    if (slashOpen) void store.loadBrainCommands();
+  });
 
   /** Boite's prompt controls follow the agent's own commands. */
   let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!thread && !!provider && supportsSideQuestions(provider.protocol)));
 
   /** Agent commands first, so a tie goes to the agent's own. */
-  let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
+  let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...skillItems, ...boiteItems]));
   let commandToken = $derived.by(() => {
     const token = target ? undefined : /^\/[^\s]+/.exec(text)?.[0];
-    return token && [...agentItems, ...boiteItems].some(item => item.label === token) ? token : '';
+    return token && [...agentItems, ...skillItems, ...boiteItems].some(item => item.label === token) ? token : '';
   });
   let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
   let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
@@ -277,14 +291,16 @@
     }
     // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
     const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
-    const state = stateForInput(); noteTyping(store, key);
+    const state = stateForInput(); noteTyping(store, key); closeDraftUndo();
+    const prior = { text: state.text, attachments: state.attachments.length };
+    // Still writing: a send pressed while files were loading waits for the next Send.
+    sendWhenLoaded = null;
     // The state still holds the text before this edit: that is the step undo returns to.
-    if (!nativeUndo) {
-      const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
-      recordEdit(state, kind, before, input.data ?? null);
-    }
+    const kind = nativeUndo ? null : touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
+    if (kind) recordEdit(state, kind, before, input.data ?? null);
     const whole = editComposerInput(store, key, element, nativeUndo, pendingEdit);
     settled(state);
+    if (kind === 'big' && !state.text && !state.attachments.length) offerDraftUndo(editing(), prior, strings.composer.draftCleared);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
@@ -316,7 +332,7 @@
   /** What the composer's own edits write to (`lib/composer-editing.ts`). An answer's files reach the agent as paths, so it takes images whatever the provider reads. */
   function editing(): EditingHost {
     return { store, key, box, state: stateForInput(), provider: reply ? null : provider,
-      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); } };
+      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); }, shown: () => key };
   }
 
   /**
@@ -342,6 +358,7 @@
 
   async function submit(nextDraft = false) {
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
+    if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, state: stateForInput(), shape: sendShape(text, attachments), nextDraft }; return; }
     const prompt = text;
     const images = attachments;
     const references = previewReferences;
@@ -365,13 +382,14 @@
     if (side.submit(inputStore, inputKey, prompt)) { requestAnimationFrame(grow); return; }
     const editedThread = state.editing ? inputStore.openThread : null;
     const edited = state.editing ? await rewindComposerEdit(inputStore, inputKey, state, prompt, images, references) : null; if (edited === false) return;
-    // A queue that still holds something takes this prompt too, whatever the
-    // thread's status: sending it on its own would put it ahead of prompts the
-    // user typed first. Sending is also how he resumes a queue a refusal paused.
+    // The queue keeps this prompt behind earlier entries; sending resumes a paused queue.
     if (!editedThread && (inputStore.busy || state.queued.length > 0 || state.sending || offline)) {
       // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
-      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) },
-        offline ? { choice: $state.snapshot(sendChoice) } : undefined);
+      // Every queued prompt keeps the chips it was written with: a later change of the picker does not redirect it.
+      // Chips that only show what the thread resolves to keep the thread's own selection, so the prompt can steer a turn left on the agent's default.
+      const kept = queuedChoice(inputStore, inputStore.openThread?.id === inputKey ? inputStore.openThread : null, $state.snapshot(sendChoice));
+      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: kept, ...(references.length ? { previewReferences: references } : {}) },
+        offline ? { choice: { ...kept } } : undefined);
       state.editing = null;
       emptyBox(state);
       resetHistory(state);
@@ -385,8 +403,7 @@
     const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
     // Undo never brings back a prompt that left.
     if (local) { emptyBox(state); resetHistory(state); recall = null; requestAnimationFrame(grow); }
-    // A rewind can finish after navigation: the replacement belongs to the
-    // captured thread and machine, whichever conversation is on screen now.
+    // A rewind's replacement belongs to the captured thread and machine, even after navigation.
     const accepted = await (editedThread
       ? inputStore.send(prompt, inputKey, images, references)
       : nextDraft
@@ -413,25 +430,13 @@
   // Three ways in, one path: the attach button, pasted files,
   // and files dropped on the box. `lib/attachments.ts` owns the caps.
 
-  /** Reads files one at a time into this input's attachments (`lib/composer-attachments.ts`). */
-  async function take(files: File[]) {
+  /** Each file shows at once as a loading tile, its `[Image N]` at the caret, and is read behind the box. */
+  function take(files: File[]) {
     if (files.length === 0) return;
-    const state = stateForInput();
+    track();
     // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
-    const attachmentProvider = reply ? null : provider;
-    const inputKey = key;
-    const inputStore = store;
-    readingFiles += 1;
-    try {
-      // Each picture that arrives is one undo step, its reference in the text included.
-      const holder = {
-        get attachments() { return state.attachments; },
-        set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; }
-      };
-      await attachFiles(inputStore, files, holder, attachmentProvider, () => {
-        if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
-      });
-    } finally { readingFiles -= 1; }
+    const taken = stateForInput();
+    void takeFiles(store, taken, files, reply ? null : provider, () => { if (sendWhenLoaded?.state === taken) sendWhenLoaded = null; });
   }
 
   function onpaste(event: ClipboardEvent) {
@@ -463,12 +468,12 @@
   function removeAttachment(at: number) {
     const state = stateForInput();
     checkpoint(state);
-    // The keyboard's remove button goes with its chip, so the focus comes back to
-    // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
+    // The keyboard's remove button goes with its chip, so focus returns to the box; a tap leaves it, which would open a phone's keyboard.
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
-    if (refocus) box?.focus({ preventScroll: true });
+    if (!state.text.trim() && !state.attachments.length) offerDraftUndo(editing(), { text: '', attachments: 1 }, strings.composer.draftCleared);
+    if (refocus) focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
   /**
@@ -481,8 +486,7 @@
   }
 
   /** Nothing in the box and nothing on its way into it: what a second Enter needs. */
-  let boxEmpty = $derived(text.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0 &&
-    readingFiles === 0 && !dictating);
+  let boxEmpty = $derived(text.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0 && !dictating);
 
   /**
    * What Send now does to the queue: steer the running turn, resume it
@@ -519,19 +523,26 @@
     return true;
   }
 
-  /**
-   * A sent prompt back in the box. On a thread at rest it comes back as the
-   * message to edit, pictures and files included: sending replaces it and
-   * what followed. A running thread only recalls the words, to queue again.
-   * Edit mode asks what `MessageList`'s `branchable` asks, the rules of a rewind.
-   */
+  /** An idle thread recalls a fully hydrated edit; a running thread recalls words to queue. */
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
-    const edit = !store.busy && state.queued.length === 0 && thread !== null && !thread.agentSessionId && thread.projectId !== null;
+    const edit = !store.busy && state.queued.length === 0 && thread !== null && (!!thread.agentSessionId || thread.projectId !== null);
+    if (edit) {
+      const owner = store, inputKey = key, at = recall;
+      const message = thread?.messages.find(message => message.id === prompt.id);
+      if (!message) return;
+      checkpoint(state);
+      const loading = editWhole(owner, inputKey, message, () => store === owner && key === inputKey && recall === at && recallRead === loading);
+      recallRead = loading;
+      void loading.then(applied => {
+        if (applied) { caret = state.text.length; requestAnimationFrame(grow); }
+      }).finally(() => { if (recallRead === loading) recallRead = null; });
+      return;
+    }
+    recallRead = null;
     restorePrompt(prompt.text, prompt.previewReferences);
-    if (edit) state.attachments = prompt.attachments;
-    else if (state.editing) state.attachments = [];
-    state.editing = edit ? prompt.id : null;
+    if (state.editing) state.attachments = [];
+    state.editing = null;
   }
 
   /** Leaves edit mode: the box empties, nothing was rewound. */
@@ -541,9 +552,9 @@
     state.editing = null;
     state.attachments = [];
     state.previewReferences = [];
-    recall = null;
+    recall = null; recallRead = null;
     put('');
-    box?.focus({ preventScroll: true });
+    focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
   function restoreQueued(at: number) {
@@ -607,13 +618,9 @@
 
   /** Prompt commands complete the box; other commands execute and close the menu. */
   function pickSlash(item: PaletteItem) {
-    if (item.id === 'goal' || item.id === 'goal2' || item.id === 'loop' || item.id === 'btw') {
-      put(`/${item.id} `);
-      box?.focus({ preventScroll: true });
-      return;
-    }
-    if (isAgentCommand(item)) {
-      put(`/${item.id.slice(AGENT_PREFIX.length)} `);
+    const completion = slashCompletion(item);
+    if (completion !== null) {
+      put(completion);
       box?.focus({ preventScroll: true });
       return;
     }
@@ -696,7 +703,7 @@
       // question away with the turn. Skip and the stop button still end it.
       event.preventDefault();
       if (target) target.stop?.(); else void store.stop();
-    } else if (event.key === 'Escape' && composer?.editing) {
+    } else if (event.key === 'Escape' && (composer?.editing || recallRead !== null)) {
       event.preventDefault();
       cancelEdit();
     }
@@ -718,20 +725,25 @@
     {#if composer && composer.queued.length > 0}
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        paused={composer.paused} sending={composer.sending} outgoing={composer.outgoing ?? 0} connected={store.connection === 'ready'} machine={machineLabel}
+        paused={composer.paused} sending={composer.sending} outgoing={composer.outgoing ?? 0} connected={store.connection === 'ready'} machine={machineLabel} starts={!thread}
         {sendNow}
         onrestore={restoreQueued} onremove={(at) => store.removeQueued(key, at)} onretry={(at) => store.retryQueued(key, at)}
         onsendnow={sendQueuedNow} />
     {/if}
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
+  <div class="composer" class:dictating data-testid="composer" tabindex="-1" {ondragover} {ondrop} onkeydown={(event) => {
+    if (event.target !== event.currentTarget || event.key !== 'Escape') return;
+    // The touch focus target shares the box's Escape handling, including pending questions.
+    onkeydown(event);
+    event.stopPropagation();
+  }}>
     {#if !target}<ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />{/if}
     <ComposerIntent editing={!!composer?.editing} reply={reply?.async && reply.id === repliesOf(store).docked ? null : reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
 
-    {#if side.current && side.current.threadId === thread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
+    {#if side.current && side.current.threadId === thread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]')); }} />{/if}
     {#if attachments.length > 0}
-      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus({ preventScroll: true })} />{/key}
+      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'))} />{/key}
     {/if}
 
     <div class="input-wrap">
@@ -789,14 +801,9 @@
       onhover={(index) => (mentions.at = index)}
     />
 
-    {#if speechStatus}
-      <div class="speech-preview" class:error={speechError} data-testid="dictation-preview">
-        <span class="speech-status" role={speechError ? 'alert' : 'status'}>{speechStatus}</span>
-        {#if speechPreview}<p aria-live="polite" aria-atomic="true">{speechPreview}</p>{/if}
-      </div>
-    {/if}
+    <ComposerSpeechPreview status={speechStatus} preview={speechPreview} error={speechError} />
 
-    <ComposerBar bind:this={toolbar} {store} {key} {target} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {target} {bot} {provider} canSend={sendable} waiting={sendWhenLoaded !== null} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}
@@ -808,10 +815,6 @@
 </div>
 
 <style>
-  .speech-preview { padding: 0 14px 6px; min-width: 0; }
-  .speech-status { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .speech-preview.error .speech-status { color: var(--color-danger); }
-  .speech-preview p { margin: 2px 0 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); overflow-wrap: anywhere; max-height: 3em; overflow-y: auto; }
   .composer-wrap {
     position: relative;
     flex: none;
@@ -887,8 +890,6 @@
 
   @media (max-width: 720px) {
     .composer { --composer-rest: var(--shadow-e1); border-radius: var(--radius-xl); }
-    .speech-preview { padding: 0 16px 8px; }
-    .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
     .composer-wrap, .composer-wrap.centered {
       padding: 8px 12px max(10px, env(safe-area-inset-bottom));

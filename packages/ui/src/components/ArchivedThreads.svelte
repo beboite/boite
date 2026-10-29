@@ -6,6 +6,7 @@
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, archivedTime } from '../lib/archive';
+  import { projectThread } from '../lib/thread-rows';
   import { SnapshotReads } from '../lib/store/snapshot-reads';
   import { canDeleteThread } from '../lib/thread-removal';
   import { ThreadRestore } from '../lib/thread-restore.svelte';
@@ -60,7 +61,7 @@
 
   function reconcile(summary: ThreadSummary) {
     const held = rows.has(summary.id);
-    const keep = !removed.has(summary.id) && !summary.parentThreadId &&
+    const keep = !removed.has(summary.id) && (!summary.parentThreadId || projectThread(summary, store.threads.find(t => t.id === summary.parentThreadId))) &&
       (summary.archived || (held && (lock.restoring === summary.id || lock.deleting === summary.id || restored.includes(summary.id))));
     reads.change(summary.id, keep ? summary : null);
     if (threads === null) return;

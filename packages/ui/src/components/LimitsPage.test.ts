@@ -6,6 +6,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
 import LimitsPage from './LimitsPage.svelte';
+import { phoneWidth } from '../test/phone-width';
 import { FakeClient } from '../lib/fake-client';
 import { quotaReader, REFRESH_SHOWN_MS } from '../lib/quota-reader.svelte';
 
@@ -86,6 +87,21 @@ test('a paired device draws the limit bars the core holds, with no refresh, swit
   expect(document.querySelector('[data-testid="limits-refresh"]')).toBeNull();
   expect(document.querySelector('[data-testid="limits-tracked"]')).toBeNull();
   expect(call).toHaveBeenCalledWith('quotas.list', expect.objectContaining({ refresh: false }));
+});
+
+test('on a phone, which leaves Providers to the desktop, no provider read says so with no way to Providers', async () => {
+  const restore = phoneWidth();
+  try {
+    const call = vi.fn(async () => []);
+    mounted = mount(LimitsPage, { target: document.body, props: {
+      store: { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'phone-empty-core', accounts: [] } as unknown as Store,
+    } });
+    await settle();
+    expect(document.querySelector('[data-testid="limits-empty"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="limits-empty"] button')).toBeNull();
+  } finally {
+    restore();
+  }
 });
 
 test('a core that refuses a paired device its limits asks for an update instead of an error', async () => {
@@ -194,10 +210,10 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
   const open = vi.spyOn(window, 'open').mockReturnValue(null);
   mounted = mount(LimitsPage, { target: document.body, props: { store } });
   try {
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(4));
     expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
     const groups = [...document.querySelectorAll<HTMLElement>('[data-testid="gateway-quotas"]')];
-    expect(groups.map(group => group.dataset.provider)).toEqual(['claude', 'codex', 'antigravity']);
+    expect(groups.map(group => group.dataset.provider)).toEqual(['claude', 'codex', 'antigravity', 'meta']);
     expect(groups[0]!.querySelector('h2')!.textContent).toContain('via Douane');
     const claude = groups[0]!.querySelectorAll('[data-testid="usage-limit-provider"]');
     expect(claude).toHaveLength(2);
@@ -207,6 +223,9 @@ test('Douane quotas are native cards grouped by provider, with plan, status, cre
     expect(groups[1]!.querySelector('[data-testid="usage-limit-credit"]')!.textContent).toMatch(/Credits.*62,500 credits/);
     // An average stands for its accounts: Boite names it, in the app's language.
     expect(groups[2]!.querySelector('strong')!.textContent).toBe('Antigravity · 10 accounts');
+    // A connected native Muse subscription can have no observed quota window yet.
+    expect(groups[3]!.textContent).toContain('Muse Code subscription');
+    expect(groups[3]!.querySelectorAll('[role="meter"]')).toHaveLength(0);
     // The gateway's entries are always read: no monitor switch for them.
     expect(document.querySelector('[data-testid="quota-monitor"][data-account-id^="proxy:"]')).toBeNull();
     document.querySelector<HTMLButtonElement>('[data-testid="subscription-proxy-open"]')!.click();
@@ -228,7 +247,7 @@ test('a paired phone shows Douane as native bars, never its embedded dashboard',
   expect(phone.owner).toBe(false);
   mounted = mount(LimitsPage, { target: document.body, props: { store: phone } });
   try {
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(4));
     expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
     expect(document.querySelector('iframe')).toBeNull();
     expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
@@ -282,4 +301,65 @@ test('the automatic resume switch saves the setting and a refusal puts it back',
   await settle();
   expect(saveSettings).toHaveBeenCalledWith({ autoResumeLimitedThreads: true });
   expect(toggle.checked).toBe(false);
+});
+
+test('the bell of a card, a gateway entry included, sets several shares left per period, presets and custom ones', async () => {
+  const calls: unknown[] = [];
+  const rows: AccountQuota[] = [{
+    ...quota('Claude'), accountId: 'proxy:claude:max', label: 'Claude Max', providerName: 'Claude',
+    windows: [{ id: 'five-hour', label: '5 hours', usedPercent: 40, resetsAt: null }, { id: 'credits', label: 'Credits', usedPercent: 10, resetsAt: null }],
+    gateway: { kind: 'douane', entryId: 'max', display: 'accounts', plan: null, accounts: 1, status: 'ready', credits: [] },
+  }];
+  const call = vi.fn(async (method: string, params: unknown) => {
+    if (method === 'quotas.alert') {
+      calls.push(params);
+      const { period, thresholds } = params as { period: 'fiveHour'; thresholds: number[] };
+      rows[0] = { ...rows[0]!, alerts: thresholds.length ? { [period]: [...thresholds].sort((a, b) => b - a) } : undefined };
+      return structuredClone(rows);
+    }
+    if (method === 'quotas.list') return structuredClone(rows);
+    if (method === 'subscriptionProxy.quotas') return { status: 'ready', providers: [], updatedAt: null, checkedAt: null, error: null };
+    throw new Error(method);
+  });
+  const store = { client: { call, on: () => () => {} }, connection: 'ready', owner: false, endpointUrl: 'alert-core',
+    settings: { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: 'http://douane.test/v1', dashboardUrl: null } } } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  const bell = () => document.querySelector<HTMLButtonElement>('[data-testid="quota-alert-bell"]')!;
+  const chip = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="quota-alert-${id}"]`)!;
+  expect(bell().classList.contains('set')).toBe(false);
+  bell().click();
+  await settle();
+  // Credits have no period: the 5-hour window is the only line.
+  expect([...document.querySelectorAll('[data-testid="quota-alerts"] .period')].map((node) => node.textContent)).toEqual([strings.quotas.alertPeriods.fiveHour]);
+  chip('fiveHour-25').click();
+  await settle();
+  chip('fiveHour-10').click();
+  await settle();
+  expect(calls).toEqual([{ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25] }, { accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10] }]);
+  expect(['fiveHour-50', 'fiveHour-25', 'fiveHour-10'].map((id) => chip(id).getAttribute('aria-pressed'))).toEqual(['false', 'true', 'true']);
+  expect(bell().classList.contains('set')).toBe(true);
+
+  // Custom adds its own chip; out of range saves nothing; a click on a custom chip removes it.
+  chip('fiveHour-custom').click();
+  await settle();
+  const input = chip('fiveHour-input') as unknown as HTMLInputElement;
+  input.value = '150';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(calls).toHaveLength(2);
+  chip('fiveHour-custom').click();
+  await settle();
+  const again = chip('fiveHour-input') as unknown as HTMLInputElement;
+  again.value = '5';
+  again.dispatchEvent(new Event('input', { bubbles: true }));
+  again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10, 5] });
+  expect(chip('fiveHour-5').getAttribute('aria-pressed')).toBe('true');
+  chip('fiveHour-5').click();
+  await settle();
+  expect(calls.at(-1)).toEqual({ accountId: 'proxy:claude:max', period: 'fiveHour', thresholds: [25, 10] });
+  expect(chip('fiveHour-5')).toBeNull();
 });

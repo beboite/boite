@@ -59,6 +59,12 @@ export interface Group {
   devices: GroupDevice[];
   /** The id of the device that asked, when a device asked. */
   device?: string;
+  /**
+   * The member whose settings every other member follows (`SYNCED_SETTINGS`,
+   * keybindings, brain switches), the same for every member. Absent: each
+   * machine keeps its own. A core before `features.settingsHome` leaves it out.
+   */
+  settingsHome?: string;
 }
 
 /**
@@ -217,6 +223,8 @@ export interface GroupRpcMethods {
   'group.create': { params: { name: string }; result: Group };
   /** Rename the shared group; owner only. */
   'group.rename': { params: { name: string }; result: Group };
+  /** The member every other one takes its settings from, a live member's id, or null for none. Every member hears of it. Owner only. */
+  'group.settingsHome': { params: { coreId: string | null }; result: Group };
   /** A one-time invitation another machine joins with. Owner only. */
   'group.invite': { params: Record<string, never>; result: GroupInvite };
   /** Joins the group an invitation names: this core calls the member that minted it. Owner only. */

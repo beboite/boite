@@ -35,13 +35,32 @@ export function rpcUrl(coreUrl: string): string {
  */
 export const IDLE_PROBE_MS = 25_000;
 /**
- * How long a probe waits for any frame at all. The idle probe only goes out
- * while no call waits for its answer: frames arrive in order, so behind a large
- * answer still downloading on a slow link, the probe's answer would come too
- * late and a healthy socket would read as dead. A call's own 120 s timeout
- * decides for a socket that carries one.
+ * How long a probe waits for any frame at all, the same 10 s a new socket gets
+ * to say hello. Frames arrive in order, so a probe's answer queues behind a long
+ * answer still downloading; a remote client asks the core to slice every answer
+ * (`progress`), and each 64 KiB slice counts as a frame, so a slow link keeps
+ * answering while a dead one stays silent. Until 2026-10-22 a call waiting kept
+ * the probe away and a link that dropped under an open conversation read as
+ * connected for the two minutes of that call's timeout.
  */
-export const PROBE_DEADLINE_MS = 15_000;
+export const PROBE_DEADLINE_MS = 10_000;
+/**
+ * A call on a remote socket to a core that slices its answers
+ * (`chunkedAnswers`) that hears no frame at all for this long sends a probe:
+ * the click on a conversation of a machine whose link died shows the machine
+ * offline within this and the probe's deadline. A socket that answers, or
+ * carries any event meanwhile, is not asked. Older cores keep the call's own
+ * 120 s timeout.
+ */
+export const QUIET_CALL_MS = 3_000;
+/**
+ * The slowest upload a probe still waits for: its `hello` queues behind the
+ * bytes this client sent since the last frame came back, past the first 64 KiB,
+ * so 2 MiB of pictures give it 62 s more. Answers need no such allowance: they come in 64 KiB
+ * slices, so a download faster than about 6.4 KiB/s lands one within the 10 s
+ * deadline.
+ */
+export const UPLOAD_FLOOR_BYTES_PER_S = 32 * 1024;
 /** How long `resume()` gives the socket it already has before replacing it. */
 export const RESUME_PROBE_MS = 4_000;
 

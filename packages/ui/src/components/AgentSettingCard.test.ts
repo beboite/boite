@@ -26,7 +26,7 @@ async function setup(): Promise<{ client: FakeClient; store: Store; agent: Agent
   store.attach(client);
   await store.connect();
   await store.open('t-trace');
-  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+  const agent = await client.call('agents.profile.save', { value: { name: 'Mira', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [],
     selection: { providerId: 'claude', accountId: 'a-claude-main', model: null, effort: null, permissionMode: 'default' } } });
   return { client, store, agent };
 }
@@ -96,17 +96,17 @@ test('unticking one of two projects applies the rest; the card reads changed and
 test('Apply as proposed reads applied; Refuse reads refused and leaves the agent alone', async () => {
   const { client, store, agent } = await setup();
   try {
-    const first = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'maxRunMinutes', value: 30, reason: 'Builds take longer' });
+    const first = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'subagents', value: false, reason: 'One task at a time' });
     card(store, await asked(store, first.questionId));
-    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('10 min');
-    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('30 min');
+    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('On');
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('Off');
     query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
     await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === first.questionId)).toBe(false));
-    expect((await client.call('agents.runtime.get', { agentId: agent.id })).maxRunMinutes).toBe(30);
+    expect((await client.call('agents.runtime.get', { agentId: agent.id })).subagents.enabled).toBe(false);
     await verdictRow(store, first.questionId);
     expect(query('[data-testid=agent-setting-card]').getAttribute('data-outcome')).toBe('applied');
     expect(query('[data-testid=agent-setting-verdict]').textContent).toBe('Applied');
-    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Maximum minutes per execution: 30 min');
+    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Subagents: Off');
 
     await unmount(mounted!);
     const second = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'autoMemory', value: false, reason: 'The notes are noise' });
@@ -124,6 +124,25 @@ test('Apply as proposed reads applied; Refuse reads refused and leaves the agent
   }
 });
 
+test('a model card names the provider and the model, a probed model id that holds a slash included', async () => {
+  const { client, store, agent } = await setup();
+  try {
+    await store.probeModels('opencode', 'a-opencode');
+    const { questionId } = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'model', value: 'opencode/anthropic/claude-sonnet-5', reason: 'Cheaper for reviews' });
+    const question = await asked(store, questionId);
+    card(store, question);
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('OpenCode · Claude Sonnet 5');
+    // A card drawn before cards named the provider holds an id of the bot's own (Claude's): Apply reads it so, and so does the card.
+    await unmount(mounted!);
+    const { modelRefs: _, ...legacy } = question.agentSetting!;
+    card(store, { ...question, agentSetting: legacy });
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('opencode/anthropic/claude-sonnet-5');
+  } finally {
+    store.detach();
+    client.close();
+  }
+});
+
 test('an archived agent closes its card without an answer', async () => {
   const { client, store, agent } = await setup();
   try {
@@ -134,6 +153,34 @@ test('an archived agent closes its card without an answer', async () => {
     await verdictRow(store, questionId);
     expect(query('[data-testid=agent-setting-card]').getAttribute('data-state')).toBe('closed');
     expect(query('[data-testid=agent-setting-verdict]').textContent).toBe('Closed without an answer');
+  } finally {
+    store.detach();
+    client.close();
+  }
+});
+
+test('an instructions card shows the proposed text; an archive card applied reads applied, not closed', async () => {
+  const { client, store, agent } = await setup();
+  try {
+    const rules = 'Guard the release.\nCheck every gate.';
+    const { questionId } = await client.call('agents.settings.request', { threadId: 't-trace', agent: agent.id, key: 'instructions', value: rules, reason: 'The user gave me rules' });
+    card(store, await asked(store, questionId));
+    expect(query('[data-testid=agent-setting-previous]').textContent).toBe('None');
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe(`${rules.length} characters`);
+    expect(query('[data-testid=agent-setting-text]').textContent).toBe(rules);
+    query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === questionId)).toBe(false));
+
+    await unmount(mounted!);
+    const archive = await client.call('agents.settings.request', { threadId: 't-trace', agent: 'Mira', key: 'status', value: 'archived', reason: 'Mira is no longer needed' });
+    card(store, await asked(store, archive.questionId));
+    expect(query('[data-testid=agent-setting-proposed]').textContent).toBe('Archived');
+    query<HTMLButtonElement>('[data-testid=agent-setting-apply]').click();
+    await vi.waitFor(() => expect(store.pendingQuestions.some((question) => question.id === archive.questionId)).toBe(false));
+    expect((await client.call('agents.snapshot', {})).profiles.find((profile) => profile.id === agent.id)?.status).toBe('archived');
+    await verdictRow(store, archive.questionId);
+    expect(query('[data-testid=agent-setting-card]').getAttribute('data-outcome')).toBe('applied');
+    expect(query('[data-testid=agent-setting-subject]').textContent).toBe('Mira · Status: Archived');
   } finally {
     store.detach();
     client.close();

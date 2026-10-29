@@ -30,13 +30,20 @@ ARM64, containing the compiled core, CLI shim, UI and embedded release version.
 with the desktop updater key and release version. Both stable and nightly
 publication require those signatures, include the archives in the checksums,
 and add separate server targets to `latest.json`. Docker images remain separate.
+The same x64 job writes `boite-server_<version>_android.zip` for phones: the
+core's scripts, the UI and the Termux controller, which run on Bun's Android
+build. It is signed and listed the same way, under the `android-aarch64-server`
+target ([Android server](android-server.md#releases-and-updates)).
 
 The nightly also attaches the signed Android app as
 `boite-android-<MAJOR.MINOR.PATCH>.apk`. That version belongs to the app, not
 to the release: `apps/android/VERSION` holds `MAJOR.MINOR`, raised by hand, and
 the patch grows by one only when the APK is rebuilt. A release with no change
 to the app attaches the previous APK under its original name.
-[Android](android.md#the-app-version) has the full rule.
+[Android](android.md#the-app-version) has the full rule. Boite Server, the app
+that runs a core on a phone, comes beside it as
+`boite-server-android-<MAJOR.MINOR.PATCH>.apk` under the same rule, counted from
+`apps/android-server/VERSION` ([Android server](android-server.md#publishing-the-app)).
 
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
   `/`, with a `.br` and a `.gz` copy beside each text asset. The Tauri config
@@ -192,7 +199,8 @@ compilation; distributable builds use the overlay.
 CLI `--config` paths resolve from `apps/shell`, while paths inside the configs
 resolve from `src-tauri`. A directory resource preserves its tree under the
 mapped name, giving `ui/index.html`; a glob would flatten it. Windows adds a
-separate resource overlay for the split `core/` JavaScript bundle.
+separate resource overlay for the split `core/` JavaScript bundle and
+`boite.exe`.
 
 ## Channels
 
@@ -310,6 +318,9 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `artifact-retention-worker.js`, the background scan for unused deliverables.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   invokes the adjacent core's CLI entry ([cli.md](cli.md)).
+- `boite.exe`, the same CLI without cmd.exe, which Windows finds first; built
+  from `apps/shell/launcher` by `stage-sidecar.ts`. Once the core has stopped,
+  the installer moves aside a copy an agent's command still holds.
 - `ui/`, the same build a phone gets over the pairing link.
 
 `core/` and `ui/` hold only the current build. Their file names carry a hash,
@@ -455,6 +466,19 @@ agent's `--version`, and an agent's own updater can open a console window.
 
 ## Release notes
 
+The release and nightly workflows pass their downloaded artifact directories to
+`scripts/ci/changelog.ts`. The generated notes start with direct download links
+grouped by platform: Windows x64, macOS Apple Silicon/Intel, Linux x64/ARM64,
+and Android when its APKs are attached. Linux rows offer Debian/Ubuntu packages
+and AppImages. A separate headless-server table links the Linux and Termux
+archives. Signatures, the updater's macOS archives and `latest.json` stay out
+of these tables.
+
+Links use the exact attached filenames and the release tag, so a reused Android
+APK keeps its independent app version. An absent artifact never gets a link.
+Nightly notes open with an instability warning and a reminder to back up data.
+The tables precede the optional announcement and automatic changelog.
+
 Release notes come from Git commits, including commits without a pull request.
 Each subject links to its commit, and a comparison link opens the complete diff.
 Each line ends with its author and its `Co-authored-by` trailers: a GitHub
@@ -472,7 +496,8 @@ unrelated branches never become the baseline. The first release includes the
 repository's history.
 
 The manual release and nightly forms accept an optional `announcement`. It
-appears above the generated changelog. Leave it empty for fully automatic notes.
-You can also edit the release draft before publishing. Retrying an existing
-draft refreshes its artifacts and preserves manually edited notes; it refuses
-to replace a published release or a tag pointing at another commit.
+appears below the downloads and above the generated changelog. Leave it empty
+for fully automatic notes. Retrying an existing draft refreshes its artifacts
+and generated notes, including download links; put an announcement in the input
+to retain it on retries. The workflow refuses to replace a published release
+or a tag pointing at another commit.

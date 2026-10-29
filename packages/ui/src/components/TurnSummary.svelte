@@ -1,6 +1,15 @@
+<script module lang="ts">
+  import type { MemoryPass } from '../lib/agent-turns';
+  /** A persistent agent's folded steps: how many, whether they show above the answer, and the click that flips it. */
+  export type SummarySteps = { count: number; open: boolean; toggle: () => void };
+  /** The memory pass that followed the turn, and what a click on its mark opens. */
+  export type SummaryMemory = { pass: MemoryPass; open?: () => void };
+</script>
+
 <script lang="ts">
   import { page } from '../lib/page-hidden.svelte';
-  import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
+  import { Brain, Check, ChevronRight, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
+  import { stepsLabel } from '../lib/agent-turns';
   import type { BackgroundTask, ThreadProgress, Turn } from '@boite/contracts';
   import { clockTime, elapsed, exactTime, formatTokens } from '../lib/format';
   import { totalTokens } from '../lib/usage';
@@ -8,7 +17,7 @@
   import { backgroundLabel } from '../lib/background';
   import { secondClock } from '../lib/clock.svelte';
   import type { Snippet } from 'svelte';
-  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, actions }: {
+  let { turn, requestStartedAt = null, clockOffset = 0, progress, waiting = false, activeTool = false, activeContent = false, background = [], stop, pointed = false, steps, memory, actions }: {
     turn: Turn;
     /**
      * When the user's request this turn belongs to started, earlier than the
@@ -16,6 +25,8 @@
      * The elapsed time counts from there.
      */
     requestStartedAt?: number | null;
+    /** How far the core's clock runs ahead of this device's: every time here is the core's. */
+    clockOffset?: number;
     progress?: ThreadProgress | null;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
@@ -28,13 +39,17 @@
     stop?: () => void;
     /** The pointer is on another message of this turn: the settled summary shows as if its own message were pointed at. */
     pointed?: boolean;
+    /** A persistent agent's folded steps, counted on the line; the count opens them above the answer. */
+    steps?: SummarySteps;
+    /** The memory pass that followed this turn: a small mark whose tooltip says what changed. */
+    memory?: SummaryMemory;
     /** The turn's own buttons (copy, retry, fork), at the end of the line. */
     actions?: Snippet;
   } = $props();
   const hidden = $derived(page.hidden);
   const running = $derived(turn.status === 'running');
   /** The second clock ticks while the turn runs and the page is on screen; a settled turn keeps the time it stopped at. */
-  const now = $derived(running ? secondClock.now : Date.now());
+  const now = $derived((running ? secondClock.now : Date.now()) + clockOffset);
   const compactOperation = $derived(turn.execution?.operation === 'compact');
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));
@@ -67,13 +82,18 @@
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
   const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
+  const fold = $derived(strings.chat.fold);
+  /** The mark's tooltip: what the pass did, then its summary. */
+  const memoryTitle = $derived(memory ? [fold.memory[memory.pass.status], ...(memory.pass.summary && memory.pass.status !== 'running' ? [memory.pass.summary] : [])].join(' · ') : '');
+  /** A line that counts steps or carries a memory mark reads at rest: it is what the agent did, not a measurement. */
+  const marked = $derived(!!steps || !!memory);
 </script>
 
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
   <span class="metric"><span class="dot ui-label" aria-hidden="true">·</span><span class="ui-label" class:quiet data-testid={id} {title}>{text}</span></span>
 {/snippet}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
-  <div class="summary" class:compacting class:settled class:pointed class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+  <div class="summary" class:compacting class:settled class:pointed class:marked class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if compacting}
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
@@ -103,6 +123,23 @@
     {/if}
     {#if turn.finishedAt !== null}
       {@render metric('turn-finished-at', fill(turn.status === 'error' ? strings.chat.failedAt : strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), exactTime(turn.finishedAt))}
+    {/if}
+    {#if (steps || memory) && !running}
+      <!-- The count and the memory mark wrap as one, so the mark never starts a line alone. -->
+      <span class="metric">
+        {#if steps}
+          <span class="dot ui-label" aria-hidden="true">·</span>
+          <button type="button" class="mark steps" aria-expanded={steps.open} title={steps.open ? fold.hideSteps : fold.showSteps} onclick={steps.toggle} data-testid="turn-steps">
+            <span class="ui-label">{stepsLabel(steps.count)}</span><span class="fold-caret" class:open={steps.open} aria-hidden="true"><ChevronRight size={11} /></span>
+          </button>
+        {/if}
+        {#if memory}
+          <span class="dot ui-label" aria-hidden="true">·</span>
+          <button type="button" class="mark memory" data-status={memory.pass.status} title={memoryTitle} aria-label={memoryTitle} disabled={!memory.open} onclick={memory.open} data-testid="memory-pass">
+            <Brain size={12} strokeWidth={1.75} />
+          </button>
+        {/if}
+      </span>
     {/if}
     {#if total > 0}
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
@@ -141,6 +178,15 @@
   /* Pointed from another message of the turn, its buttons show with it. */
   .summary.settled.pointed :global(.act) { opacity: 1; }
   @media (hover: none) { .summary.settled { opacity: 1; } }
+  .summary.settled.marked { opacity: 1; }
+  /* The step count and the memory mark: text buttons on the line, no box, the foreground on hover. */
+  .mark { display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 2px; margin: -2px 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font-size: inherit; font-variant-numeric: inherit; cursor: pointer; transition: color var(--dur-2) var(--ease-out-quint); }
+  .mark:hover:not(:disabled), .mark:focus-visible { color: var(--color-foreground); background: none; }
+  .mark:disabled { cursor: default; }
+  .mark.memory[data-status='running'] { animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+  .mark.memory[data-status='error'] { color: var(--color-danger); }
+  @media (prefers-reduced-motion: reduce) { .mark.memory[data-status='running'] { animation: none; } }
+  :global(html[data-motion='reduced']) .mark.memory[data-status='running'] { animation: none; }
   .summary[data-status='error'] > :global(svg) { color: var(--color-danger); }
   .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .compaction-copy { min-width: 0; }

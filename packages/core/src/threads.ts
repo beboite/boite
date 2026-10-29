@@ -1,14 +1,9 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type ActivityTurn, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, threadActive, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
-  Account,
-  AccountId,
-  Attachment,
-  PreviewReference,
-  SentFrom,
-  ThreadLink,
+  Account, AccountId, Attachment,
   ImageMimeType,
   Message,
   MessageId,
@@ -23,7 +18,6 @@ import type {
   Thread,
   ThreadId,
   ThreadRewind,
-  ThreadStatus,
   ThreadSummary,
   Turn,
   TurnId,
@@ -38,6 +32,7 @@ import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
+import { BackgroundCompaction } from './threads/background-compact.ts';
 import { CacheKeepalive } from './threads/cache-keepalive.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
@@ -45,14 +40,18 @@ import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkTurnRequest, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
-import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
+import { USER_ORIGIN, autonomousSource, originAutomatic, originOperation, type StartTurnOptions, type TurnInput, type TurnOrigin } from './threads/turn-origin.ts';
+import { saveThread, withLoad } from './threads/records.ts';
+import { isBusy, markQueued } from './threads/lifecycle.ts';
+import { admissionRefusal } from './threads/admission.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { LimitResumes } from './threads/limit-resume.ts';
 import { AutoContinues } from './threads/auto-continue.ts';
+import { ResumePlanner } from './threads/resume.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
-import { agentProvider, checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
+import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
@@ -73,9 +72,9 @@ type CreateParams = RpcParams<'threads.create'>;
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
-    const provider = agentProvider(this.core, agent);
-    const account = this.core.accounts.require(agent.selection.accountId);
-    if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
+    // Opening its conversation must also work after a provider or account was
+    // removed, so the owner can read it and repair its route in Settings.
+    // Profile saves and turn admission validate the route before it can run.
     const now = Date.now();
     const thread: ThreadSummary = {
       id: newId('thr_'), projectId, agentSessionId: sessionId, title: agent.name, titleSource: 'user',
@@ -110,8 +109,12 @@ export class ThreadStore {
   readonly spawns: ThreadSpawns;
   /** The `autoCompact` setting: compactions the core opens between turns. */
   readonly autoCompact: AutoCompaction;
+  /** The experimental `backgroundCompaction` setting: copies compacted ahead of the limit. */
+  readonly backgroundCompact: BackgroundCompaction;
   /** The `cacheKeepalive` setting: pings that keep a waiting thread's prompt cache warm. */
   readonly cacheKeepalive: CacheKeepalive;
+  /** Every resume the core plans by itself, whatever stopped the turn (`threads/resume.ts`). */
+  readonly resumes: ResumePlanner;
   /** Threads a usage limit stopped, resumed once its window resets (`threads/limit-resume.ts`). */
   readonly limitResumes: LimitResumes;
   /** Turns stopped before their answer, resumed by themselves (`threads/auto-continue.ts`). */
@@ -139,9 +142,11 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.autoCompact = new AutoCompaction(core, this);
+    this.backgroundCompact = new BackgroundCompaction(core, this);
     this.cacheKeepalive = new CacheKeepalive(core, this);
-    this.limitResumes = new LimitResumes(core, this);
-    this.autoContinue = new AutoContinues(core, this);
+    this.resumes = new ResumePlanner(core, this);
+    this.limitResumes = new LimitResumes(core, this.resumes);
+    this.autoContinue = new AutoContinues(core, this, this.resumes);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
   }
@@ -316,7 +321,7 @@ export class ThreadStore {
       const modeChanged = next.permissionMode !== thread.permissionMode;
       if (modeChanged) next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       const saved = this.save(next, 'thread.updated');
-      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode);
+      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode, thread, next);
       return saved;
     }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);
@@ -352,7 +357,7 @@ export class ThreadStore {
     }
     if (switched) {
       this.agentState.cancelBackground(thread.id);
-      if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+      if (!threadActive(thread.status)) {
         this.releaseAgent(thread.id);
         this.agentState.noteBackground(thread.id, []);
       }
@@ -372,13 +377,13 @@ export class ThreadStore {
 
   isRemoving(threadId: ThreadId): boolean { return this.removing.has(threadId); }
 
-  /** A quiescent automatic archive changes visibility only, retaining the checkout and execution state. */
-  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number): ThreadSummary | null {
+  /** Automatic Done changes visibility only, retaining the checkout and any prompt still finishing. */
+  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number, detected = false): ThreadSummary | null {
     const thread = this.core.journal.getThread(expected.id);
     const state = archiveState(this.core.journal, expected.id);
     const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
     if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
-    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
+    if ((!detected && thread.updatedAt !== expected.updatedAt) || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread, detected)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
       const now = Date.now();
@@ -386,14 +391,17 @@ export class ThreadStore {
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
-    if (archivedThread) this.core.fileTickets.forgetUnder(thread.cwd);
+    if (archivedThread) {
+      this.autoCompact.stopIfDone(thread.id);
+      this.core.fileTickets.forgetUnder(thread.cwd);
+    }
     return archivedThread;
   }
 
   /** Turning off the project filter reveals its automatic hides without dismissing the PR. */
   showMergedPrThreads(projectId: ProjectId): void {
     for (const thread of this.core.journal.listThreads(projectId)) {
-      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id)) continue;
+      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id) || this.core.worktrees.reservations.holder(thread.cwd) !== null) continue;
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
@@ -404,28 +412,7 @@ export class ThreadStore {
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
     if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId, 'explicit');
-    if (archived) {
-      // Temporary inference belongs to the visible family, including retained descendants.
-      const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
-      for (const member of family) this.sideQuestions.cancel(member.id);
-    }
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
-    // An archived thread is not coming back this minute: its warm process goes
-    // now, and the commands that process listed go with it.
-    if (archived) {
-      this.moves.forget(threadId);
-      this.core.delegation.stop(threadId);
-      this.core.scheduler.stop(threadId);
-      this.releaseAgent(threadId);
-      this.agentState.commands.delete(threadId);
-      this.agentState.noteBackground(threadId, []);
-      // Nobody answers a card on a thread put away, and no turn should start from one.
-      this.cards.clearQuestionsOf(threadId, true, 'archive');
-      this.deferred.deferredAnswers.delete(threadId);
-      this.deferred.consumed.delete(threadId);
-      this.deferred.pendingWakes.delete(threadId);
-      void this.core.terminals.closeThread(threadId);
-    }
     const thread = this.require(threadId);
     // A subagent reopened by hand is not put away again for the work it already finished.
     if (!archived && thread.archived && thread.parentThreadId) this.core.delegation.retirements.keep(threadId);
@@ -443,13 +430,32 @@ export class ThreadStore {
       // Archiving an archived thread again keeps its time: nothing new was put away.
       const archivedAt = archived ? (thread.archived ? thread.archivedAt ?? null : Date.now()) : null;
       const saved = this.save({ ...thread, archived, doneAt, archivedAt }, 'thread.archived');
-      if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      const projectThread = !thread.parentThreadId || this.core.journal.getThread(thread.parentThreadId)?.agentSessionId;
+      if ((thread.archived !== archived || (thread.doneAt ?? null) !== doneAt) && projectThread && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      if (archived) this.core.bus.whenCommitted(() => this.putAway(threadId, thread.cwd));
       return saved;
     })());
-    // A removal waits for the same stops itself before it hides the family.
-    if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
-    if (archived) this.core.fileTickets.forgetUnder(thread.cwd);
     return saved;
+  }
+
+  /** What a committed archive stops: its warm process and what it listed go now. One that rolls back stops nothing. */
+  private putAway(threadId: ThreadId, cwd: string): void {
+    // Temporary inference belongs to the visible family, including retained descendants.
+    const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
+    for (const member of family) this.sideQuestions.cancel(member.id);
+    this.moves.forget(threadId);
+    this.core.delegation.stop(threadId);
+    this.core.scheduler.stop(threadId);
+    this.releaseAgent(threadId);
+    this.agentState.commands.delete(threadId);
+    this.agentState.noteBackground(threadId, []);
+    // Nobody answers a card on a thread put away, and no turn should start from one.
+    this.cards.clearQuestionsOf(threadId, true, 'archive');
+    for (const pending of [this.deferred.deferredAnswers, this.deferred.consumed, this.deferred.pendingWakes]) pending.delete(threadId);
+    void this.core.terminals.closeThread(threadId);
+    // A removal waits for the same stops itself before it hides the family.
+    if (!this.removing.has(threadId)) void this.endArchivedWork(threadId);
+    this.core.fileTickets.forgetUnder(cwd);
   }
 
   /**
@@ -467,7 +473,7 @@ export class ThreadStore {
       if (this.core.journal.getThread(threadId)?.archived !== true) return;
       const idle = family.filter((id) => {
         const member = this.core.journal.getThread(id);
-        return member !== null && !['queued', 'running', 'waiting'].includes(member.status);
+        return member !== null && !threadActive(member.status);
       });
       await Promise.all(idle.map(id => this.core.procs.stopAndWait(id)));
     } catch (error) {
@@ -484,14 +490,15 @@ export class ThreadStore {
   async remove(threadId: ThreadId): Promise<void> {
     const root = this.require(threadId);
     if (root.agentSessionId || root.parentThreadId) {
-      throw refused('threadId: delete a conversation from its parent; persistent agent sessions are managed through Agents', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
+      throw refused('threadId: delete a conversation from its parent; a bot\'s thread goes when the bot is archived', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
     }
     if (this.removing.has(threadId)) throw refused('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);
     for (const thread of family) this.removing.add(thread.id);
     try {
+      // One write hides the family; until it commits, its runs and steps go on.
+      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => { for (const thread of family) this.archive(thread.id, true); })());
       this.core.workflows.stopRoot(threadId, 'Conversation deleted');
-      for (const thread of family) this.archive(thread.id, true);
       await Promise.all(family.map(thread => this.core.scheduler.stopAndWait(thread.id)));
       await Promise.all(family.flatMap(thread => [
         this.core.procs.stopAndWait(thread.id),
@@ -564,7 +571,7 @@ export class ThreadStore {
     const refusal = this.compactRefusal(thread);
     if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact', undefined, undefined, automatic ? AUTO_COMPACT_LABEL : undefined);
+    return this.startTurn(threadId, { prompt: protocol === 'echo' ? '[compact]' : '/compact', ...(automatic ? { display: AUTO_COMPACT_LABEL } : {}) }, { kind: 'compact', automatic }, { expectedSelectionVersion });
   }
 
   /** Why this thread's agent cannot compact, or null. */
@@ -594,14 +601,18 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: ActivityTurn, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
+  /** Accepts a turn and queues it (`threads/turn-origin.ts`): `origin` says who starts it and why. */
+  startTurn(threadId: ThreadId, input: string | TurnInput, origin: TurnOrigin = USER_ORIGIN, options: StartTurnOptions = {}): Turn {
+    let { prompt, attachments = [], previews: previewReferences = [], display: displayText } = typeof input === 'string' ? { prompt: input } : input;
+    const { expectedSelectionVersion, persistAdmission, choice: executionChoice } = options;
+    const operation = originOperation(origin), automatic = originAutomatic(origin);
+    const clientRequestId = origin.requestId;
+    const activity = origin.kind === 'goal' ? origin.activity : undefined;
+    const startedBy = origin.kind === 'spawned' ? origin.startedBy : undefined;
+    const sentFrom = origin.kind === 'user' ? origin.sentFrom ?? null : null;
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
-    if (thread.agentSessionId && operation !== 'compact') {
-      const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
-      if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');
-    }
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);
     if (referenceError) throw refused(referenceError);
@@ -609,27 +620,54 @@ export class ThreadStore {
     const { fingerprint, turn: accepted } = checkTurnRequest(this.core.journal, threadId, prompt, attachments, previewReferences, clientRequestId);
     if (accepted) return accepted;
     this.checkSelection(thread, expectedSelectionVersion);
-    if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {
+    const refusal = admissionRefusal(this.core, thread, executionChoice);
+    if (refusal !== null) throw refused(refusal, { threadId });
+    if (this.isBusy(threadId)) {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
     }
+    // A turn the core starts by itself on a persistent agent's thread meets the agent's pause and budget first.
+    const autonomous = autonomousSource(origin);
+    if (autonomous !== null) this.core.agentRuntime.admit(thread, autonomous);
     // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
-    thread = followAgent(this.core, thread);
+    if (executionChoice) {
+      const provider = this.core.providers.require(executionChoice.providerId);
+      const account = this.core.accounts.require(executionChoice.accountId);
+      const model = checkModel(provider, account.id, executionChoice.model);
+      const sameAccount = thread.providerId === provider.id && thread.accountId === account.id;
+      thread = { ...thread, providerId: provider.id, accountId: account.id, model,
+        effort: checkEffort(provider, account.id, model, executionChoice.effort), speed: checkSpeed(provider, account.id, model, executionChoice.speed ?? null),
+        ...(!sameAccount ? { sessionId: null, sessionResumeAt: null } : {}) };
+    } else thread = followAgent(this.core, thread);
+    this.core.sharedCompute?.assertTurn(threadId);
+    this.core.sharedAccess?.assertTurn(threadId);
     const provider = this.core.providers.require(thread.providerId);
+    const account = this.core.accounts.require(thread.accountId);
+    if (account.providerId !== provider.id) throw refused(`accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`, {
+      field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id,
+    });
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),
-      this.core.accounts.require(thread.accountId),
+      account,
       () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
+    this.core.sharedAccess.uploads(threadId, attachments);
 
-    // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
-    // So is every keepalive (`threads/cache-keepalive.ts`).
-    const automatic = (operation === 'compact' && displayText !== undefined) || operation === 'keepalive';
+    if (!operation && !activity && !startedBy) {
+      const expanded = this.core.brain.expandPrompt(prompt, this.agentState.commands.get(threadId));
+      const offset = expanded.length - prompt.length;
+      if (expanded !== prompt) {
+        previewReferences = previewReferences.map(reference => reference.mention ? {
+          ...reference, mention: { start: reference.mention.start + offset, end: reference.mention.end + offset },
+        } : reference);
+        prompt = expanded;
+      }
+    }
+
     const now = Date.now();
     // The first message after a move carries the note to the agent. A compact,
     // a keepalive or a slash command goes to the agent as the command alone, so
@@ -647,8 +685,9 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
-        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : executionChoice ? { sessionResumeAt: null } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
+        ...(executionChoice ? { frozenSelection: true as const } : {}),
         ...(operation ? { operation } : {}),
         ...(automatic ? { automatic: true as const } : {}),
       },
@@ -674,7 +713,7 @@ export class ThreadStore {
     // Accept the prompt and its queued status in one commit before starting the driver.
     this.core.bus.afterCommit(() => {
       const accepted = this.core.journal.db.transaction(() => {
-        let reservation: (() => void) | undefined;
+        let reservation: (() => void) | undefined, admitted: (() => void) | undefined;
         this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
           reservation = this.core.delegation.prepareTurnReservation(threadId, operation);
           this.core.journal.putTurn(turn);
@@ -682,16 +721,18 @@ export class ThreadStore {
           this.core.journal.putMessage(message);
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
           if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
+          admitted = persistAdmission?.();
         });
         const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId, !nativeCommandPrompt(prompt)) : undefined;
         this.core.bus.emit('message.started', message);
         this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
         // A status that stays queued tells nobody: the row still loses its pending move note.
         if (moved && this.core.journal.getThread(threadId)?.status === 'queued') this.core.bus.emit('thread.updated', this.withLoad(this.require(threadId)));
-        this.setStatus(threadId, 'queued');
-        return { reservation, dismissal };
+        markQueued(this.core, threadId);
+        return { reservation, dismissal, admitted };
       })();
       // Nothing in memory consumes the wake or resumes the agent until the prompt exists on disk.
+      accepted.admitted?.();
       accepted.reservation?.();
       // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first; a keepalive leaves it for the next.
       if (operation !== 'background' && operation !== 'keepalive') this.deferred.pendingWakes.delete(threadId);
@@ -708,6 +749,11 @@ export class ThreadStore {
     return turn;
   }
 
+  /** True while a turn of the thread is under way (`threads/lifecycle.ts`). */
+  isBusy(threadId: ThreadId): boolean {
+    return isBusy(this.core, threadId);
+  }
+
   /**
    * Cancels what the core planned to try again on the thread: a capacity retry
    * its turn waits for, which then fails with the refusal, a resume after a
@@ -715,7 +761,7 @@ export class ThreadStore {
    */
   cancelRetry(threadId: ThreadId): boolean {
     this.require(threadId);
-    return this.runner.cancelRetry(threadId) || this.limitResumes.cancel(threadId, 'cancelled by the user') || this.autoContinue.cancel(threadId, 'cancelled by the user');
+    return this.runner.cancelRetry(threadId) || this.resumes.cancel(threadId, 'cancelled by the user');
   }
 
   stopTurn(threadId: ThreadId): boolean {
@@ -723,7 +769,7 @@ export class ThreadStore {
     this.handoff.forget(threadId);
     this.cacheKeepalive.forget(threadId);
     // Stop on a thread waiting for a usage limit to reset means: do not resume it.
-    const plannedResume = this.limitResumes.cancel(threadId, 'the thread was stopped') || this.autoContinue.cancel(threadId, 'the thread was stopped');
+    const plannedResume = this.resumes.cancel(threadId, 'the thread was stopped');
     this.core.coordination.pause(threadId);
     // Runs first: once they are stopped, a team with no child has nothing left to pause.
     const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);
@@ -743,6 +789,7 @@ export class ThreadStore {
    * its exit, and with no `turn.finished` to follow nothing else would sweep it.
    */
   releaseAgent(threadId: ThreadId): void {
+    void this.core.procs.protection.revoke(threadId).catch(() => {});
     this.agentState.cancelBackground(threadId);
     releaseThread(threadId);
     this.core.procs.sweepSoon(threadId);
@@ -752,14 +799,17 @@ export class ThreadStore {
     return this.core.journal.queuedTurn(threadId, 'coordination') === null ? false : this.core.scheduler.stop(threadId);
   }
 
-  /** A keepalive takes no steering: what would steer it waits for the turn after it, and a result stops it. */
-  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function' && !this.cacheKeepalive.pinging(threadId); }
+  /** Maintenance takes no steering: results remain in their inbox until the next conversation turn. */
+  canSteer(threadId: string): boolean {
+    const operation = this.core.journal.lastTurn(threadId)?.execution?.operation;
+    return typeof this.runner.handles.get(threadId)?.steer === 'function' && operation !== 'compact' && !this.cacheKeepalive.pinging(threadId);
+  }
 
   async steer(threadId: string, text: string): Promise<boolean> {
     const handle = this.runner.handles.get(threadId);
     if (!handle?.steer || this.runner.steering.has(threadId)) return false;
     const turn = this.core.journal.runningTurn(threadId);
-    if (!turn || turn.execution?.operation === 'keepalive') return false;
+    if (!turn || turn.execution?.operation === 'keepalive' || turn.execution?.operation === 'compact') return false;
     this.runner.steering.add(threadId);
     try {
       const submitted = await handle.steer(text);
@@ -831,10 +881,6 @@ export class ThreadStore {
   }
 
   // -- internals ------------------------------------------------------------
-
-  private setStatus(threadId: ThreadId, status: ThreadStatus): void {
-    setThreadStatus(this.core, threadId, status);
-  }
 
   private save(thread: ThreadSummary, eventType: string): ThreadSummary {
     return saveThread(this.core, thread, eventType);

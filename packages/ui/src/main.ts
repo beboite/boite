@@ -34,7 +34,7 @@ function boot(): Promise<void> {
   return startLocale().then(async () => {
     mount(quotas ? (await import('./QuotaApp.svelte')).default : App, { target });
     // Edge scrollbars and load on press follow their switches for the page's life.
-    if (!quotas) void import('./lib/interaction-experiments').then(({ startInteractionExperiments }) => startInteractionExperiments());
+    if (!quotas) void import('./lib/interactions').then(({ startInteractions }) => startInteractions());
     revealShell();
   });
 }

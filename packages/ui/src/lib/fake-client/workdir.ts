@@ -1,10 +1,11 @@
 /** A thread's working directory: files, git, the panel and published artifacts. */
-import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
+import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FAKE_CHANGES, FAKE_DIFFS, FAKE_MEDIA, FAKE_MEDIA_PATHS, fakeBytes, fakeLanguage } from './files';
 import { seededArtifact } from './agents-demo';
 import { refusal, T0 } from './shared';
 import type { FakeContext, FakeMethods } from './context';
+import { fakeSharedFile } from './shared-access';
 
 /** A stable time per path, so two runs of a capture read the same tree. */
 function fileTime(ctx: FakeContext, path: string): number {
@@ -151,6 +152,23 @@ export function workdirMethods(ctx: FakeContext, all: () => Pick<FakeMethods, 'b
       if (view && !part.view) throw refusal('artifacts.read view needs an artifact published with boite view');
       return { ...value };
     },
+    'artifacts.viewCheck': async (params) => {
+      const thread = ctx.thread(params.threadId);
+      if (thread.archived) throw refusal('artifacts.viewCheck needs an active thread');
+      if (!thread.turns.at(-1)) throw refusal('artifacts.viewCheck needs a thread with a turn');
+      if (params.script !== undefined && typeof params.script !== 'string') throw refusal('artifacts.viewCheck script must be JavaScript text');
+      if (params.scheme !== undefined && params.scheme !== 'dark' && params.scheme !== 'light') throw refusal('artifacts.viewCheck scheme must be dark or light');
+      fakeSharedFile(ctx, params.threadId, params.path, 'publish');
+      const path = inside(ctx, thread.cwd, params.path, 'artifacts.viewCheck path', 'file');
+      if (!/\.html?$/i.test(path)) throw refusal('artifacts.viewCheck path must be an HTML file');
+      const source = ctx.files.get(path) ?? '';
+      if (!source.trim()) throw refusal('artifacts.viewCheck page is empty');
+      if (new TextEncoder().encode(viewDocument(source)).length > VIEW_MAX_BYTES) throw refusal('artifacts.viewCheck page must be at most 4 MB');
+      const remote = /<(?:script|link|img|iframe)\b[^>]*\s(?:src|href)\s*=\s*["']?((?:https?:)?\/\/[^"'\s>]+)/i.exec(source);
+      if (remote) throw refusal(`artifacts.viewCheck page is not ready to show. Fix the file and run the command again:\n- ${remote[1]} is remote, and a view loads nothing remote.`);
+      // The in-memory client has no isolated browser. Never pretend it captured or executed a page.
+      return { checked: false, errors: ['the draft could not be checked: this client has no available browser'], advice: [], captures: [] };
+    },
     // The real core embeds local files and loads the page in a headless browser; here the page is stored as written.
     'artifacts.view': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -263,9 +281,11 @@ const ready = true;
     },
     'files.list': async (params) => {
       const cwd = ctx.thread(params.threadId).cwd;
-      return listDir(ctx, inside(ctx, cwd, params.path ?? '', 'files.list path', 'dir'));
+      fakeSharedFile(ctx,params.threadId,params.path||'.');
+      return listDir(ctx, inside(ctx, cwd, params.path ?? '', 'files.list path', 'dir')).filter(entry=>{try{fakeSharedFile(ctx,params.threadId,entry.path,'read',true);return true;}catch{return false;}});
     },
     'files.read': async (params) => {
+      fakeSharedFile(ctx,params.threadId,params.path);
       const path = inside(ctx, ctx.thread(params.threadId).cwd, params.path, 'files.read path', 'file');
       // A picture, a sound and anything else binary answer as a url, the way
       // the core hands out a ticket, except that these carry their own bytes.
@@ -295,6 +315,7 @@ const ready = true;
       return content;
     },
     'files.locate': async (params) => {
+      fakeSharedFile(ctx,params.threadId,params.path);
       const cwd = ctx.thread(params.threadId).cwd;
       if (typeof params.path !== 'string' || params.path.length === 0) throw refusal(`files.locate path: expected a file path, got ${JSON.stringify(params.path)}`);
       try {

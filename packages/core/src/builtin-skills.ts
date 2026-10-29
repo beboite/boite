@@ -57,7 +57,7 @@ boite issue draft --title "<symptom in a few words>" --description-file <file>
 \`\`\`
 
 Show the user the printed draft. It is anonymized but the issue is public on
-github.com/beboite/boite; let them change anything. An agent never publishes
+github.com/mtsu-dev/boite; let them change anything. An agent never publishes
 it: the issue goes out under the user's own GitHub account, by their hand.
 The draft prints a link that opens GitHub with the issue filled in; give it
 to the user (\`boite browse <link>\` opens it in the panel) so they submit it
@@ -66,7 +66,7 @@ which creates it with \`gh\` when it is signed in. Give the path of the full
 anonymized export too, which they can drag into the issue.
 
 With \`gh: ready\`, look for an existing report first:
-\`gh issue list --repo beboite/boite --search "<words>" --state all\`, and
+\`gh issue list --repo mtsu-dev/boite --search "<words>" --state all\`, and
 give the user the matching issue so they comment there instead of opening a
 duplicate.
 `,
@@ -74,7 +74,7 @@ duplicate.
 
 export const PROVE_IT_SKILL: BuiltinSkill = {
   name: 'boite-prove-it',
-  description: 'Check that a change works before calling it done, and put the proof in the answer: the deciding output, a capture, a clip or a boite view page.',
+  description: 'Check that a change works before calling it done, and put the proof in the answer: the deciding output, a capture, a clip or a chart.',
   body: `# Prove it
 
 A change is done once you have seen it work. Size the check to the change: a
@@ -103,7 +103,7 @@ Put the proof where the user reads, in the answer:
 | A command's result | The one deciding line, such as \`42 pass, 0 fail\` |
 | A screen, a render, a clip | \`boite attach <file>\` |
 | Before and after | Both files attached, or one \`boite view\` page side by side |
-| Numbers, a timeline, a comparison | A \`boite view\` page (skill boite-visual) |
+| Numbers, a timeline, a comparison | A \`\`\`mermaid fence in the answer (xychart-beta, timeline) or a table |
 
 A link to a Markdown report proves nothing to the user: it opens as raw text.
 Notes for the next agent go in the project's docs, not in the answer.
@@ -115,14 +115,15 @@ or two lines.
 
 export const VISUAL_SKILL: BuiltinSkill = {
   name: 'boite-visual',
-  description: 'Explain with a diagram, chart or simulator drawn by boite view, or an HTML file to keep. For a visual, a schema, a catch-up or a choice between options.',
+  description: 'A visual beyond a mermaid fence: a boite view page (simulator, animation, controls) or an HTML file to keep, what to draw and how to check it.',
   body: `# Show it visually
 
-Three commands, three jobs:
+Four ways, four jobs:
 
-| Command | For |
+| Way | For |
 |---|---|
-| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look. The default for explaining. |
+| A \`\`\`mermaid fence or TeX in your answer | A diagram, a chart or a formula. No command: chat draws it. The default. |
+| \`boite view <page.html>\` | A page drawn in your answer, after the paragraph it explains, in the app's look: what Mermaid cannot draw, such as a simulator, an animation or controls. |
 | \`boite attach <file>\` | A file the user keeps or opens elsewhere: a capture, a clip, a PDF, a standalone HTML page. |
 | \`boite preview <file.html>\` | The project's own HTML, opened in the panel to try. |
 
@@ -159,15 +160,31 @@ travels along them.
 
 When the user wants something to keep, share or print, write one
 self-contained HTML file (inline CSS and JavaScript, embedded images, nothing
-loaded from the network) and send it with \`boite attach\`. Run
-\`boite view\` on the same file to show it in the chat as well; its publish
-check catches script errors, remote resources and sideways scrolling.
+loaded from the network) and send it with \`boite attach\`. Check the same
+file as below, then run \`boite view\` to show it in the chat as well.
 
 ## Check
 
-\`boite view\` refuses a broken page and says why. For a page with controls,
-open the file in \`boite browser\`, use each control and read
-\`boite browser diagnostics\` before you publish.
+Run \`boite view check <page.html>\` before publishing. It embeds the local
+assets and loads the page with the view's kit and sandbox at desktop and
+phone content widths (816 and 330 px), without creating any message,
+artifact, tab or panel. It saves uniquely named PNGs in your current
+directory. Open both captures, fix what you see and rerun the check.
+
+For controls, write a local \`checks.js\` and run
+\`boite view check <page.html> --script checks.js\`. The file is the body of
+an async function, without a function wrapper. It runs after a fresh page
+load at each width. Use DOM clicks and input/change events to exercise every
+control, await updates, throw an Error when an assertion fails, and return
+JSON values that show the resulting state. The captures show that state
+after the script, even when it throws. Open those captures too.
+
+The check uses the app's fallback palettes and fonts, not the connected
+client's custom theme or selected fonts. Use \`--scheme light\` to check the
+light palette; dark is the default. Errors or an unavailable browser exit
+nonzero after saving available captures; \`--json\` returns capture paths.
+Fix errors and advice before publishing with \`boite view <page.html>\`,
+then place the page in your answer with the printed image line.
 `,
 };
 

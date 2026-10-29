@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, extractJson, RpcErrorCode } from '@boite/contracts';
 import type { DelegationConfig, Turn, WorkflowPlan, WorkflowRun } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
@@ -9,9 +9,10 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
 import { startServer } from '../src/server.ts';
+import { assertIdleFamily } from '../src/threads/completion.ts';
 import { HANDOFF } from '../src/threads/handoff.ts';
 import { AGENT_ENV } from '@boite/contracts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
@@ -167,6 +168,82 @@ test('plans are refused by field before anything starts', async () => {
   expect(await thrown(bad({ name: 'x', limits: { maxSteps: 500 }, steps: [{ id: 'a', profile: 'fast', task: 't' }] }))).toThrow('limits.maxSteps: expected an integer from 1 to 64');
   expect(await thrown(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', context: { drop: ['memory'] } }] }))).toThrow('steps[0].context.drop: expected a list of instructions, guides, mcp, hooks');
   expect(await bad(REVIEW)).toEqual({ levels: [['scan'], ['review'], ['fix'], ['report']] });
+});
+
+const FENCED_TEXT = { text: 'Keep ``` inside the JSON string.' };
+const fencedOutput = (value: unknown) => '```json\n' + JSON.stringify(value) + '\n```';
+
+test.each([
+  ['backticks inside a JSON string', fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['U+2028 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2028```\u2028after' }), { value: { text: 'Before\u2028```\u2028after' } }],
+  ['U+2029 around backticks inside a JSON string', fencedOutput({ text: 'Before\u2029```\u2029after' }), { value: { text: 'Before\u2029```\u2029after' } }],
+  ['CRLF and an indented closing fence', '```json \r\n' + JSON.stringify(FENCED_TEXT) + '\r\n  ``` \t\r\n', { value: FENCED_TEXT }],
+  ['an opening after prose and an extra backtick', 'Answer: ````json\t\n' + JSON.stringify(FENCED_TEXT) + '\n```', { value: FENCED_TEXT }],
+  ['four-backtick fences around JSON containing backticks', '````json\n' + JSON.stringify(FENCED_TEXT) + '\n````', { value: FENCED_TEXT }],
+  ['raw JSON', JSON.stringify(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['the last valid block', fencedOutput({ text: 'Earlier' }) + '\nThen:\n' + fencedOutput(FENCED_TEXT), { value: FENCED_TEXT }],
+  ['an invalid final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":}\n```', { value: FENCED_TEXT }],
+  ['an unterminated final block', fencedOutput(FENCED_TEXT) + '\n```json\n{"text":', { value: FENCED_TEXT }],
+  ['non-overlapping blocks', '```json\ninvalid\n' + fencedOutput(FENCED_TEXT), null],
+  ['malformed JSON', '```json\n{"text":}\n```', null],
+] as const)('workflow JSON extraction: %s', (_name, answer, expected) => {
+  expect(extractJson(answer)).toEqual(expected);
+});
+
+test('workflow JSON extraction finishes on repeated unterminated fences', async () => {
+  const { h, threadId } = await setup();
+  const module = new URL('../../contracts/src/workflow-plan.ts', import.meta.url).href;
+  const program = `
+    import { extractJson } from ${JSON.stringify(module)};
+    const fence = ${JSON.stringify('```')};
+    const answers = [
+      fence + '\\n' + (fence + '\\na').repeat(500_000),
+      fence + 'json\\n' + ' '.repeat(500_000) + 'x\\n',
+      fence + '\\n' + (fence + '\\t').repeat(500_000),
+    ];
+    console.log(JSON.stringify(answers.map(extractJson)));
+  `;
+  const child = h.core.procs.spawn(threadId, process.execPath, ['--eval', program], { agentRoot: false });
+  const output = new Response(child.proc.stdout).text();
+  const errors = new Response(child.proc.stderr).text();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let exit: number | null;
+  try {
+    // A generous liveness bound, not a benchmark: the old backtracking takes minutes on this input.
+    exit = await Promise.race([child.exited, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 10_000); })]);
+  } finally {
+    clearTimeout(timer);
+    h.core.procs.killTree(threadId);
+    await child.exited;
+  }
+  expect(exit).toBe(0);
+  expect(await errors).toBe('');
+  expect(await output).toBe('[null,null,null]\n');
+}, 20_000);
+
+test('fenced workflow output preserves backticks in a JSON string without a correction', async () => {
+  const output = { text: 'Keep \u2028```\u2028 and \u2029```\u2029 inside the JSON string.' };
+  const { prompts } = scripted(ctx => taskOf(ctx.prompt) === 'Produce text.'
+    ? fencedOutput(output)
+    : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', {
+    threadId, requestId: 'backtick-output', plan: { name: 'Backtick output', steps: [
+      { id: 'source', profile: 'fast', task: 'Produce text.', output: { text: 'string' } },
+      { id: 'use', profile: 'fast', task: 'Use {{source.text}}' },
+    ] },
+  });
+  const done = await settled(h, threadId, run.id);
+  expect([done.status, done.error]).toEqual(['done', null]);
+  const source = done.nodes[0]!.instances[0]!;
+  expect(source.output).toEqual(output);
+  expect(source.attempts).toBe(1);
+  expect(h.core.journal.listTurns(source.threadId!)).toHaveLength(1);
+  expect(prompts.some(prompt => prompt.prompt.includes('does not match this workflow step'))).toBe(false);
+  const use = done.nodes[1]!.instances[0]!;
+  const expectedTask = `Use ${output.text}`;
+  expect(use.task).toBe(expectedTask);
+  expect(prompts.filter(prompt => prompt.threadId === use.threadId).map(prompt => taskOf(prompt.prompt))).toEqual([expectedTask]);
 });
 
 test('a mismatched output is asked for once more, then the step fails and retry runs it again', async () => {
@@ -327,7 +404,8 @@ test.each(['running', 'correction'] as const)('a restarted core pauses %s workfl
   await waitFor(() => held.size === 1);
   const child = run.nodes[0]!.instances[0]!.threadId!;
   if (phase === 'correction') {
-    const off = h.core.bus.onAny((name, payload) => {
+    // Registered after the workflows' own committed observer: the close begins once the correction is decided.
+    const off = h.core.bus.onCommitted((name, payload) => {
       if (name === 'turn.finished' && (payload as Turn).threadId === child) h.core.workflows.beginClose();
     });
     held.get(child)!('missing structured result');
@@ -631,6 +709,71 @@ test('a paused run lets its running steps end, and is done once every step is', 
   await owner.call('workflows.control', { threadId, runId: one.id, action: 'pause' });
   [...held.values()][0]!('A done');
   expect((await settled(h, threadId, one.id)).status).toBe('done');
+});
+
+test('Mark done waits for a running run and stops a paused one, which expiry still keeps', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'done' });
+  await waitFor(() => held.size === 1);
+  expect(await owner.call('threads.archive', { threadId, onlyIfIdle: true }).catch(error => error)).toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+  // The Curio Shop case: a run paused days ago refused Done with "a workflow is still running".
+  expect(() => assertIdleFamily(h.core, threadId)).toThrow('a workflow is still running');
+  expect((await owner.call('threads.archive', { threadId, onlyIfIdle: true })).archived).toBe(true);
+  expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
+  await Bun.sleep(20);
+  expect(held.size).toBe(0);
+});
+
+test('an archive that rolls back leaves its run paused, and the committed one stops it once', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'rollback' });
+  await waitFor(() => held.size === 1);
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+  // Stopping a run also stops its processes and shared jobs, which no rollback brings back.
+  const stopRoot = h.core.workflows.stopRoot.bind(h.core.workflows);
+  let stops = 0;
+  h.core.workflows.stopRoot = (rootId, reason) => { stops += 1; return stopRoot(rootId, reason); };
+  // Nor do the archive's own stops: its children, its turn and its terminals.
+  const direct: string[] = [];
+  const delegationStop = h.core.delegation.stop.bind(h.core.delegation);
+  const schedulerStop = h.core.scheduler.stop.bind(h.core.scheduler);
+  const closeThread = h.core.terminals.closeThread.bind(h.core.terminals);
+  h.core.delegation.stop = (id, ...rest) => { direct.push('delegation'); return delegationStop(id, ...rest); };
+  h.core.scheduler.stop = (id, ...rest) => { direct.push('scheduler'); return schedulerStop(id, ...rest); };
+  h.core.terminals.closeThread = id => { direct.push('terminals'); return closeThread(id); };
+  rolledBackArchive(h, threadId);
+  expect(h.core.threads.require(threadId).archived).toBe(false);
+  expect([stops, direct]).toEqual([0, []]);
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('paused');
+  h.core.threads.archive(threadId, true);
+  expect(stops).toBe(1);
+  expect(new Set(direct)).toEqual(new Set(['delegation', 'scheduler', 'terminals']));
+  expect(h.core.workflows.get(threadId, run.id)).toMatchObject({ status: 'stopped', error: 'The thread was archived.' });
+});
+
+test('a deletion whose archive rolls back leaves the run and its running step going', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'removal' });
+  await waitFor(() => held.size === 1);
+  const stepId = [...held.keys()][0]!;
+  const announce = h.core.projects.announce;
+  h.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { expect(await thrown(h.core.threads.remove(threadId))).toThrow('injected failure'); }
+  finally { h.core.projects.announce = announce; }
+  expect([h.core.threads.require(threadId).archived, h.core.threads.require(stepId).archived]).toEqual([false, false]);
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  await Bun.sleep(20);
+  expect([...held.keys()]).toEqual([stepId]);
+  await h.core.threads.remove(threadId);
+  expect(held.size).toBe(0);
 });
 
 test('completed steps keep their summary while the team is paused and deliver once resumed', async () => {

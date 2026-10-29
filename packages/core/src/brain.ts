@@ -1,7 +1,7 @@
 /// <reference path="./text.d.ts" />
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { BrainConfig, BrainEntry, BrainStatus, Protocol } from '@boite/contracts';
+import type { AgentCommand, BrainConfig, BrainEntry, BrainStatus, Protocol } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
@@ -14,6 +14,7 @@ const INSTRUCTIONS_LIMIT = 128 * 1024;
 const INSTRUCTION_FILES = ['AGENTS.md', '.agents/AGENTS.md', 'CLAUDE.md', 'GEMINI.md'];
 const CATALOG_DIRS = ['skills', '.agents/skills', '.claude/skills', '.codex/skills', 'plugins', '.claude/plugins', '.codex/plugins'];
 const PLUGIN_FILES = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json'];
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 type GitSnapshot = NonNullable<BrainStatus['git']> & { head: string | null };
 type Schedule = (run: () => Promise<void>, ms: number) => () => void;
 const defaultSchedule: Schedule = (run, ms) => {
@@ -63,7 +64,7 @@ interface Inventory {
   problems: string[];
   /** Every path the scan looked at, and what it saw there. */
   stamps: Map<string, string>;
-  /** The text of each instruction file, by entry path, as the scan read it. */
+  /** Instruction text and manual skill bodies, by entry path, as the scan read them. */
   texts: Map<string, string>;
   /** Whether any stamp came from within RACY_MS of the scan. */
   racy: boolean;
@@ -94,7 +95,7 @@ function inventory(given: string): Inventory {
       const text = read(root, file);
       if (kind === 'instructions') texts.set(entry.path, text);
       else {
-        const front = kind === 'skill' ? /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1] : undefined;
+        const front = kind === 'skill' ? FRONTMATTER.exec(text)?.[1] : undefined;
         if (kind === 'skill' && front === undefined) throw new Error(`${entry.path}: expected YAML frontmatter with name and description`);
         const metadata: unknown = kind === 'plugin' ? JSON.parse(text) : Bun.YAML.parse(front!);
         if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error(`${entry.path}: expected an object`);
@@ -103,6 +104,16 @@ function inventory(given: string): Inventory {
         if (kind === 'skill' && (typeof data.description !== 'string' || !data.description.trim())) throw new Error(`${entry.path}: description must be a nonempty string`);
         entry.name = data.name.slice(0, 200);
         entry.description = typeof data.description === 'string' ? data.description.slice(0, 2000) : '';
+        if (kind === 'skill' && data['disable-model-invocation'] !== undefined) {
+          if (typeof data['disable-model-invocation'] !== 'boolean') throw new Error(`${entry.path}: disable-model-invocation must be a boolean`);
+          entry.disableModelInvocation = data['disable-model-invocation'];
+          if (entry.disableModelInvocation) {
+            entry.name = data.name.trim().replace(/^\/+/, '');
+            if (!entry.name || /\s/.test(entry.name)) throw new Error(`${entry.path}: manual skill name must be a nonempty command token without whitespace`);
+            entry.name = entry.name.slice(0, 200);
+            texts.set(entry.path, text.replace(FRONTMATTER, ''));
+          }
+        }
       }
     } catch (cause) { entry.error = messageOf(cause); }
     entries.push(entry);
@@ -280,11 +291,41 @@ export class BrainStore {
       if (entry.error) throw refused(entry.error);
       blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
     }
-    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error && !listedSkill(listed, join(path, entry.path)));
+    const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error && !entry.disableModelInvocation && !listedSkill(listed, join(path, entry.path)));
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));
     const text = blocks.join('\n\n');
     if (Buffer.byteLength(text) > INSTRUCTIONS_LIMIT) throw refused(`Brain instructions and skill catalog exceed ${INSTRUCTIONS_LIMIT} bytes; reduce the entry files or catalog`);
     return `${text}\n\n`;
+  }
+
+  /** Manual skills remain available with a connected folder, independently of automatic sharing. */
+  commands(): AgentCommand[] {
+    const { path } = this.config();
+    if (!path) return [];
+    const commands = new Map<string, AgentCommand>();
+    let entries: BrainEntry[];
+    // An unreadable brain folder leaves the menu empty instead of failing it.
+    try { entries = this.current(path).entries; } catch { return []; }
+    for (const entry of entries) {
+      if (entry.kind !== 'skill' || entry.error || !entry.disableModelInvocation || commands.has(entry.name)) continue;
+      commands.set(entry.name, { name: entry.name, description: entry.description, hint: null });
+    }
+    return [...commands.values()];
+  }
+
+  /** Expand only a leading manual trigger; an advertised driver command wins. */
+  expandPrompt(prompt: string, commands: readonly AgentCommand[] = []): string {
+    const name = /^\/([^\s]+)(?:\s|$)/.exec(prompt)?.[1];
+    if (!name || commands.some(command => command.name === name)) return prompt;
+    const { path } = this.config();
+    if (!path) return prompt;
+    let scan: Inventory;
+    // An unreadable brain folder leaves the prompt as the user wrote it.
+    try { scan = this.current(path); } catch { return prompt; }
+    const { entries, texts } = scan;
+    const entry = entries.find(entry => entry.kind === 'skill' && !entry.error && entry.disableModelInvocation && entry.name === name);
+    const body = entry && texts.get(entry.path);
+    return body?.trim() ? body + prompt.slice(name.length + 1) : prompt;
   }
 
   /**

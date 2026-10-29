@@ -6,6 +6,7 @@ import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { Core, type CoreOptions } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
+import { MemoryVault } from '../src/platform/secret-vault.ts';
 import { startServer } from '../src/server.ts';
 import type { RunningServer } from '../src/server.ts';
 
@@ -20,6 +21,8 @@ export interface TestCore {
 }
 
 export interface TestCoreOptions {
+  /** Restart fixtures can retain the address peers already trust, like an installed core. */
+  port?: number;
   serverUpdates?: CoreOptions['serverUpdates'];
   bundleHash?: string;
   helloTimeoutMs?: number;
@@ -28,6 +31,10 @@ export interface TestCoreOptions {
   onShutdown?: () => void;
   retentionPassMs?: number;
   pullRequestWatches?: CoreOptions['pullRequestWatches'];
+  /** A data directory an earlier test core used: the restart a test wants to see. The test removes it. */
+  dataDir?: string;
+  /** The secret vault; a memory vault by default, so no test reaches the system's. */
+  secretVault?: CoreOptions['secretVault'];
 }
 
 const HOST_AGENT_OPT_INS = [
@@ -63,7 +70,7 @@ export function scriptedClaude(harness: TestCore): void {
 }
 
 export async function startTestCore(options: TestCoreOptions = {}): Promise<TestCore> {
-  const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
+  const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), 'boite-core-'));
   process.env.BOITE_DATA_DIR = dataDir;
   // Drafts land in the test's own directory, never in the user's Documents.
   process.env.BOITE_DRAFTS_DIR = join(dataDir, 'Documents', 'Boite');
@@ -80,7 +87,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates, retentionPassMs: options.retentionPassMs, pullRequestWatches: options.pullRequestWatches, secretVault: options.secretVault ?? (() => Promise.resolve(new MemoryVault())) });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, shortAnswers: false, ...options.settings });
@@ -96,7 +103,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   const server = startServer({
     core,
     host: '127.0.0.1',
-    port: 0,
+    port: options.port ?? 0,
     ...(options.helloTimeoutMs === undefined ? {} : { helloTimeoutMs: options.helloTimeoutMs }),
   });
 
@@ -125,7 +132,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
       await server.stop();
       await core.close();
       delete process.env.BOITE_DATA_DIR;
-      await removeDir(dataDir);
+      if (options.dataDir === undefined) await removeDir(dataDir);
     },
   };
 }
@@ -155,6 +162,23 @@ export async function echoThread(
 
 /** How many test cores have stopped. A wait that outlives a stop was abandoned by its test. */
 let stops = 0;
+
+/**
+ * Archives the thread through a write that fails after the thread row is
+ * saved, so the whole transaction rolls back. Returns the error it threw;
+ * any other failure, an early refusal included, is thrown on.
+ */
+export function rolledBackArchive(harness: TestCore, threadId: string): unknown {
+  const announce = harness.core.projects.announce;
+  harness.core.projects.announce = () => { throw new Error('injected failure after the thread was written'); };
+  try { harness.core.threads.archive(threadId, true); }
+  catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('injected failure')) throw error;
+    return error;
+  }
+  finally { harness.core.projects.announce = announce; }
+  throw new Error('the archive did not fail');
+}
 
 /**
  * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait

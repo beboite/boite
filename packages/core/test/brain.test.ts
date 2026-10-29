@@ -279,7 +279,7 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
     expect(first.indexOf('Shared convention')).toBeLessThan(first.indexOf('boite where'));
   }
   else expect(first).not.toContain('Shared convention');
-  expect(first).toContain('boite agents send');
+  expect(first).toContain('boite threads send');
   // Native subagent tools are off in Boite, so a fresh session always learns the Boite way.
   expect(first).toContain('boite delegate spawn');
   expect(first.indexOf('boite where')).toBeLessThan(first.indexOf('Hello'));

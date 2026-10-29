@@ -1,5 +1,18 @@
+/** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
+export const OFF_TOTAL_USER_TIME = 0;
+/** ...TotalKernelTime. */
+export const OFF_TOTAL_KERNEL_TIME = 8;
+/** ...ActiveProcesses. */
+export const OFF_ACTIVE_PROCESSES = 40;
+/** The accounting struct plus its IO_COUNTERS tail. */
+export const ACCOUNTING_SIZE = 96;
+
 interface JobWriter {
   setJobInfo(job: number, klass: number, buffer: Uint8Array): boolean;
+}
+
+interface JobReader {
+  queryJobInfo(job: number, klass: number, buffer: Uint8Array): boolean;
 }
 
 export const CLASS_EXTENDED_LIMIT = 9;
@@ -13,6 +26,20 @@ const JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x20;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
 const CPU_RATE_CONTROL_ENABLE = 0x1;
 const CPU_RATE_CONTROL_HARD_CAP = 0x4;
+
+export function cpuRateOfJob(api: JobReader, handle: number): {flags: number; rate: number} | null {
+  const buffer = new Uint8Array(8);
+  if (!api.queryJobInfo(handle, CLASS_CPU_RATE_CONTROL, buffer)) return null;
+  const view = new DataView(buffer.buffer);
+  return {flags: view.getUint32(0, true), rate: view.getUint32(4, true)};
+}
+
+export function memoryLimitOfJob(api: JobReader, handle: number): {flags: number; bytes: number; priority: number} | null {
+  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
+  if (!api.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
+  const view = new DataView(buffer.buffer);
+  return {flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)), priority: view.getUint32(OFF_PRIORITY_CLASS, true)};
+}
 
 export function applyCpuCap(api: JobWriter, job: number, percent: number): boolean {
   const buffer = new Uint8Array(8);

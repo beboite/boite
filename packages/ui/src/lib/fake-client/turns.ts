@@ -1,8 +1,8 @@
 /** The turn engine: start, stream and stop a turn, the way the echo driver answers. */
-import { previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
+import { effectiveCompaction, previewPrompt, RpcErrorCode, threadActive, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
-import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON } from './conversation';
+import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SETTING_MARKERS, SPAWN_MARKER, AGENT_SETTING_MARKER, AGENT_SETTING_REASON, AGENT_MODEL_MARKER, AGENT_MODEL_REASON } from './conversation';
 import { requestAgentSetting } from './agent-settings';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
@@ -46,7 +46,7 @@ export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<bo
   return stopped;
 }
 
-export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = [], automatic = false): Turn {
+export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: FakeOperation, activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = [], automatic = false, label?: string): Turn {
   // The real transport serializes Svelte proxies before they reach the core.
   previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
   const thread = ctx.thread(threadId);
@@ -82,7 +82,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     role: automatic ? 'system' : 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      userPart(thread, prompt, previewReferences, automatic, activityKind, moved),
+      userPart(thread, prompt, previewReferences, automatic, activityKind, moved, label),
       ...attachments.map(attachmentPart)
     ],
     state: 'complete',
@@ -125,7 +125,13 @@ function refuseTurn(ctx: FakeContext, thread: Thread, queuedTurn?: Turn): RpcFai
   return null;
 }
 
-function turnExecution(thread: Thread, operation: 'compact' | 'delegation' | undefined, automatic: boolean): NonNullable<Turn['execution']> {
+/**
+ * The operations the fake core opens by itself: a compaction, a delegated
+ * child's turn, and a persistent agent's wakes, labelled in its conversation.
+ */
+type FakeOperation = 'compact' | 'delegation' | 'routine' | 'event';
+
+function turnExecution(thread: Thread, operation: FakeOperation | undefined, automatic: boolean): NonNullable<Turn['execution']> {
   return {
     providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
     effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
@@ -135,12 +141,13 @@ function turnExecution(thread: Thread, operation: 'compact' | 'delegation' | und
   };
 }
 
-function userPart(thread: Thread, prompt: string, previewReferences: PreviewReference[], automatic: boolean, activityKind: 'goal' | 'loop' | undefined, moved: Thread['moveNote'] | undefined): MessagePart {
+function userPart(thread: Thread, prompt: string, previewReferences: PreviewReference[], automatic: boolean, activityKind: 'goal' | 'loop' | undefined, moved: Thread['moveNote'] | undefined, label?: string): MessagePart {
   const part: Extract<MessagePart, { type: 'text' }> = {
     type: 'text',
     text: activityKind ? activityPrompt(thread, activityKind, prompt) : previewPrompt(prompt, previewReferences),
   };
   if (automatic) part.displayText = 'Automatic compaction';
+  if (label) part.displayText = label;
   if (previewReferences.length) {
     part.displayText = prompt;
     part.previewReferences = structuredClone(previewReferences);
@@ -277,6 +284,13 @@ const TURN_MARKERS: TurnMarker[] = [
       } catch { /* already entrusted, or already asked */ }
     }
   } },
+  { matches: prompt => prompt.includes(AGENT_MODEL_MARKER), run: (ctx, thread, turn) => {
+    const agent = ctx.agents.liveProfiles()[0];
+    if (!agent) return;
+    try {
+      requestAgentSetting(ctx, thread, turn, { threadId: thread.id, agent: agent.id, key: 'model', value: 'opencode/default', reason: AGENT_MODEL_REASON });
+    } catch { /* already on it, or already asked */ }
+  } },
   { matches: prompt => prompt.includes('[background]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message) },
   { matches: prompt => prompt.includes('[monitor]'), run: (ctx, thread, _turn, message) => backgroundShell(ctx, thread, message, 'monitor') },
   { matches: prompt => prompt.includes('[tool-stream]'), run: (ctx, thread, _turn, message) => streamToolInput(ctx, thread, message) },
@@ -351,7 +365,8 @@ function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Messa
     outputTokens: Math.max(1, Math.ceil(modelPrompt.length / 4)),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000
+    costUsdEquivalent: Math.round(modelPrompt.length * 0.02) / 1000,
+    buckets: 1
   };
   turn.status = record.cancelled ? 'stopped' : 'done';
   turn.finishedAt = ctx.now();
@@ -425,17 +440,20 @@ export const FAKE_AUTO_COMPACT_SETTLE_MS = 400;
 
 /**
  * The `autoCompact` setting, for what a fake thread can show: it has no
- * background work and no prompt cache, so only `turn-end` and the threshold
- * apply. A turn that opens first keeps the thread busy and the timer does nothing.
+ * prompt cache or native tool-boundary compaction. A reached token limit falls
+ * back to the end of the turn regardless of moments; otherwise only `turn-end`
+ * applies, still gated by a configured limit. A new turn keeps the timer idle.
  */
 function autoCompact(ctx: FakeContext, thread: Thread, turn: Turn): void {
   // Checked when the turn ends and again when the timer fires, on the setting and the thread as they are then.
   const wanted = (now: Thread): boolean => {
-    const rule = ctx.settings.autoCompact;
-    if (!rule || !rule.moments.includes('turn-end') || (rule.tokens !== null && (now.context?.tokens ?? 0) < rule.tokens)) return false;
+    const rule = effectiveCompaction(ctx.settings, now).autoCompact;
+    if (!rule) return false;
+    const reachedLimit = rule.tokens !== null && (now.context?.tokens ?? 0) >= rule.tokens;
+    if (!reachedLimit && !(rule.tokens === null && rule.moments.includes('turn-end'))) return false;
     return now.activity?.goal?.status !== 'active' && now.activity?.loop?.status !== 'active';
   };
-  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId || !wanted(thread)) return;
+  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || !wanted(thread)) return;
   setTimeout(() => {
     // A closed client keeps its threads for a reconnection: nothing is added to them meanwhile.
     if (ctx.bus.state === 'closed') return;

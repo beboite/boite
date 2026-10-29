@@ -41,6 +41,29 @@ export function chatLink(raw: string): ChatLink | null {
   return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
+/**
+ * The path a file link names, whole, as it goes on the clipboard: a relative
+ * one joined to the thread's folder, `.` and `..` resolved, written with
+ * Windows separators when it is a Windows path, since `chatLink` turned them
+ * all into `/`.
+ */
+export function fullPath(path: string, cwd: string | null | undefined): string {
+  const inFolder = !cwd || /^(?:[a-z]:)?[\\/]/i.test(path) ? null : `${cwd}/${path}`;
+  const whole = (inFolder ?? path).replaceAll('\\', '/');
+  // The root stays whole: a share's `//server/share`, a drive's `C:/` or `/`. Nothing climbs above it.
+  const root = /^\/\/[^/]+\/[^/]+\/?|^[a-z]:\/?|^\//i.exec(whole)?.[0] ?? '';
+  const parts: string[] = [];
+  for (const part of whole.slice(root.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..' && parts.length > 0 && parts.at(-1) !== '..') parts.pop();
+    else if (part !== '..' || !root) parts.push(part);
+  }
+  const base = root && !root.endsWith('/') ? `${root}/` : root;
+  const joined = base + parts.join('/') + (parts.length > 0 && whole.endsWith('/') ? '/' : '') || '.';
+  // An absolute POSIX path keeps its `/` even beside a Windows folder; only a path joined to that folder takes its `\\`.
+  return /^(?:\/\/|[a-z]:\/)/i.test(joined) || (inFolder !== null && cwd!.includes('\\')) ? joined.replaceAll('/', '\\') : joined;
+}
+
 // Ratios and dates can have path separators without naming a file.
 const NUMERIC_PATH = /^[\\/]?\d[\d.,\\/]*$/;
 
@@ -52,7 +75,7 @@ export function fileLike(text: string): boolean {
 }
 
 /**
- * A thread as `boite agents` names it: `thr_x`, `<machine>/thr_x` or
+ * A thread as `boite threads` names it: `thr_x`, `<machine>/thr_x` or
  * `<core-id>/thr_x`.
  */
 const THREAD_ID = 'thr_[0-9a-z]{12,32}';
@@ -221,7 +244,7 @@ export class BracketLinks {
   }
 }
 
-type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string; thread?: boolean };
+export type LinkToken = { index: number; text: string; label?: string; target?: string; auto?: string; thread?: boolean };
 
 /**
  * The link tokens of `text`, in order: the leftmost of the next bracket link
@@ -233,7 +256,7 @@ type LinkToken = { index: number; text: string; label?: string; target?: string;
  * there, as the next alternative of one regex would, and the scan then moves
  * on by one character.
  */
-function* linkTokens(text: string): Generator<LinkToken> {
+export function* linkTokens(text: string): Generator<LinkToken> {
   const tokens = new RegExp(OTHER_TOKENS, 'g');
   const absoluteAt = new RegExp(ABSOLUTE_PATH, 'y');
   // Every bracket link holds `](`: a text without one never builds the scanner.
@@ -271,9 +294,15 @@ function* linkTokens(text: string): Generator<LinkToken> {
 }
 
 /** Tokenize links before emphasis, keeping URL punctuation and escaped attributes intact. */
-export function richInline(text: string, format: (text: string) => string): string {
+export function richInline(text: string, format: (text: string) => string, explicit = true): string {
   let out = '', start = 0;
   for (const token of linkTokens(text)) {
+    // A Markdown parser already rejected this link; do not retry its decoded destination.
+    if (!explicit && token.label !== undefined) {
+      out += format(text.slice(start, token.index)) + escapeHtml(token.text);
+      start = token.index + token.text.length;
+      continue;
+    }
     if (token.thread) {
       out += format(text.slice(start, token.index)) + threadLinkHtml(token.text, token.text);
       start = token.index + token.text.length;

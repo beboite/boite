@@ -180,7 +180,8 @@ test('a competing checkout at the reserved path survives rollback of our separat
   let competingPath = '';
   const held = spyOn(h.core.procs, 'spawn').mockImplementation((id, cmd, args, options) => {
     if (!competingPath && cmd === 'git' && command(args)[0] === 'worktree' && command(args)[1] === 'add') {
-      competingPath = command(args)[2]!;
+      // The reserved branch is last; the path precedes it, after optional flags.
+      competingPath = command(args).at(-2)!;
       git(repo.path, 'worktree', 'add', '-b', otherBranch, competingPath);
       writeFileSync(join(competingPath, 'unmerged.txt'), 'preserve the competing checkout\n');
       git(competingPath, 'add', 'unmerged.txt'); git(competingPath, 'commit', '-m', 'competing checkout work');

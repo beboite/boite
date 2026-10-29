@@ -24,6 +24,7 @@ interface Formatters {
   credits: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
   quotaDay: Intl.DateTimeFormat;
+  quotaYear: Intl.DateTimeFormat;
   /** What `Date.toLocaleString(tag)` writes, built once rather than on every call. */
   exact: Intl.DateTimeFormat;
   /** The day spelled out and the time to the second: a message's hover title. */
@@ -50,6 +51,7 @@ function formatters(): Formatters {
     credits: new Intl.NumberFormat(tag, { maximumSignificantDigits: 6 }),
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
     quotaDay: new Intl.DateTimeFormat(tag, { weekday: 'long' }),
+    quotaYear: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'short', day: 'numeric' }),
     exact: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }),
     full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' })
   };
@@ -180,10 +182,16 @@ export function weekdayTime(value: number): string {
   return formatters().weekday.format(new Date(value));
 }
 
-/** Quota resets spell the day out and keep the screen's preferred clock. */
-export function quotaResetTime(value: number): string {
+/** A weekday within the next seven local dates, otherwise a date; keep the screen's preferred clock. */
+export function quotaResetTime(value: number, now = Date.now()): string {
   const set = formatters();
-  return `${set.quotaDay.format(value)} ${set.dayClock.format(value)}`;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const week = new Date(today);
+  week.setDate(week.getDate() + 7);
+  const sameYear = new Date(value).getFullYear() === today.getFullYear();
+  const date = value >= today.getTime() && value < week.getTime() ? set.quotaDay : sameYear ? set.calendar : set.quotaYear;
+  return `${date.format(value)} ${set.dayClock.format(value)}`;
 }
 
 /** `512`, `84.4K`, `1.2M`, `3.4B` in English, `84,4 k` in French: a token count in a chip or a title. */

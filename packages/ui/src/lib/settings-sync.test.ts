@@ -1,8 +1,8 @@
 import { expect, test, vi } from 'vitest';
-import { RpcErrorCode, type RpcMethodName } from '@boite/contracts';
+import { RpcErrorCode, SYNCED_SETTINGS, type RpcMethodName } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { FakeClient } from './fake-client';
-import { PORTABLE_SETTINGS, SyncFailure, syncSettings, type SyncEnd } from './settings-sync';
+import { SyncFailure, syncSettings, type SyncEnd } from './settings-sync';
 
 async function machine(options: { uninstalled?: boolean } = {}): Promise<FakeClient> {
   const client = new FakeClient({ delayMs: 0, ...options });
@@ -20,8 +20,7 @@ function older(client: FakeClient, answer: (method: string, params: unknown) => 
 const unknown = (method: string) => Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `${method}: unknown method` }));
 
 async function end(client: Client): Promise<SyncEnd> {
-  const [{ loaded }, accounts] = await Promise.all([client.call('providers.list', {}), client.call('accounts.list', {})]);
-  return { client, providers: loaded, accounts };
+  return { client };
 }
 
 test('the target takes the portable settings, the keybindings and the brain switches, and keeps what is its own', async () => {
@@ -41,7 +40,7 @@ test('the target takes the portable settings, the keybindings and the brain swit
   const source = await from.call('settings.get', {});
   const target = await to.call('settings.get', {});
   expect(target).toMatchObject({ warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false });
-  for (const key of PORTABLE_SETTINGS) expect(target[key]).toEqual(source[key]);
+  for (const key of SYNCED_SETTINGS) expect(target[key]).toEqual(source[key]);
   expect(report.changed).toBe(5);
   // The machine's network face stays its own.
   expect(target).toMatchObject({ listenOnLan: false, publicUrl: null, quotaOrder: ['a-codex', 'a-claude'] });
@@ -54,7 +53,7 @@ test('the target takes the portable settings, the keybindings and the brain swit
   expect((await to.call('brain.status', {})).config).toMatchObject({ path: 'E:/Target/brain', enabled: true, globalInstructions: false, boiteGuide: false });
 });
 
-test('a target with no brain is told so, and a login never crosses: its providers are listed instead', async () => {
+test('a target with no brain is told so, and a login never crosses', async () => {
   const from = await machine();
   const to = await machine({ uninstalled: true });
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true });
@@ -65,10 +64,30 @@ test('a target with no brain is told so, and a login never crosses: its provider
 
   expect(report.brain).toBe('absent');
   expect(configure.mock.calls.map(([method]) => method)).not.toContain('brain.configure');
-  expect(configure.mock.calls.map(([method]) => method).filter((method) => method.startsWith('accounts.'))).toEqual([]);
-  expect(report.providers.length).toBeGreaterThan(0);
-  const ids = report.providers.map((row) => row.id);
-  expect(new Set(ids).size).toBe(ids.length);
+  expect(configure.mock.calls.map(([method]) => method).filter((method) => method.startsWith('accounts.') || method.startsWith('providers.'))).toEqual([]);
+});
+
+test('what the target changed for itself stays: a setting, a chord and a brain switch it keeps', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('settings.set', { shortAnswers: false, muteAgents: false, focusGuard: false });
+  await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
+  await from.call('keybindings.set', { command: 'palette', chord: 'mod+shift+k' });
+  await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, globalInstructions: true, boiteGuide: false });
+  await to.call('settings.set', { shortAnswers: true, muteAgents: true, focusGuard: true, syncOverrides: ['shortAnswers', 'keybinding:panel', 'brain:boiteGuide'] });
+  await to.call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' });
+  await to.call('brain.configure', { path: 'E:/Target/brain', enabled: true, globalInstructions: false, boiteGuide: true });
+
+  const report = await syncSettings(await end(from), await end(to));
+
+  const target = await to.call('settings.get', {});
+  // Kept here; the rest follows.
+  expect(target).toMatchObject({ shortAnswers: true, muteAgents: false, focusGuard: false, syncOverrides: ['shortAnswers', 'keybinding:panel', 'brain:boiteGuide'] });
+  expect(report.changed).toBe(2);
+  const keys = (await to.call('keybindings.get', {})).bindings;
+  expect(keys.panel).toBe('mod+alt+p');
+  expect(keys.palette).toBe('mod+shift+k');
+  expect((await to.call('brain.status', {})).config).toMatchObject({ globalInstructions: true, boiteGuide: true });
 });
 
 test('a core without a brain is skipped, not failed', async () => {
@@ -167,4 +186,59 @@ test('memory settings stay local across copies and later adjustments on either m
     await syncSettings(await end(from), await end(to));
     expect(await to.call('settings.get', {})).toMatchObject({ asyncQuestions: true, agentMemoryBudgetPercent: 45, memoryReserveMb: 512, memoryProtection: false });
   } finally { from.close(); to.close(); }
+});
+
+test('a setting the home never wrote follows as its default, so one given back takes the home value', async () => {
+  const from = await machine();
+  const to = await machine();
+  expect((await from.call('settings.get', {})).shortAnswers).toBeUndefined();
+  await to.call('settings.set', { shortAnswers: false, autoCompact: { tokens: 200_000, moments: ['turn-end'] } });
+
+  const report = await syncSettings(await end(from), await end(to));
+
+  expect(report.changed).toBe(2);
+  expect(await to.call('settings.get', {})).toMatchObject({ shortAnswers: true, autoCompact: null });
+});
+
+test('a setting another window keeps on the target while the copy is on its way stays as that window saved it', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('settings.set', { shortAnswers: false, muteAgents: false });
+  const call = to.call.bind(to) as Client['call'];
+  const racing = older(to, (method, params) => method === 'settings.follow'
+    // The other window's save lands between the copy's read and its write.
+    ? call('settings.set', { shortAnswers: true, syncOverrides: ['shortAnswers'] }).then(() => call('settings.follow', params as never)) as Promise<never> : null);
+  const spy = vi.spyOn(racing, 'call');
+  await syncSettings(await end(from), await end(racing));
+  expect(spy.mock.calls.some(([method]) => method === 'settings.follow')).toBe(true);
+  expect(await to.call('settings.get', {})).toMatchObject({ shortAnswers: true, muteAgents: false, syncOverrides: ['shortAnswers'] });
+});
+
+test('a chord kept on the target while the settings part is copied is left alone by the keybindings part', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('settings.set', { muteAgents: false });
+  await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
+  const call = to.call.bind(to) as Client['call'];
+  const racing = older(to, (method, params) => method === 'settings.follow'
+    // Another window changes the chord, and keeps it, while the settings part is on its way.
+    ? call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' })
+      .then(() => call('settings.set', { syncOverrides: ['keybinding:panel'] }))
+      .then(() => call('settings.follow', params as never)) as Promise<never> : null);
+  await syncSettings(await end(from), await end(racing));
+  expect((await to.call('keybindings.get', {})).bindings.panel).toBe('mod+alt+p');
+});
+
+test('installing updates by itself follows the default machine, a server included, and a desktop that turns it off keeps its own', async () => {
+  // A Docker server cannot update itself, yet as the group's default it carries the choice to every desktop.
+  const server = await machine();
+  const desk = await machine();
+  await server.call('settings.set', { autoInstallUpdates: true });
+  await syncSettings(await end(server), await end(desk));
+  expect((await desk.call('settings.get', {})).autoInstallUpdates).toBe(true);
+
+  // Turned off from that desktop's own window, which marks it as kept there.
+  await desk.call('settings.set', { autoInstallUpdates: false, syncOverrides: ['autoInstallUpdates'] });
+  await syncSettings(await end(server), await end(desk));
+  expect((await desk.call('settings.get', {})).autoInstallUpdates).toBe(false);
 });

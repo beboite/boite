@@ -3,7 +3,7 @@
   import { Check, FolderOpen, Search } from '@lucide/svelte';
   import type { Project, ProjectId } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
-  import { focusComposer } from '../lib/focus';
+  import { focusComposer, focusInitial } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
   import { homePath, projectName } from '../lib/format';
   import { scoreFields, type SearchField } from '../lib/palette';
@@ -23,7 +23,17 @@
    * on a draft (`store.projectChoiceRequest`).
    */
   /** `phone`: the copy the phone's welcome draws; the find chord opens the one the width shows. */
-  let { store, testid, phone = false, children }: { store: Store; testid: string; phone?: boolean; children: Snippet } = $props();
+  let { store, testid, phone = false, selection, children }: {
+    store: Store; testid: string; phone?: boolean; children: Snippet;
+    /** Reuse the search for an action on an existing project, without changing the draft. */
+    selection?: {
+      machines: Machine[];
+      projects: (owner: Store) => readonly Project[];
+      onpick: (owner: Store, project: Project) => void;
+      label: string;
+      empty: string;
+    };
+  } = $props();
 
   const OPEN_FOLDER = 'open-folder';
 
@@ -51,7 +61,10 @@
 
   const popover = new Closing();
   /** One machine names no machine. */
-  let several = $derived(workspace.machines.length > 1);
+  const machines = $derived(selection?.machines ?? workspace.machinesOr(store));
+  const label = $derived(selection?.label ?? strings.thread.changeProject);
+  const openFolder = $derived(!selection && store.owner);
+  let several = $derived(workspace.machines.length > 1 || machines.length > 1);
   let trigger = $state<HTMLButtonElement | undefined>(undefined);
   let input = $state<HTMLInputElement | undefined>(undefined);
   let list = $state<HTMLDivElement | undefined>(undefined);
@@ -63,7 +76,6 @@
 
   /** Every machine's drafts first, whether the core has made them yet or not, then its live projects. */
   let groups = $derived.by<Group[]>(() => {
-    const machines = workspace.machinesOr(store);
     // The machine on screen first: its projects are the likeliest pick.
     const ordered = [...machines.filter((m) => m.store === store), ...machines.filter((m) => m.store !== store)];
     const fields = (name: string, machine: Machine, path: string): SearchField[] => [
@@ -73,9 +85,9 @@
     ];
     return ordered.map((machine) => {
       const here = machine.store === store;
-      const drafts = machine.store.draftsProject;
+      const drafts = selection ? undefined : machine.store.draftsProject;
       const rows: Row[] = [
-        {
+        ...(!selection ? [{
           id: JSON.stringify([machine.id, null]),
           label: strings.drafts.name,
           hint: drafts ? homePath(drafts.path) : '',
@@ -84,22 +96,22 @@
           tile: drafts ? { project: drafts, store: machine.store } : null,
           machine,
           fields: fields(strings.drafts.name, machine, '')
-        },
-        ...machine.store.projects
+        }] : []),
+        ...(selection ? selection.projects(machine.store) : machine.store.projects)
           .filter((entry) => entry.id !== drafts?.id && entry.archived !== true)
           .map((entry) => ({
             id: JSON.stringify([machine.id, entry.id]),
             label: projectName(entry),
             hint: homePath(entry.path),
             title: entry.path,
-            active: here && entry.id === store.draft?.projectId,
+            active: !selection && here && entry.id === store.draft?.projectId,
             tile: { project: entry, store: machine.store },
             machine,
             fields: fields(projectName(entry), machine, entry.path)
           }))
       ];
       return { id: machine.id, machine: several ? machine : null, rows };
-    });
+    }).filter(group => group.rows.length > 0);
   });
 
   /** Typed, one list over every machine, best first, the palette's ranking (`lib/palette.ts`). */
@@ -116,7 +128,7 @@
   });
 
   /** What the arrows walk: the rows in screen order, then opening a folder. */
-  let order = $derived([...shown.flatMap((group) => group.rows.map((row) => row.id)), ...(store.owner ? [OPEN_FOLDER] : [])]);
+  let order = $derived([...shown.flatMap((group) => group.rows.map((row) => row.id)), ...(openFolder ? [OPEN_FOLDER] : [])]);
   let empty = $derived(shown.length === 0);
 
   $effect(() => {
@@ -139,7 +151,7 @@
     }
     seen = { store: owner, request };
     untrack(() => {
-      if (!trigger || window.matchMedia('(max-width: 720px)').matches !== phone) return;
+      if (selection || !trigger || window.matchMedia('(max-width: 720px)').matches !== phone) return;
       if (popover.open) input?.focus({ preventScroll: true });
       else open(true);
     });
@@ -149,7 +161,8 @@
   $effect(() => {
     if (!popover.open) return;
     void tick().then(() => {
-      if (byKeyboard || !window.matchMedia('(max-width: 720px)').matches) input?.focus({ preventScroll: true });
+      if (byKeyboard) input?.focus({ preventScroll: true });
+      else focusInitial(input, input?.closest<HTMLElement>('[role=dialog]'));
       const at = order.findIndex((id) => shown.some((group) => group.rows.some((row) => row.id === id && row.active)));
       if (at >= 0) move(at);
     });
@@ -178,7 +191,7 @@
   /** Closed from the keyboard, it gives the keys to the composer: the next thing typed is the prompt. */
   function close(refocus: boolean) {
     popover.hide();
-    if (refocus && !focusComposer()) trigger?.focus({ preventScroll: true });
+    if (refocus && (selection || !focusComposer())) trigger?.focus({ preventScroll: true });
   }
 
   function move(at: number) {
@@ -189,6 +202,12 @@
 
   async function pick(id: string) {
     popover.hide();
+    if (selection) {
+      const row = groups.flatMap(group => group.rows).find(row => row.id === id);
+      if (row?.tile) selection.onpick(row.machine.store, row.tile.project);
+      trigger?.focus({ preventScroll: true });
+      return;
+    }
     if (id === OPEN_FOLDER) {
       store.projectPickerOpen = true;
       return;
@@ -254,10 +273,11 @@
   <button
     type="button"
     class="trigger"
+    class:chip={!!selection}
     aria-haspopup="dialog"
     aria-expanded={popover.open}
-    aria-label={strings.thread.changeProject}
-    title={strings.thread.changeProject}
+    aria-label={label}
+    title={label}
     data-testid={testid}
     bind:this={trigger}
     onclick={(event) => { event.stopPropagation(); if (popover.open) popover.hide(); else open(); }}
@@ -281,7 +301,7 @@
       class:closing={popover.closing}
       role="dialog"
       aria-modal="true"
-      aria-label={strings.thread.changeProject}
+      aria-label={label}
       tabindex="-1"
       {onkeydown}
       data-testid="{testid}-menu"
@@ -306,7 +326,7 @@
         />
       </label>
 
-      <div class="rows" role="listbox" id={listId} aria-label={strings.thread.changeProject} bind:this={list} data-testid="{testid}-list">
+      <div class="rows" role="listbox" id={listId} aria-label={label} bind:this={list} data-testid="{testid}-list">
         {#each shown as group (group.id)}
           {#if group.machine}<div class="group ui-label" role="presentation"><MachineIcon icon={group.machine.icon} os={group.machine.store.core?.os} size={12} />{group.machine.label}</div>{/if}
           {#each group.rows as row (row.id)}
@@ -333,10 +353,10 @@
             </button>
           {/each}
         {/each}
-        {#if empty}<p class="empty" data-testid="{testid}-empty">{fill(strings.thread.noProjectMatch, { query: query.trim() })}</p>{/if}
+        {#if empty}<p class="empty" data-testid="{testid}-empty">{!typed && selection ? selection.empty : fill(strings.thread.noProjectMatch, { query: query.trim() })}</p>{/if}
       </div>
 
-      {#if store.owner}
+      {#if openFolder}
         <button
           type="button"
           class="row folder"
@@ -366,6 +386,10 @@
   /* A word inside the heading: it takes the sentence's type and only fills under the pointer. */
   .trigger {
     cursor: pointer;
+    gap: 6px;
+  }
+
+  .trigger:not(.chip) {
     height: auto;
     padding: 2px 6px;
     gap: 4px;
@@ -377,8 +401,8 @@
     transition: background var(--dur-2) var(--ease-out-quint);
   }
 
-  .trigger:hover,
-  .trigger[aria-expanded='true'] {
+  .trigger:not(.chip):hover,
+  .trigger:not(.chip)[aria-expanded='true'] {
     background: var(--color-hover);
   }
 

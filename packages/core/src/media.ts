@@ -1,7 +1,7 @@
-import { DISPLAY_IMAGE_MAX, DISPLAY_THUMB_MAX, IMAGE_INLINE_CHARS, MESSAGE_PAGE, MESSAGE_PAGE_MAX, type ImagePreviews, type MessageId, type ThreadId } from '@boite/contracts';
+import { DISPLAY_IMAGE_MAX, DISPLAY_THUMB_MAX, type ImagePreviews } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
-import { mediaDisplay, mediaPreviews, messageIdsNear, putMediaDisplay, putMediaPreview, unscannedMedia } from './journal/media-previews.ts';
+import { mediaDisplay, mediaPreviews, putMediaDisplay, putMediaPreview } from './journal/media-previews.ts';
 
 /** Past this many pixels a picture gets no blur: decoding it costs more memory than the blur is worth. */
 const PREVIEW_MAX_PIXELS = 7680 * 4320;
@@ -9,8 +9,6 @@ const PREVIEW_MAX_PIXELS = 7680 * 4320;
 const PREVIEW_CONCURRENCY = 3;
 /** Base64 characters held by pictures waiting for a blur. Past this, the next read of their page asks again. */
 const PREVIEW_QUEUE_CHARS = 64 * 1024 * 1024;
-/** How long a page read waits for the blurs of pictures no client was sent before. */
-const WARM_BUDGET_MS = 1500;
 
 /** WebP copies made at once. Each decodes one picture on Bun's image worker, about 130 ms for a 1920 by 1080 screenshot. */
 const DISPLAY_CONCURRENCY = 2;
@@ -60,8 +58,6 @@ interface Job {
   messageId: string;
   partIndex: number;
   data: string;
-  done: Promise<void>;
-  settle: () => void;
 }
 
 /** A ThumbHash render of the picture as a PNG data URL, or null when Bun cannot decode it or refuses its size. */
@@ -110,56 +106,6 @@ export class MediaPreviews {
       this.enqueue(threadId, messageId, partIndex, data);
       return null;
     };
-  }
-
-  /**
-   * Makes the blurs of the page a `compactImages` read is about to send, for
-   * messages no read looked at before, so the first opening of an old thread
-   * already draws them. It covers `limit` messages on each side of `near`, or
-   * the last `limit`. A message is looked at once; the wait is bounded and the
-   * rest goes on in the background. Called before the page is read, never
-   * between the read and the answer, so the answer still holds every event
-   * sent before it.
-   */
-  async warm(threadId: ThreadId, near?: MessageId, limit?: number): Promise<void> {
-    // The blurs are optional: a failure here never costs the reader the page.
-    try {
-      await this.warmPage(threadId, near, limit);
-    } catch (error) {
-      this.core.log('warn', `media previews for thread ${threadId} were not prepared: ${messageOf(error)}`);
-    }
-  }
-
-  private async warmPage(threadId: ThreadId, near?: MessageId, limit?: number): Promise<void> {
-    const journal = this.core.journal;
-    if (journal.getThread(threadId) === null) return;
-    const rowid = near === undefined ? null : journal.messageRowid(threadId, near);
-    if (near !== undefined && rowid === null) return;
-    const size = Math.min(Math.max(1, Math.trunc(Number.isFinite(limit) ? limit! : MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
-    const fresh = unscannedMedia(journal.db, messageIdsNear(journal.db, threadId, rowid, size));
-    if (fresh.length === 0) return;
-    const waits: Promise<void>[] = [];
-    for (const messageId of fresh) {
-      const message = journal.getMessage(messageId);
-      if (message === null) continue;
-      const known = mediaPreviews(journal.db, messageId);
-      let complete = message.state !== 'streaming';
-      message.parts.forEach((part, index) => {
-        const picture = part.type === 'image' || (part.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(part.mimeType));
-        if (!picture || part.data.length <= IMAGE_INLINE_CHARS || known.has(index)) return;
-        const done = this.enqueue(threadId, messageId, index, part.data);
-        if (done === null) complete = false;
-        else waits.push(done);
-      });
-      if (complete) putMediaPreview(journal.db, threadId, messageId, -1, null);
-    }
-    if (waits.length === 0) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      Promise.all(waits),
-      new Promise<void>(resolve => { timer = setTimeout(resolve, WARM_BUDGET_MS); }),
-    ]);
-    clearTimeout(timer);
   }
 
   /**
@@ -225,18 +171,15 @@ export class MediaPreviews {
     }
   }
 
-  /** The promise of that blur being written, or null when the queue is full. */
-  private enqueue(threadId: string, messageId: string, partIndex: number, data: string): Promise<void> | null {
+  /** Queue a missing blur; a full queue leaves it for a later read. */
+  private enqueue(threadId: string, messageId: string, partIndex: number, data: string): void {
     const key = `${messageId}\0${partIndex}`;
     const existing = this.waiting.get(key) ?? this.running.get(key);
-    if (existing !== undefined) return existing.done;
-    if (this.queuedChars + data.length > PREVIEW_QUEUE_CHARS && this.waiting.size + this.running.size > 0) return null;
-    let settle: () => void = () => undefined;
-    const done = new Promise<void>(resolve => { settle = resolve; });
+    if (existing !== undefined) return;
+    if (this.queuedChars + data.length > PREVIEW_QUEUE_CHARS && this.waiting.size + this.running.size > 0) return;
     this.queuedChars += data.length;
-    this.waiting.set(key, { threadId, messageId, partIndex, data, done, settle });
+    this.waiting.set(key, { threadId, messageId, partIndex, data });
     this.pump();
-    return done;
   }
 
   private pump(): void {
@@ -251,7 +194,6 @@ export class MediaPreviews {
       }).finally(() => {
         this.running.delete(key);
         this.queuedChars -= job.data.length;
-        job.settle();
         this.pump();
       });
     }

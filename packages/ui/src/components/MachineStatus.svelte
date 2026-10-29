@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isThisPC, machineHealth, workspace } from '../lib/workspace.svelte';
+  import { machineName, listedName, isThisPC, machineHealth, workspace } from '../lib/workspace.svelte';
   import { Monitor, TriangleAlert } from '@lucide/svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -27,7 +27,7 @@
   const items = $derived<MenuItem[]>([
     ...(machines.length > 1 ? [
       { id: 'all', label: strings.machines.all, active: filter === null, hideActiveMark: true },
-      ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: tones[health.get(m)!], label: health.get(m) === 'offline' ? strings.connection.offline : strings.connection[m.store.connection] }, active: m.id === filter })),
+      ...machines.map(m => ({ id: m.id, label: listedName(m), status: { tone: tones[health.get(m)!], label: health.get(m) === 'offline' ? strings.connection.offline : strings.connection[m.store.connection] }, active: m.id === filter })),
       separator('manage-separator')
     ] : []),
     { id: 'manage', label: strings.connection.manage, icon: 'settings' }
@@ -43,7 +43,7 @@
   {#if shown}
     <Menu {items} onpick={choose} {label} variant="ghost" {testid}>
       {#if issues}<TriangleAlert size={16} />{:else}<Monitor size={16} />{/if}
-      {#if chosen}<span class="name ui-label">{chosen.label}</span>{/if}
+      {#if chosen}<span class="name ui-label">{machineName(chosen)}</span>{/if}
     </Menu>
   {/if}
 </div>

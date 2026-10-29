@@ -1,13 +1,19 @@
 <script lang="ts">
   import { Archive, CheckCheck, LoaderCircle } from '@lucide/svelte';
   import type { ProjectEntry } from '../lib/project-view.svelte';
-  import { archiveCount, projectThreadView } from '../lib/project-threads.svelte';
+  import { archiveCount, projectThreadView, type ProjectThreadKind } from '../lib/project-threads.svelte';
   import { count as formatCount, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { recentPreferences } from '../lib/recent.svelte';
 
-  /** `away`: the machine is not connected, so its last known working count is drawn without the live colour. */
-  let { entry, working, controls, collapsed = false, searching = false, away = false }: { entry: ProjectEntry; working: number; controls: string; collapsed?: boolean; searching?: boolean; away?: boolean } = $props();
+  /**
+   * `away`: the machine is not connected, so its last known working count is drawn without the live colour.
+   * `body`: the lists the card shows as its body. Their rows say the count, so the pill only stands in for them
+   * while the card is folded, and unfolds it.
+   */
+  let { entry, working, controls, collapsed = false, searching = false, away = false, body = [] }: {
+    entry: ProjectEntry; working: number; controls: string; collapsed?: boolean; searching?: boolean; away?: boolean; body?: readonly ProjectThreadKind[];
+  } = $props();
   const kinds = ['working', 'done', 'archived'] as const;
   const labels = { working: strings.sidebar.projectWorkingThreads, done: strings.sidebar.projectDoneThreads, archived: strings.sidebar.projectArchivedThreads };
 </script>
@@ -17,11 +23,12 @@
     {@const total = kind === 'working' ? working : archiveCount(entry.project, kind)}
     {@const open = !collapsed && !(kind === 'working' && searching) && projectThreadView.isOpen(entry, kind)}
     {@const label = fill(labels[kind], { count: String(total), project: projectName(entry.project) })}
-    {@const grouped = kind !== 'working' || recentPreferences.groupWorking}
-    {#if total > 0}
+    {@const inBody = body.includes(kind)}
+    {@const grouped = (kind !== 'working' || recentPreferences.groupWorking) && !inBody}
+    {#if total > 0 && (!inBody || collapsed)}
     <button type="button" class="ghost counter {kind}" class:away class:active={open && grouped} data-testid="project-{kind}-toggle" data-count={total}
-      title={label} aria-label={label} aria-expanded={grouped ? open : undefined} aria-controls={grouped ? `${controls}-${kind}` : undefined} disabled={!grouped || (kind === 'working' && searching)}
-      onclick={() => projectThreadView.toggle(entry, kind, collapsed)}>
+      title={label} aria-label={label} aria-expanded={grouped || inBody ? open : undefined} aria-controls={grouped ? `${controls}-${kind}` : undefined} disabled={!inBody && (!grouped || (kind === 'working' && searching))}
+      onclick={() => inBody ? entry.machine.store.toggleProject(entry.project.id) : projectThreadView.toggle(entry, kind, collapsed)}>
       {#if kind === 'working'}<LoaderCircle size={13} aria-hidden="true" />{:else if kind === 'done'}<CheckCheck size={13} aria-hidden="true" />{:else}<Archive size={13} aria-hidden="true" />{/if}
       <span class="ui-label">{formatCount(total)}</span>
     </button>

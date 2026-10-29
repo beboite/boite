@@ -41,7 +41,7 @@ test('a provider Boite installs waits in Settings, one tile away, and joins the 
   expect(store.defaultChoice()?.providerId).toBe('antigravity');
 });
 
-test('Providers keeps installation details and Machines updates the managed copy that runs', async () => {
+test('Providers keeps installation details and updates the managed copy that runs', async () => {
   store.draft = null;
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
@@ -66,21 +66,17 @@ test('Providers keeps installation details and Machines updates the managed copy
   await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
   expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
   expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
-  query<HTMLButtonElement>('[data-testid=settings-tab-machines]').click();
   await waitFor(() => document.querySelector('[data-testid=machine-agent-update][data-provider-id=opencode]') !== null);
   expect(document.querySelector('[data-testid=machine-agent-update][data-provider-id=opencode] [data-testid=install-update]')).toBeNull();
   expect(query('[data-testid=machine-agent-update][data-provider-id=opencode] .version').textContent).toBe('1.18.31');
-  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  await waitFor(() => document.querySelector(behind) !== null);
 
-  // Providers says whose copy runs, never its version: versions and updates belong to Machines.
+  // The provider's row says whose copy runs; its version and its update sit in the page's agent card.
   store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
   await openProviderDetails('opencode');
   expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Installed by Boite');
   expect(document.querySelector(`${behind} [data-testid=install-remove]`)).not.toBeNull();
   expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
 
-  query<HTMLButtonElement>('[data-testid=settings-tab-machines]').click();
   const update = '[data-testid=machine-agent-update][data-provider-id=opencode]';
   await waitFor(() => document.querySelector(`${update} [data-testid=install-update]`) !== null);
   expect(query(`${update} [data-testid=install-update]`).textContent?.trim()).toBe('Update');

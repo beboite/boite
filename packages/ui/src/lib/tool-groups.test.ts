@@ -119,9 +119,9 @@ test('a call reads as its command, or as a sentence in the tense it is in', () =
 
 test('a running command says what it is for, else the program and its subcommands', () => {
   // The agent's own words while the command runs, not the bare name of the CLI it calls.
-  const described = tool('Bash', { command: 'boite agents send thr_1 "redo the titled assets"', description: 'Ask the media step to redo the titled assets\nsecond line' }, { status: 'running' });
+  const described = tool('Bash', { command: 'boite threads send thr_1 "redo the titled assets"', description: 'Ask the media step to redo the titled assets\nsecond line' }, { status: 'running' });
   expect(liveLabel(described)).toBe('Ask the media step to redo the titled assets');
-  expect(liveLabel(tool('Bash', { command: 'boite agents send thr_1 "redo it"' }, { status: 'running' }))).toBe('Running boite agents send');
+  expect(liveLabel(tool('Bash', { command: 'boite threads send thr_1 "redo it"' }, { status: 'running' }))).toBe('Running boite threads send');
   expect(liveLabel(tool('PowerShell', { command: 'git -C D:/x status', description: '  ' }, { status: 'running' }))).toBe('Running git');
   expect(commandOf('FOO=1 bun run check --watch')).toBe('bun run check');
   expect(commandOf(`FOO="hello world" BAR='a b' gh repo create`)).toBe('gh repo create');

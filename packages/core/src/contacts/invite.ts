@@ -4,7 +4,8 @@
  * alone the inviting core keeps, so it travels like a password.
  */
 import { createHash, createPublicKey } from 'node:crypto';
-import { invalidParams } from '../errors.ts';
+import { invalidParams, unavailable } from '../errors.ts';
+import { isTailnetAddress, isTailnetV6 } from '../group/addresses.ts';
 import { checkBox } from '../group/seal.ts';
 
 export const INVITE_PREFIX = 'boite://contact#';
@@ -62,9 +63,24 @@ export function checkCard(value: unknown, field: string): ContactCard {
   return { coreId, publicKey, box: checkBox(card.box, `${field}.box`), machine: checkMachine(card.machine, `${field}.machine`) };
 }
 
+const PLAIN_HTTP = 'expected https, or http to a tailnet name or address, or numeric loopback';
+
+/** A tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48) or numeric loopback: WireGuard or the machine itself carries plain HTTP. */
+function carried(address: string): boolean {
+  const bare = address.replace(/^\[|\]$/g, '');
+  return isTailnetAddress(bare) || isTailnetV6(bare) || bare === '127.0.0.1' || bare === '::1';
+}
+
+/** A DNS name, as opposed to an address written as numbers. */
+function isName(host: string): boolean {
+  return !host.startsWith('[') && !/^[\d.]+$/.test(host);
+}
+
 /**
  * What a guest dials: an origin, HTTPS anywhere, HTTP only to a tailnet name
- * or address, where WireGuard carries it, or to numeric loopback.
+ * or address, where WireGuard carries it, or to numeric loopback. A name
+ * outside `*.ts.net` (a Headscale tailnet's base domain) passes here and is
+ * resolved before the join dials it (`checkTailnetName`).
  */
 export function contactUrl(raw: unknown, field: string): string {
   let url: URL;
@@ -73,12 +89,37 @@ export function contactUrl(raw: unknown, field: string): string {
   }
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw invalidParams(`${field}: expected an origin without credentials, path, query or fragment`, { field });
   const host = url.hostname.toLowerCase();
-  const tailnet = host.endsWith('.ts.net') || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/.test(host);
-  const loopback = host === '127.0.0.1' || host === '[::1]';
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (tailnet || loopback))) {
-    throw invalidParams(`${field}: expected https, or http to a tailnet name (*.ts.net) or numeric loopback`, { field });
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (isName(host) || carried(host)))) {
+    throw invalidParams(`${field}: ${PLAIN_HTTP}`, { field });
   }
   return url.origin;
+}
+
+export type Lookup = (host: string) => Promise<string[]>;
+
+async function systemLookup(host: string): Promise<string[]> {
+  // Loaded here: only a join to a name outside *.ts.net needs it.
+  const { lookup } = await import('node:dns/promises');
+  return (await lookup(host, { all: true, verbatim: true })).map(entry => entry.address);
+}
+
+/**
+ * Plain HTTP to a name outside `*.ts.net` only when every address it resolves
+ * to is on the tailnet or loopback: a Headscale MagicDNS name passes, a LAN or
+ * public name is refused. A `*.ts.net` name is not resolved: a shared
+ * machine's name may answer only once its share is accepted.
+ */
+export async function checkTailnetName(origin: string, field: string, lookup: Lookup = systemLookup): Promise<void> {
+  const url = new URL(origin);
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'http:' || !isName(host) || host.endsWith('.ts.net')) return;
+  let addresses: string[];
+  try { addresses = await lookup(host); } catch {
+    throw unavailable(`${field}: ${host} does not resolve, so this machine is not on the inviter's tailnet; join that tailnet with MagicDNS on, or ask the inviter for an invitation for another network`);
+  }
+  if (addresses.length === 0 || !addresses.every(carried)) {
+    throw invalidParams(`${field}: ${host} resolves to ${addresses.join(', ') || 'nothing'}, outside the tailnet; ${PLAIN_HTTP}`, { field });
+  }
 }
 
 export function encodeInvite(invite: Invitation): string {

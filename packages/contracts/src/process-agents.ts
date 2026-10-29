@@ -1,4 +1,5 @@
 import type { NativeAgent, ProcessRecord } from './index.ts';
+import { KILL_EXIT_CODE } from './trace.ts';
 
 const names: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'pi', grok: 'Grok', agy: 'agy' };
 const base = (path: string) => path.replaceAll('\\', '/').split('/').at(-1)?.toLowerCase().replace(/\.(exe|cmd|ps1)$/, '') ?? '';
@@ -58,7 +59,7 @@ export function collectProcessAgents(records: ProcessRecord[], live: ProcessReco
     return [{
       ...command, id, toolId: id, source: 'process', startedAt: record.startedAt,
       ...(record.exitedAt !== null ? { finishedAt: record.exitedAt } : {}),
-      status: record.exitedAt === null ? running.has(id) ? 'running' : 'unknown' : record.exitCode === 0 ? 'done' : record.exitCode === null ? 'unknown' : 'error',
+      status: record.exitedAt === null ? running.has(id) ? 'running' : 'unknown' : record.exitCode === 0 ? 'done' : record.exitCode === null ? 'unknown' : record.exitCode === KILL_EXIT_CODE ? 'stopped' : 'error',
     } satisfies NativeAgent];
   });
 }

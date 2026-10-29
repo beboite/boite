@@ -13,6 +13,8 @@ export const fr: Translation = {
     signInHint: 'Connectez-vous avec Ouvrir {name}, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
     mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
     enabledHint: 'Activé, les comptes connectés sur cette machine ne sont plus utilisés pour Claude et Codex, ni pour Grok derrière Douane.',
+    use: 'Utiliser {name}',
+    switchFailed: 'Impossible de basculer {name} : {error}',
     account: 'Les requêtes passent par {name} ({origin}). Les connexions de ce PC ne sont pas utilisées.',
     via: 'via {name}',
     quotasFailed: 'Impossible de lire les limites de {name} : {error}',

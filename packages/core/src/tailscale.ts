@@ -20,6 +20,7 @@
 import type { TailscaleStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { processPlatform } from './platform/index.ts';
+import { runCommand } from './run-command.ts';
 
 const STATUS_TIMEOUT_MS = 5_000;
 const SERVE_TIMEOUT_MS = 15_000;
@@ -27,7 +28,7 @@ const HTTPS_PORT = '443';
 /** Where the owner turns on MagicDNS and HTTPS certificates. */
 export const TAILSCALE_DNS_ADMIN = 'https://login.tailscale.com/admin/dns';
 
-interface Run {
+export interface Run {
   code: number | null;
   stdout: string;
   stderr: string;
@@ -91,7 +92,7 @@ export interface TailscaleOptions {
   cli?: () => string[] | null;
 }
 
-function defaultCli(): string[] | null {
+export function defaultCli(): string[] | null {
   const override = process.env['BOITE_TAILSCALE_CLI'];
   if (override) return /\.[cm]?[jt]s$/.test(override) ? [process.execPath, override] : [override];
   const found = processPlatform.tailscaleCli?.() ?? null;
@@ -205,26 +206,16 @@ export class TailscaleAccess {
     return { ...status, detail: run.timedOut ? 'timeout' : classifyFailure(output) };
   }
 
-  private async run(cli: string[], args: string[], timeoutMs: number): Promise<Run> {
-    const [command, ...prefix] = cli;
-    let child: ReturnType<Core['procs']['spawn']>;
-    try {
-      child = this.core.procs.spawn('system:tailscale', command!, [...prefix, ...args], { agentRoot: false });
-    } catch (error) {
-      return { code: null, stdout: '', stderr: error instanceof Error ? error.message : String(error), timedOut: false };
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.proc.kill();
-    }, timeoutMs);
-    try {
-      const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
-      return { code, stdout, stderr, timedOut };
-    } finally {
-      clearTimeout(timer);
-    }
+  private run(cli: string[], args: string[], timeoutMs: number): Promise<Run> {
+    return runCli(this.core, cli, args, timeoutMs);
   }
+}
+
+/** One tailscale command, stopped with what it started after `timeoutMs`. Its output stays on the core. */
+export async function runCli(core: Core, cli: string[], args: string[], timeoutMs: number): Promise<Run> {
+  const [command, ...prefix] = cli;
+  const run = await runCommand(core.procs, 'system:tailscale', command!, [...prefix, ...args], timeoutMs);
+  return { ...run, stdout: new TextDecoder().decode(run.stdout) };
 }
 
 /**

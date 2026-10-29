@@ -2,6 +2,9 @@
 import { TODO_STATUSES, type Thread, type Todo, type TodoGoal } from '@boite/contracts';
 import { refusal, todoText } from './shared';
 import type { FakeContext, FakeMethods } from './context';
+import { applySharedBoard, sharedTodos } from './shared-board';
+import { invalidShared, refusedShared, sharedScope } from './shared-state';
+import { secureId } from '../secure-id';
 
 /** A `/goal2`'s state as its card shows it, as the core reads it on every send. */
 function goalOf(thread: Thread | undefined): TodoGoal | null {
@@ -21,7 +24,7 @@ function projectTodos(ctx: FakeContext, projectId: string | null): Todo[] {
   if (projectId === null) throw refusal('this agent session has no project');
   const rank = (todo: Todo): number => (todo.status === 'done' ? 1 : 0);
   return structuredClone(
-    ctx.todos
+    [...ctx.todos, ...sharedTodos(ctx, projectId)]
       .filter((todo) => todo.projectId === projectId)
       .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt)
       .map((todo) => {
@@ -59,10 +62,19 @@ function emitTodos(ctx: FakeContext, projectId: string): void {
   ctx.emit('todos.updated', { projectId, todos: projectTodos(ctx, projectId) });
 }
 
+/** The cards an agent reads: a shared one only while its source may reach that association, as the core's `visibleTodos`. */
+export function agentTodos(ctx: FakeContext, threadId: string, todos: Todo[]): Todo[] {
+  return todos.filter(todo=>{
+    if(!todo.shared)return true;
+    try{sharedScope(ctx,{threadId,sharedProjectId:todo.shared.sharedProjectId});return true;}catch{return false;}
+  });
+}
+
 export function todoMethods(ctx: FakeContext) {
   return {
     'todos.list': async (params) => {
-      return projectTodos(ctx, ctx.thread(params.threadId).projectId);
+      const todos=projectTodos(ctx, ctx.thread(params.threadId).projectId);
+      return ctx.bus.principal!=='agent'?todos:agentTodos(ctx, params.threadId, todos);
     },
     'todos.add': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -82,6 +94,20 @@ export function todoMethods(ctx: FakeContext) {
       return structuredClone(todo);
     },
     'todos.update': async (params) => {
+      if (params.sharedProjectId) {
+        const scope = sharedScope(ctx, {...params, sharedProjectId: params.sharedProjectId});
+        const current = sharedTodos(ctx, scope.local.projectId).find(t => t.id === params.todoId && t.shared?.sharedProjectId === params.sharedProjectId);
+        if (!current) throw refusedShared('todoId: expected a live shared card');
+        if (params.goalThreadId !== undefined && (params.text !== undefined || params.status !== undefined && params.status !== 'open')) throw invalidShared('todos.update: link changes are separate from text or status edits');
+        const base = {cardId: params.todoId, requestId: secureId()};
+        const command = params.goalThreadId ? {...base, kind: 'claim' as const, expectedRevision: current.shared!.card.revision, worker: {project: scope.local, threadId: params.goalThreadId, address: {coreId: scope.local.ownerCoreId, threadId: params.goalThreadId}}}
+          : params.goalThreadId === null ? current.shared!.card.assignment ? {...base, kind: 'release' as const, claimId: current.shared!.card.assignment.claimId} : null
+          : {...base, kind: 'update' as const, ...(params.text === undefined ? {} : {text: params.text}), ...(params.status === undefined ? {} : {status: params.status})};
+        if (!command) return current;
+        const result = await applySharedBoard(ctx, {...params, sharedProjectId: params.sharedProjectId, command});
+        if (['conflict','deleted','revoked'].includes(result.outcome) || command.kind === 'claim' && result.outcome === 'queued') throw refusedShared('todoId: shared card claim requires an accepted authority reservation');
+        return sharedTodos(ctx, scope.local.projectId).find(t => t.id === params.todoId && t.shared?.sharedProjectId === params.sharedProjectId)!;
+      }
       const thread = ctx.thread(params.threadId);
       if (thread.projectId === null) throw refusal('this agent session has no project');
       const todo = ctx.todos.find((one) => one.id === params.todoId && one.projectId === thread.projectId);
@@ -107,6 +133,10 @@ export function todoMethods(ctx: FakeContext) {
       return projectTodos(ctx, thread.projectId).find((one) => one.id === todo.id)!;
     },
     'todos.remove': async (params) => {
+      if (params.sharedProjectId) {
+        await applySharedBoard(ctx, {...params, sharedProjectId: params.sharedProjectId, command: {kind: 'remove', cardId: params.todoId, requestId: secureId()}});
+        return {ok: true as const};
+      }
       const thread = ctx.thread(params.threadId);
       if (thread.projectId === null) throw refusal('this agent session has no project');
       const index = ctx.todos.findIndex((one) => one.id === params.todoId && one.projectId === thread.projectId);

@@ -24,10 +24,10 @@ export function slashName(item: PaletteItem): string {
 
 /**
  * Every command Boite runs itself, in the order the palette shows them. The
- * ones that need an open thread are only there while one is.
+ * ones that need an open thread are only there while one is. A phone, which
+ * leaves Providers to the desktop (`desktopSettings`), is offered no way to it.
  */
-export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
-  void inShell;
+export function appCommands(store: Store, phone: boolean): PaletteItem[] {
   const open = store.openThread;
   const items: PaletteItem[] = [];
   /** One row, its hint the chord the keyboard table holds for it, if any. */
@@ -64,12 +64,12 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   items.push(row('sidebar', strings.palette.sidebar));
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material buttons toolbar'));
-  items.push({ id: 'task-manager', kind: 'command', label: strings.taskManager.title, keywords: 'cpu ram memory disk network processes usage' });
+  items.push({ id: 'task-manager', kind: 'command', label: strings.taskManager.title, keywords: 'cpu gpu ram memory disk storage network processes usage' });
   // The one way back to an archived thread: no chord, so written like the tour.
   items.push({ id: 'archived', kind: 'command', label: strings.settings.archived.heading, keywords: 'archive restore unarchive old hidden' });
   items.push(row('reopen-thread', strings.keyboard.commands.reopenThread, 'undo closed restore unarchive last'));
   if (store.owner) {
-    items.push(row('providers', strings.palette.providers, 'accounts login install'));
+    if (!phone) items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
   }
   // The tour again. It is no chord's command, so it is written here rather

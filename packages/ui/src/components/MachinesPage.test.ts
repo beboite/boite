@@ -19,7 +19,6 @@ afterEach(async () => {
   for (const store of stores.splice(0)) { store.client?.close(); store.detach(); }
   workspace.machines = [];
   workspace.active = primary;
-  workspace.settingsSync.links = {};
   workspace.settingsSync.reports = {};
   document.body.innerHTML = '';
   localStorage.clear();
@@ -58,70 +57,67 @@ function input(selector: string, value: string) {
   flushSync();
 }
 
-test('sync stays on the list and the settings button edits the owning machine without changing the active conversation', async () => {
+test('the default machine is one choice for the whole group: the others follow it, the window stays where it was', async () => {
+  // A copy an earlier version kept for this window alone: the choice in the group replaces it.
+  localStorage.setItem('boite.settings-sync', JSON.stringify({ target: 'source' }));
   const { source, target } = await setup();
   expect(query('[data-testid="machines-page"] h1').textContent).toContain(strings.settings.tabs.machines);
-  // Each machine is listed once, with its versions and agents folded under its own row.
-  expect(document.querySelectorAll('#settings-machines [data-testid="machine-card"] [data-testid="machine-updates-card"]')).toHaveLength(2);
-  expect(document.querySelectorAll('[data-testid="machine-updates-card"]')).toHaveLength(2);
-  const fold = query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-details-toggle"]');
-  const details = document.getElementById(fold.getAttribute('aria-controls')!)!;
-  expect([fold.getAttribute('aria-expanded'), details.inert]).toEqual(['false', true]);
-  fold.click();
-  flushSync();
-  expect([fold.getAttribute('aria-expanded'), details.inert]).toEqual(['true', false]);
+  // Nothing to unfold: each machine is one row, its details on the settings pages the bar above them picks.
+  expect(document.querySelectorAll('[data-testid="machine-card"]')).toHaveLength(2);
+  expect(document.querySelector('[data-testid="machine-details-toggle"], [data-testid="machine-updates-card"], [data-testid="machine-settings-open"]')).toBeNull();
   await source.store.open('t-trace');
   const thread = source.store.openThread;
   await source.store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentMemoryBudgetPercent: 70 });
   await target.store.client!.call('settings.set', { warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
-  query<HTMLInputElement>('[data-testid="group-sync"]').click();
+  expect(query('[data-testid="group-home-pick"]').textContent).toContain(strings.machines.homeNone);
+
+  query<HTMLButtonElement>('[data-testid="group-home-pick"]').click();
+  flushSync();
+  query<HTMLElement>('[data-testid="group-home-pick-menu"] [data-value="source"]').click();
+  // Every member reports the same choice: it lives in the group, not in this window.
+  await vi.waitFor(() => expect([source.store.group?.settingsHome, target.store.group?.settingsHome]).toEqual(['source', 'source']));
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
-  await vi.waitFor(() => expect(workspace.settingsSync.reports[target.id]).toBeDefined());
   flushSync();
-  expect(document.querySelector('[data-testid="machine-sync-report"]')).toBeNull();
-  expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
+  expect(query('[data-machine-id="source"] [data-testid="machine-home"]').textContent).toBe(strings.machines.homeBadge);
+  expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-home"]')).toBeNull();
+  expect(query('[data-testid="group-home-pick"]').textContent).toContain('source');
+  // What belongs to each machine stays there.
   expect(target.store.settings).toMatchObject({ warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
-  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="setting-auto-update-harnesses"]').click();
-  await vi.waitFor(() => expect(target.store.settings?.autoUpdateHarnesses).toBe(true));
-  expect(source.store.settings?.autoUpdateHarnesses).toBe(false);
-
-  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
-  flushSync();
-  expect(query('[data-testid="machine-settings"]').dataset.machineId).toBe('target');
-  expect(query('[data-testid="machine-settings-source"]').textContent).toContain('source');
-  expect(query<HTMLInputElement>('[data-testid="memory-budget"]').value).toBe('40');
-  expect(document.querySelector('[data-testid="setting-focus-guard"]')).toBeNull();
-  input('[data-testid="memory-budget"]', '50');
-  query('[data-testid="memory-budget"]').dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(target.store.settings?.agentMemoryBudgetPercent).toBe(50));
-  expect(source.store.settings?.agentMemoryBudgetPercent).toBe(70);
-
-  input('[data-testid="setting-warmProcessMinutes"]', '12');
-  // The field saves by itself when it loses focus: there is no Save button.
-  query('[data-testid="setting-warmProcessMinutes"]').dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(target.store.settings?.warmProcessMinutes).toBe(12));
-  expect(source.store.settings?.warmProcessMinutes).toBe(9);
-  expect(document.querySelector('[data-testid="worktree-storage"]')).not.toBeNull();
+  expect(localStorage.getItem('boite.settings-sync')).toBeNull();
   await source.store.client!.call('settings.set', { asyncQuestions: true });
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(true));
-  expect(target.store.settings).toMatchObject({ warmProcessMinutes: 12, agentMemoryBudgetPercent: 50, autoUpdateHarnesses: true });
   expect(workspace.active).toBe(source.store);
   expect(source.store.openThread).toBe(thread);
 
-  query<HTMLButtonElement>('[data-testid="machine-settings-back"]').click();
+  query<HTMLButtonElement>('[data-testid="group-home-pick"]').click();
   flushSync();
-  expect(query<HTMLInputElement>('[data-testid="group-sync"]').checked).toBe(true);
-  expect(workspace.active).toBe(source.store);
-  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
+  query<HTMLElement>(`[data-testid="group-home-pick-menu"] [data-value="none"]`).click();
+  await vi.waitFor(() => expect(target.store.group?.settingsHome).toBeUndefined());
   flushSync();
-  source.store.showSettings('machines', 'machines');
-  flushSync();
-  expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
-  expect(document.querySelector('#settings-machines')).not.toBeNull();
-  expect(source.store.openThread).toBe(thread);
+  expect(document.querySelector('[data-testid="machine-home"]')).toBeNull();
+  await source.store.client!.call('settings.set', { asyncQuestions: false });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  expect(target.store.settings?.asyncQuestions).toBe(true);
 });
 
-test('each row says where its updates stand, one button checks every machine, and a machine alone shows its details', async () => {
+test('this computer goes by its own name and "(you)", whatever it was called by default', async () => {
+  const { source } = await setup();
+  source.store.localCore = true;
+  source.store.core = { ...source.store.core!, hostname: 'NUNO-X870' };
+  workspace.customize(source.id, strings.machines.local, source.icon);
+  flushSync();
+  const name = query<HTMLInputElement>('[data-machine-id="source"] [data-testid="machine-rename"]');
+  expect(name.value).toBe('NUNO-X870');
+  expect(query('[data-machine-id="source"] [data-testid="machine-you"]').textContent).toBe(strings.machines.youTag);
+  expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-you"]')).toBeNull();
+  // Renamed, it keeps the name it was given.
+  name.value = 'Desk';
+  name.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  expect(query<HTMLInputElement>('[data-machine-id="source"] [data-testid="machine-rename"]').value).toBe('Desk');
+});
+
+test('each row says where its updates stand and one button checks every machine', async () => {
   const { source, target } = await setup();
   await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="machine-updates-state"]')).toHaveLength(2); });
   const settled = (machine: Machine) => machine.store.harnessUpdates.map(update => ({ ...update, latest: update.current, pending: false, skipped: null, state: 'idle' as const, checkedAt: 1 }));
@@ -138,40 +134,13 @@ test('each row says where its updates stand, one button checks every machine, an
   await vi.waitFor(() => expect(checks.map(check => check.mock.calls)).toEqual([[[true]], [[true]]]));
   expect(server).toHaveBeenCalledWith(true);
 
-  workspace.machines = workspace.machines.filter(machine => machine.id !== target.id);
-  flushSync();
-  expect(query('[data-machine-id="source"] [data-testid="machine-details-toggle"]').getAttribute('aria-expanded')).toBe('true');
-});
-
-test('offline and paired machines cannot be edited and a removed target never falls back to the active machine', async () => {
-  const { source, target } = await setup();
-  target.store.principal = 'session';
-  flushSync();
-  expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-settings-open"]')).toBeNull();
-  target.store.principal = 'owner';
-  target.store.connection = 'closed';
-  flushSync();
-  // Out of reach, the row folds its details away: nothing there works without the machine.
-  expect(document.querySelector('[data-machine-id="target"] [data-testid="machine-details-toggle"]')).toBeNull();
-  expect(query('[data-machine-id="target"] [data-testid="machine-settings-open"]').closest<HTMLElement>('.disclosure-fold')!.inert).toBe(true);
-  target.store.connection = 'ready';
-  flushSync();
-  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
-  flushSync();
-  target.store.connection = 'closed';
-  flushSync();
-  expect(query<HTMLFieldSetElement>('[data-testid="machine-settings"] > fieldset').disabled).toBe(true);
-  workspace.machines = workspace.machines.filter(machine => machine.id !== target.id);
-  flushSync();
-  expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
-  expect(workspace.active).toBe(source.store);
 });
 
 test('a machine that does not answer is grey and offers only its name, its icon and its removal', async () => {
   const { target } = await setup();
   const card = () => query('[data-machine-id="target"]');
   const has = (id: string) => card().querySelector(`[data-testid="${id}"]`) !== null;
-  expect([has('machine-open'), has('machine-details-toggle'), card().dataset.away]).toEqual([true, true, undefined]);
+  expect([has('machine-open'), has('machine-remove'), card().dataset.away]).toEqual([true, true, undefined]);
   // The screenshot's case: the first attempt timed out and the client keeps retrying behind the card.
   target.store.threads = target.store.threads.map(thread => ({ ...thread, status: 'idle' }));
   target.store.connection = 'connecting';
@@ -180,7 +149,7 @@ test('a machine that does not answer is grey and offers only its name, its icon 
   flushSync();
   expect(card().dataset.away).toBe('offline');
   expect(query('[data-machine-id="target"] [data-testid="machine-card-status"]').textContent).toBe(strings.connection.offline);
-  expect([has('machine-open'), has('machine-details-toggle'), has('machine-rename'), has('machine-customize')]).toEqual([false, false, true, true]);
+  expect([has('machine-open'), has('machine-rename'), has('machine-customize'), has('machine-remove')]).toEqual([false, true, true, true]);
   expect(card().querySelector('.error')).toBeNull();
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-remove"]').click();
   await vi.waitFor(() => expect(confirm.current?.title).toContain(target.label));
@@ -197,7 +166,7 @@ test('a machine that does not answer is grey and offers only its name, its icon 
   // Back online, the card is whole again without a click.
   target.store.connection = 'ready';
   flushSync();
-  expect([has('machine-open'), has('machine-details-toggle'), card().dataset.away]).toEqual([true, true, undefined]);
+  expect([has('machine-open'), has('machine-remove'), card().dataset.away]).toEqual([true, true, undefined]);
 });
 
 test('a thread that failed on a machine reads as that thread, and its button opens it', async () => {
@@ -244,19 +213,33 @@ test('existing separate groups keep their own actions and removing their row lea
   expect(source.store.group?.name).toBe('Home');
 });
 
-test.each([
-  { name: 'missing keybindings', patch: { keybindings: null }, message: strings.machines.syncKeysAbsent },
-  { name: 'missing brain', patch: { brain: 'absent' as const }, message: strings.machines.syncBrainAbsent },
-  { name: 'provider sign-ins', patch: { providers: [{ id: 'codex', name: 'Codex', members: [] }] }, message: 'Codex' }
-])('sync still reports $name without repeating the checkbox label', async ({ patch, message }) => {
-  const { source, target } = await setup();
-  workspace.settingsSync.reports[target.id] = {
-    source: source.label,
-    report: { settings: target.store.settings!, changed: 0, keybindings: target.store.keybindings!, brain: 'none', providers: [], ...patch }
-  };
+test('a link minted on another machine of the group, by the Tailscale switch on its Advanced page, is the one the group card shows', async () => {
+  const { target } = await setup();
+  expect(document.querySelector('[data-testid="add-device"]')).toBeNull();
+  target.store.deviceInvite = { url: 'https://target.tail.ts.net/?grant=g#join=j', expiresAt: Date.now() + 60_000 };
   flushSync();
-  const report = query('[data-testid="machine-sync-report"]');
-  expect(report.textContent).toContain(message);
-  expect(report.querySelectorAll('p')).toHaveLength(1);
-  expect(!!report.querySelector('[data-testid="machine-sync-providers"]')).toBe('providers' in patch);
+  await vi.waitFor(() => { flushSync(); expect(query('[data-testid="add-device"]').dataset.link).toBe('https://target.tail.ts.net/?grant=g#join=j'); });
+});
+
+test('each machine says for itself whether the others may start threads on it, and the default machine does not copy it', async () => {
+  const { source, target } = await setup();
+  await source.store.client!.call('group.settingsHome', { coreId: 'source' });
+  await vi.waitFor(() => expect(target.store.group?.settingsHome).toBe('source'));
+  await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="machine-group-threads-switch"]')).toHaveLength(2); });
+  const switches = [...document.querySelectorAll<HTMLInputElement>('[data-testid="machine-group-threads-switch"]')];
+  expect(switches.map(toggle => toggle.checked)).toEqual([false, false]);
+  expect(query('[data-testid="machine-group-threads"]').textContent).toContain(strings.machines.groupThreads);
+
+  // The default machine, the one the others copy, accepts them: the machine that follows it keeps its own answer.
+  query<HTMLInputElement>('[data-machine-id="source"] [data-testid="machine-group-threads-switch"]').click();
+  await vi.waitFor(() => expect(source.store.settings?.groupThreads).toBe(true));
+  await source.store.client!.call('settings.set', { asyncQuestions: false });
+  await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
+  expect(target.store.settings?.groupThreads ?? false).toBe(false);
+  expect(target.store.settings?.syncOverrides ?? []).not.toContain('groupThreads');
+  // Its own switch changes that machine alone.
+  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-group-threads-switch"]').click();
+  await vi.waitFor(() => expect(target.store.settings?.groupThreads).toBe(true));
+  await target.store.saveSettings({ groupThreads: false });
+  expect([source.store.settings?.groupThreads, target.store.settings?.groupThreads]).toEqual([true, false]);
 });

@@ -177,7 +177,8 @@ real('an agent drives a page with agent-browser commands: refs, forms, dialogs a
   expect(await thrown(command({ kind: 'wait', selector: '#never', timeoutMs: 300 }))).toThrow('wait timed out after 300 ms');
 }), 150_000);
 
-real('a window a page opens joins the conversation as a tab of its own', async () => {
+// Trace click 1 opens #pop; click 2 closes #shut. Keep the native click and popup lifecycle visible on failure.
+real('a window a page opens joins the conversation as a tab of its own', () => traceBrowserCommands(async () => {
   const { agent, threadId } = browserFixture;
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
   await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#pop' } });
@@ -189,12 +190,54 @@ real('a window a page opens joins the conversation as a tab of its own', async (
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup')]);
   // Its first request leaves before the core attaches to it: the browser's own flag names it.
   expect(browserFixture.agents.get('/popup')).toMatch(/ Chrome\/\d+/);
+  // The popup is the active tab, and it keeps its opener: a sign-in window answers the page that opened it.
+  expect(await evaluate('opener !== null && opener.document.title')).toBe('Fixture');
+  const status = async () => ((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: typeof tabs }).tabs;
+  await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#shut' } });
+  for (let i = 0; i < 50 && (tabs = await status()).length > 1; i++) await Bun.sleep(100);
+  expect(tabs.map(tab => tab.url)).toEqual([url()]);
+  expect(await evaluate('messages.join()')).toBe('hello from ');
+  // A window opened by a script, with no click behind it, is a tab too: the desktop app's webviews block none.
+  expect(await evaluate(`window.open('/popup?script', 'z', 'width=400,height=300') !== null`)).toBe(true);
+  for (let i = 0; i < 50 && (tabs = await status()).length < 2; i++) await Bun.sleep(100);
+  expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup?script')]);
+}), 150_000);
+
+real('a target that moves away from the native pointer is not clicked, and the next command can reach it', async () => {
+  const { agent, threadId } = browserFixture;
+  await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await evaluate(`document.body.innerHTML = '<button id="moving">Move</button>';
+    window.clicks = [];
+    document.addEventListener('click', event => clicks.push(event.isTrusted));
+    window.escapePointer = event => { if (event.isTrusted) moving.style.transform = 'translateX(300px)'; };
+    moving.addEventListener('pointermove', escapePointer); true`);
+  expect(await thrown(agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#moving' } }))).toThrow('did not receive native pointer movement');
+  expect(await evaluate('clicks')).toEqual([]);
+  await evaluate(`moving.removeEventListener('pointermove', escapePointer); moving.style.transform = ''; true`);
+  await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#moving' } });
+  expect(await evaluate('clicks')).toEqual([true]);
+}, 150_000);
+
+real('native pointer movement retries a selector temporarily changed by hover', async () => {
+  const {agent, threadId} = browserFixture;
+  await agent.call('browser.command', {threadId, action: {kind: 'open', url: url()}});
+  await evaluate(`document.body.innerHTML = '<button class="ready">Hover</button>';
+    window.clicks = [];
+    const button = document.querySelector('button');
+    button.addEventListener('click', event => clicks.push(event.isTrusted));
+    button.addEventListener('pointermove', event => {
+      if (!event.isTrusted) return;
+      button.className = 'hovering';
+      setTimeout(() => button.className = 'ready', 100);
+    }, {once: true}); true`);
+  await agent.call('browser.command', {threadId, action: {kind: 'click', selector: '.ready'}});
+  expect(await evaluate('clicks')).toEqual([true]);
 }, 150_000);
 
 real('a burst of windows opened at once stops at the conversation tab limit', async () => {
   const { agent, threadId } = browserFixture;
-  // The desktop app's webviews let a page open many windows; Chromium's own blocker allows one per click.
-  const host = await browserFixture.fakeHost('shell', ['--disable-popup-blocking']);
+  // The desktop app's webviews let a page open many windows, and so does the core's Chromium (`chromiumArgs`).
+  const host = await browserFixture.fakeHost('shell');
   try {
     await host.app.call('browser.hostAttach', {});
     for (let i = 0; i < 7; i++) await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
@@ -227,6 +270,45 @@ real('a site sees the browser a person runs with a window, not headless Chrome',
   expect(seen.versions).toBeGreaterThan(1);
   expect(seen.screen[0]).toBeGreaterThanOrEqual(seen.window[0]);
   expect(seen.screen[1]).toBeGreaterThanOrEqual(seen.window[1]);
+}, 150_000);
+
+real('custom profile User-Agents cover pages, workers, popups and requests even with a desktop host', async () => {
+  const { owner, agent, threadId } = browserFixture;
+  const host = await browserFixture.fakeHost();
+  try {
+    await host.app.call('browser.hostAttach', {});
+    await owner.call('settings.set', { browserProfiles: [
+      { id: 'p-suffix', name: 'Suffix', userAgent: { mode: 'suffix', value: 'Bounty/1' } },
+      { id: 'p-replace', name: 'Replace', userAgent: { mode: 'replace', value: 'Research/1' } },
+    ] });
+    for (const profile of ['p-suffix', 'p-replace']) {
+      const opened = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url(), profile } });
+      // A custom profile must not use webviews: only a process flag reaches workers and popup requests.
+      const status = async () => (await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: Array<{ tabId: string; url: string; view?: string }> };
+      expect((await status()).tabs.find(tab => tab.tabId === opened.tabId)?.view).toBeUndefined();
+      const seen = await evaluate(`(async () => {
+        const worker = await new Promise(resolve => { const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.userAgent)']))); w.onmessage = e => { w.terminate(); resolve(e.data); }; });
+        await fetch('/ua-request');
+        return { page: navigator.userAgent, worker,
+          versions: (await navigator.userAgentData.getHighEntropyValues(['fullVersionList'])).fullVersionList.length };
+      })()`, opened.tabId) as { page: string; worker: string; versions: number };
+      await agent.call('browser.command', { threadId, tabId: opened.tabId, action: { kind: 'click', selector: '#pop' } });
+      let popup: { tabId: string; url: string } | undefined;
+      for (let i = 0; i < 100; i++) {
+        popup = (await status()).tabs.find(tab => tab.url === url('/popup'));
+        if (popup) break;
+        await Bun.sleep(50);
+      }
+      expect(popup).toBeDefined();
+      const popupAgent = await evaluate('navigator.userAgent', popup!.tabId);
+      expect(seen.page).toMatch(profile === 'p-suffix' ? / Chrome\/.* Bounty\/1$/ : /^Research\/1$/);
+      expect([seen.worker, popupAgent, browserFixture.agents.get('/'), browserFixture.agents.get('/popup'), browserFixture.agents.get('/ua-request')])
+        .toEqual(Array(5).fill(seen.page));
+      expect(seen.versions).toBeGreaterThan(1);
+      await agent.call('browser.command', { threadId, tabId: popup!.tabId, action: { kind: 'close' } });
+      await agent.call('browser.command', { threadId, tabId: opened.tabId, action: { kind: 'close' } });
+    }
+  } finally { await host.close(); }
 }, 150_000);
 
 real('a click right after the viewport changes size lands on its element, and what the page then logs is kept', async () => {

@@ -3,25 +3,33 @@
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { ArrowUpRight, ChevronDown, CircleArrowDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
-  import { machineHealth, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
+  import { ArrowUpRight, RefreshCw, Trash2, ScanLine } from '@lucide/svelte';
+  import { listedName, machineHealth, machineName, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import GroupCard from './GroupCard.svelte';
-  import PhoneSettings from './PhoneSettings.svelte';
-  import MachineSettings from './MachineSettings.svelte';
   import MainMachine from './MainMachine.svelte';
-  import ServerUpdateCard from './ServerUpdateCard.svelte';
-  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
-  import AppUpdateContent from './AppUpdateContent.svelte';
+  import UpdatesCard from './UpdatesCard.svelte';
   import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
-  import { updateEverything } from '../lib/update-everything.svelte';
   import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
   let { mobile = false, onopenthread }: { mobile?: boolean; onopenthread?: () => void } = $props();
+  const uid = $props.id();
+  /**
+   * The switches a machine of a group holds for itself: whether the agents of
+   * the other machines may start threads there (`groupThreads`), and whether
+   * their bots may look after the projects their owner entrusted to them
+   * there (`groupBots`). Drawn for a
+   * member this client owns and reaches, once the group has another machine.
+   */
+  function groupThreadsShown(machine: Machine, owner: Store, coreId: string | undefined): boolean {
+    const store = machine.store;
+    return coreId !== undefined && (owner.group?.cores.length ?? 0) > 1 && owner.group?.cores.some(core => core.coreId === coreId) === true
+      && store.owner && store.connection === 'ready' && store.settings !== null;
+  }
   /** The thread a failure on that machine was about: opening it shows the cause in its chat, and clears the line. */
   function openFailedThread(machine: Machine) {
     const owner = machine.store;
@@ -31,7 +39,6 @@
     onopenthread?.();
     void workspace.select(owner, threadId);
   }
-  const uid = $props.id();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
   const groupStore = $derived((migration.source && workspace.machines.includes(migration.source) ? migration.source.store : null) ?? workspace.machines.find(machine => machine.store.group)?.store ?? workspace.active);
@@ -40,7 +47,8 @@
     for (const store of [groupStore, ...workspace.machines.map(machine => machine.store)]) {
       if (!store.group) continue;
       const previous = groups.get(store.group.id);
-      if (!previous || !previous.owner && store.owner) groups.set(store.group.id, store);
+      // The card draws the device link of the store it is given: one that just minted a link (Tailscale on Advanced) shows it.
+      if (!previous || !previous.owner && store.owner || store.owner && store.deviceInvite !== null && previous.deviceInvite === null) groups.set(store.group.id, store);
     }
     return groups.size ? [...groups.values()] : [groupStore];
   });
@@ -59,19 +67,12 @@
   });
   let memberRepair = $state(false);
   let customizing = $state<string | null>(null);
-  let settingsId = $state<string | null>(null);
   let pairingForm = $state<{ startAdding: () => void }>();
-  const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
-  const sync = workspace.settingsSync;
-  /** The rows the user folded or unfolded by hand. A machine alone on its list shows its details without a click. */
-  let unfolded = $state<Record<string, boolean>>({});
-  const detailed = (machine: Machine): boolean => unfolded[machine.id] ?? workspace.machines.length === 1;
-  let checking = $state(false);
   /**
    * A machine that tried and did not answer is out of reach, a laptop shut or
-   * a server switched off: its card goes grey and keeps only what works without
+   * a server switched off: its row goes grey and keeps only what works without
    * it, its name, its icon and its removal. The client still retries behind it
-   * and the card comes back by itself. A machine that refused this device's key
+   * and the row comes back by itself. A machine that refused this device's key
    * keeps its own repair flow instead. One the user depended on (`lost`: this
    * PC, the window's own machine, a turn still running there) stays a warning,
    * in red with its error, as the footer's machine menu shows it.
@@ -100,31 +101,15 @@
     checking: strings.harnessUpdates.checking,
     current: strings.serverUpdate.current
   };
-
-  /** One button for everything that updates: the desktop app, Boite on each machine and the agents there. */
-  async function checkAll() {
-    if (checking) return;
-    checking = true;
-    try {
-      if (showAppUpdateUi()) appUpdater.check();
-      await Promise.all(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner).flatMap(machine => [
-        machine.store.loadHarnessUpdates(true),
-        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true), machine.store.serverUpdater.loadDesktop()])
-      ]));
-    } finally {
-      checking = false;
-    }
+  /** Docker and hand-made installs update by their own command, and a server too old for the button once by hand: the row says how. */
+  function byHand(machine: Machine): string | null {
+    if (machine.store.localCore || !machine.store.owner) return null;
+    if (machine.store.serverUpdater.legacy) return strings.serverUpdate.legacy;
+    const state = machine.store.serverUpdater.snapshot;
+    if (!state || state.mode === 'systemd' || state.phase !== 'available') return null;
+    return state.mode === 'docker' ? `${strings.serverUpdate.docker} docker compose pull && docker compose up -d` : strings.serverUpdate.manual;
   }
 
-  $effect(() => {
-    const section = workspace.active.settingsSection;
-    if (workspace.active.settingsTab === 'machines' && section) {
-      void section.request;
-      settingsId = null;
-    }
-  });
-
-  /** Sign-ins happen on the machine that keeps them: its own Providers page. */
   /** The form already on the page takes it; a second one is drawn only when none is. */
   const topForm = $derived(window.__TAURI_INTERNALS__ === undefined && groupStore.principal !== 'owner' && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   async function repair() {
@@ -135,10 +120,6 @@
     pairingForm?.startAdding();
   }
 
-  async function openProviders(machine: Machine) {
-    await workspace.select(machine.store);
-    machine.store.showSettings('accounts');
-  }
   /** Removing a member ends its group membership and forgets its connection on this client. */
   async function removeMachine(machine: Machine, owner: Store) {
     const groupId = owner.group?.id;
@@ -162,48 +143,28 @@
   }
 </script>
 
-{#if settingsMachine}
-  {#key settingsMachine.id}
-    <MachineSettings machine={settingsMachine} source={sync.source(settingsMachine)?.label} onback={() => settingsId = null} />
-  {/key}
-{:else}
 <div class="page machines-page" data-testid="machines-page">
   <!-- The title and its button belong to the section: a link to the machines lands on them, not under them. -->
   <section class="connections-section" id="settings-machines" aria-label={strings.machines.heading}>
   <header class="head">
     <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
-    <div class="head-actions">
-    <button type="button" class="ghost small" data-testid="updates-check-all" disabled={checking || !workspace.machines.some(machine => machine.store.connection === 'ready')} aria-busy={checking} onclick={() => void checkAll()}>
-      <RefreshCw size={13} class={checking ? 'spinning' : undefined} /><span class="ui-label">{checking ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
-    </button>
-    {#if updateEverything.offered}
-      <button type="button" class="primary small" data-testid="updates-run-all" disabled={updateEverything.running} aria-busy={updateEverything.running} onclick={() => void updateEverything.run()}>
-        <CircleArrowDown size={13} /><span class="ui-label">{strings.updateAll.run}</span>
-      </button>
-    {/if}
-    </div>
   </header>
 
-  <!-- The desktop app updates the computer it runs on, whichever machine the window shows. -->
-  {#if showAppUpdateUi()}
-    <section class="card app-update-card" data-testid="app-update-card" aria-labelledby="{uid}-app-update">
-      <h2 class="ui-label-box" id="{uid}-app-update"><span class="ui-label">{strings.appUpdate.heading}</span><span class="local ui-label">{strings.machines.local}</span></h2>
-      <AppUpdateContent beforeInstall={() => undefined} />
-    </section>
-  {/if}
+  <UpdatesCard />
 
     <!-- A device of a group has nothing to add: its group brings every machine. One that reaches none adds itself here. -->
     {#if topForm}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
-    <div class="machines">
+    <ul class="machines">
       {#each machinesOf(owner) as machine (machine.id)}
         {@const coreId = GroupLinks.coreOf(machine)}
         {@const state = updates(machine)}
         {@const gone = away(machine) !== null}
-        {@const open = !gone && detailed(machine)}
         {@const carrier = GroupLinks.carrier(machine, workspace.machines)}
-        <section data-core-id={coreId} class="machine-card" class:away={gone} class:lost={away(machine) === 'lost'} data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id} data-away={away(machine) ?? undefined}>
+        {@const home = coreId !== undefined && owner.group?.settingsHome === coreId}
+        {@const manual = byHand(machine)}
+        <li data-core-id={coreId} class="machine-card" class:away={gone} class:lost={away(machine) === 'lost'} data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id} data-away={away(machine) ?? undefined}>
           <div class="main">
             <button
               class="ghost logo"
@@ -212,13 +173,20 @@
               title={strings.machines.icon}
               aria-expanded={customizing === machine.id}
               onclick={() => (customizing = customizing === machine.id ? null : machine.id)}
-            ><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={20} /></button>
+            ><MachineIcon icon={machine.icon} os={machine.store.core?.os} size={18} /></button>
             <div class="identity">
-              <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
-              <span class="meta">
+              <span class="title">
+                <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machineName(machine)} maxlength="80" size={Math.max(4, machineName(machine).length)}
+                  onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machineName(machine); }} />
+                {#if listedName(machine) !== machineName(machine)}<span class="you" data-testid="machine-you">{strings.machines.youTag}</span>{/if}
+                {#if home}<span class="badge" data-testid="machine-home">{strings.machines.homeBadge}</span>{/if}
+              </span>
+              <span class="meta" title={machine.store.localCore ? undefined : carrier !== undefined ? fill(strings.group.through, { machine: machineName(carrier) }) : machine.id}>
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : gone ? strings.connection.offline : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: carrier.label }) : strings.connection[machine.store.connection]}</span>
+                <span class="status ui-label" class:ready={machine.store.connection === 'ready'} data-testid="machine-card-status">{machine.store.pairingRequired ? strings.mobile.pairingRequired : gone ? strings.connection.offline : carrier !== undefined && machine.store.connection === 'ready' ? fill(strings.group.relayed, { machine: machineName(carrier) }) : strings.connection[machine.store.connection]}</span>
+                {#if machine.store.connection === 'ready' && machine.store.core?.version}<span class="version" data-testid="machine-version">{machine.store.core.version}</span>{/if}
                 {#if state}<span class="updates ui-label" data-testid="machine-updates-state" data-state={state}>{updateLabels[state]}</span>{/if}
+                {#if manual}<InfoTip topic={strings.serverUpdate.manualTitle} text={manual} />{/if}
               </span>
             </div>
             <div class="actions">
@@ -227,21 +195,31 @@
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
-              {#if gone && machine.store !== primary}
-                <button class="ghost icon-only remove" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine, owner)}><Trash2 size={15} /></button>
-              {/if}
               <!-- The machine already open has nowhere to go, and one out of reach has nothing to open. -->
               {#if machine.store !== workspace.active && !gone}
                 <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
                   ><span class="ui-label">{strings.machines.open}</span><ArrowUpRight size={13} /></button
                 >
               {/if}
+              {#if machine.store !== primary}
+                <button class="ghost icon-only remove" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine, owner)}><Trash2 size={15} /></button>
+              {/if}
             </div>
-            {#if !gone}
-            <button class="ghost icon-only fold" class:open data-testid="machine-details-toggle" aria-label={strings.machines.details} title={strings.machines.details}
-              aria-expanded={open} aria-controls="{uid}-details-{machine.id}" onclick={() => (unfolded[machine.id] = !open)}><ChevronDown size={16} /></button>
-            {/if}
           </div>
+          {#if groupThreadsShown(machine, owner, coreId)}
+            <label class="group-threads" for="{uid}-threads-{machine.id}" data-testid="machine-group-threads">
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-threads-{machine.id}-name">{strings.machines.groupThreads}</span><InfoTip topic={strings.machines.groupThreads} text={strings.machines.groupThreadsHint} /></span>
+              <input id="{uid}-threads-{machine.id}" aria-labelledby="{uid}-threads-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-threads-switch"
+                checked={machine.store.settings?.groupThreads === true}
+                onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupThreads: input.checked }))) input.checked = machine.store.settings?.groupThreads === true; }} />
+            </label>
+            <label class="group-threads" for="{uid}-bots-{machine.id}" data-testid="machine-group-bots">
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-bots-{machine.id}-name">{strings.machines.groupBots}</span><InfoTip topic={strings.machines.groupBots} text={strings.machines.groupBotsHint} /></span>
+              <input id="{uid}-bots-{machine.id}" aria-labelledby="{uid}-bots-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-bots-switch"
+                checked={machine.store.settings?.groupBots === true}
+                onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupBots: input.checked }))) input.checked = machine.store.settings?.groupBots === true; }} />
+            </label>
+          {/if}
           <div class="disclosure-fold" class:open={customizing === machine.id} inert={customizing !== machine.id}>
             <div>
               <div class="icon-choices" role="group" aria-label={strings.machines.icon}>
@@ -251,39 +229,6 @@
               </div>
             </div>
           </div>
-          <!-- Versions, agents and the machine's own settings: one click away, and still in the page for whoever looks for them. -->
-          <div class="disclosure-fold" class:open inert={!open} id="{uid}-details-{machine.id}">
-            <div>
-              <div class="details" data-testid="machine-updates-card" data-machine-id={machine.id}>
-                <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : carrier !== undefined ? fill(strings.group.through, { machine: carrier.label }) : machine.id}</span></p>
-                {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
-                {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
-                <div class="detail-actions">
-                  {#if machine.store.owner && machine.store.core}
-                    <button class="ghost small" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
-                      <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
-                    </button>
-                  {/if}
-                  {#if machine.store !== primary && !gone}
-                    <button class="ghost small remove" data-testid="machine-remove" onclick={() => void removeMachine(machine, owner)}><Trash2 size={14} /><span class="ui-label">{strings.machines.remove}</span></button>
-                  {/if}
-                </div>
-              </div>
-            </div>
-          </div>
-          {#if sync.reports[machine.id]}
-            {@const done = sync.reports[machine.id]!}
-            {#if done.report.keybindings === null || done.report.brain === 'absent' || done.report.providers.length > 0}
-              <div class="sync-report" role="status" data-testid="machine-sync-report">
-                {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
-                {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
-                {#if done.report.providers.length > 0}
-                  <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-                  <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}><span class="ui-label">{strings.machines.syncOpenProviders}</span></button>
-                {/if}
-              </div>
-            {/if}
-          {/if}
           {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
             <p class="pair-hint">{strings.mobile.pairInstalled}</p>
           <!-- A thread's failure carries the thread's title, never its cause: say it is a thread, and open it. -->
@@ -294,9 +239,9 @@
             </div>
           <!-- A remote machine switched off has nothing to explain; this PC's own core failing to start does. A call that found it away repeats its status. -->
           {:else if machine.store.error && away(machine) !== 'offline' && !(away(machine) === 'lost' && machine.store.errorOffline)}<p class="error">{machine.store.error}</p>{/if}
-        </section>
+        </li>
       {/each}
-    </div>
+    </ul>
     </GroupCard>
     {/each}
     {#if memberRepair}<PairMachine {mobile} bind:this={pairingForm} onpaired={() => memberRepair = false} />{/if}
@@ -304,21 +249,12 @@
 
   <!-- Chosen on the device itself, a phone included: it says where that device opens. -->
   <MainMachine />
-
-  {#if !mobile}
-    <!-- How a phone reaches this machine, and its app: the desktop's to set up. -->
-    <PhoneSettings store={workspace.active} />
-  {/if}
 </div>
-{/if}
 
 <style>
   .machines-page > :global(*) { max-width: var(--settings-width); }
-  .machines { margin: 0; }
   .connections-section { scroll-margin-top: 24px; }
-  .app-update-card { padding: 0; margin-bottom: 20px; }
-  .app-update-card h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 14px 14px 0; font-size: var(--text-sm); }
-  .app-update-card h2 .local { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
+  .connections-section > :global(.card) { margin-bottom: 20px; }
   .head {
     display: flex;
     align-items: center;
@@ -326,33 +262,46 @@
     gap: 16px;
     margin-bottom: 16px;
   }
-  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   h1 {
     font-size: var(--text-lg);
     margin: 0;
   }
 
   .machines {
-    display: grid;
-    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
     scroll-margin-top: 24px;
   }
   .machine-card {
     display: flex;
     flex-direction: column;
-    padding: 12px 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--color-border);
   }
   .main {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-height: 40px;
   }
+  /* Under the machine's name, as wide as its identity column. */
+  .group-threads {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 6px 0 0 48px;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+  }
+  .machine-card.away .group-threads { display: none; }
   .logo {
     display: grid;
     place-items: center;
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     border-radius: var(--radius-md);
     background: var(--color-surface-3);
@@ -371,21 +320,45 @@
     flex-direction: column;
     gap: 2px;
   }
-  /* A name that reads as a title until it is clicked. */
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  /* A name that reads as a title until it is clicked, as wide as the name. */
   .machine-name {
-    width: 100%;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
     height: var(--control-sm);
     padding: 0 6px;
     margin-left: -6px;
     font-weight: 600;
     background: transparent;
     border-color: transparent;
+    field-sizing: content;
   }
   .machine-name:hover {
     border-color: var(--color-border);
   }
   .machine-name:focus {
     background: var(--color-surface-2);
+  }
+  .you {
+    flex: none;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
+    margin-left: -4px;
+  }
+  .badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    font-weight: 500;
   }
   .meta {
     display: flex;
@@ -412,6 +385,16 @@
   .status.ready {
     color: var(--color-success);
   }
+  .version {
+    font-family: var(--font-mono);
+    color: var(--color-muted-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .version::before,
+  .updates::before { content: '·'; margin-right: 6px; color: var(--color-subtle); font-family: var(--font-sans); }
   /* Out of reach: grey, still named and still removable. */
   .away .logo { opacity: 0.5; }
   .away .machine-name { color: var(--color-muted-foreground); }
@@ -420,19 +403,9 @@
   .lost .dot { background: var(--color-danger); }
   .lost .status { color: var(--color-danger); }
   /* What the machine has to say about its updates, after its connection. */
-  .updates { color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .updates::before { content: '·'; margin-right: 6px; color: var(--color-subtle); }
+  .updates { color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
   .updates[data-state='available'] { color: var(--color-accent); }
   .updates[data-state='failed'] { color: var(--color-danger); }
-  .fold :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .head :global(.spinning) { animation: spin 1s linear infinite var(--loops); }
-  :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
-  .fold.open :global(svg) { transform: rotate(180deg); }
-  .details { padding: 12px 0 4px 52px; }
-  .address { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
-  .address .value { color: var(--color-subtle); overflow-wrap: anywhere; }
-  .detail-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0 -8px; }
-  .detail-actions:empty { display: none; }
   .remove { color: var(--color-danger); }
   .actions {
     display: flex;
@@ -440,42 +413,29 @@
     gap: 2px;
     flex: none;
   }
-  .fold { flex: none; }
   .icon-only {
     width: var(--control);
     padding: 0;
     color: var(--color-muted-foreground);
   }
+  .icon-only.remove { color: var(--color-muted-foreground); }
+  .icon-only.remove:hover { color: var(--color-danger); }
   .icon-choices {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    padding: 10px 0 2px 52px;
+    padding: 8px 0 2px 48px;
   }
   .icon-choices .chosen {
     color: var(--color-foreground);
     background: var(--color-surface-3);
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
-
-  input {
-    width: 100%;
-  }
-  /* What the copy did, under the card it wrote to, and what is left to do there. */
-  .sync-report {
-    display: grid;
-    justify-items: start;
-    gap: 6px;
-    margin: 10px 0 2px 52px;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-  .sync-report p { margin: 0; }
   .error {
     color: var(--color-danger);
     font-size: var(--text-sm);
     overflow-wrap: anywhere;
-    margin-top: 8px;
+    margin: 6px 0 0 48px;
   }
   .thread-failed {
     display: flex;
@@ -486,50 +446,34 @@
   .thread-failed p { margin: 0; min-width: 0; }
   .thread-failed button { flex: none; }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
-  @media (prefers-reduced-motion: reduce) {
-    .fold :global(svg) {
-      transition: none;
-    }
-    .head :global(.spinning) { animation: none; }
-  }
   @media (max-width: 720px) {
     .machines-page {
       padding: 16px;
     }
     .head { flex-wrap: wrap; gap: 8px 12px; }
-    .head button { min-height: var(--touch-target); }
-    /* The name and the fold keep the first line; what else the row offers goes under them. */
+    /* The name keeps the first line; what else the row offers goes under it. */
     .main {
       flex-wrap: wrap;
     }
-    .fold {
-      order: 2;
-      min-width: var(--touch-target);
-      min-height: var(--touch-target);
-    }
+    .identity { flex-basis: calc(100% - 48px); }
+    .meta { flex-wrap: wrap; gap: 2px 10px; }
+    .version::before,
+    .updates::before { content: none; }
     .actions {
-      order: 3;
       width: 100%;
       justify-content: flex-end;
     }
     .actions:empty {
       display: none;
     }
-    /* Out of reach, the row has no fold and one small button: it takes the fold's place. */
-    .away .actions {
-      order: 2;
-      width: auto;
-    }
     .actions button {
       min-height: var(--touch-target);
     }
-    .away .actions .icon-only { min-width: var(--touch-target); }
+    .actions .icon-only { min-width: var(--touch-target); }
     .icon-choices,
-    .details,
-    .sync-report {
+    .error {
       padding-left: 0;
       margin-left: 0;
     }
-    .detail-actions button { min-height: var(--touch-target); }
   }
 </style>

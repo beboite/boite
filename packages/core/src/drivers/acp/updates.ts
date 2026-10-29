@@ -177,12 +177,13 @@ export function drawUpdate(turn: AcpTurn, update: Update): void {
     case 'tool_call_update':
       turn.upsertTool(
         update.toolCallId,
-        update.name ?? update.title ?? null,
+        update.name ?? (turn.ctx.provider.id === 'opencode-v2' ? null : update.title ?? null),
         update.rawInput,
         update.rawOutput,
         update.status,
         update.content,
         turn.antigravity ? antigravitySubagentKind(update) : null,
+        update.title ?? null,
       );
       break;
     case 'usage_update': {

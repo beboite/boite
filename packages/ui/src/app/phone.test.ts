@@ -3,7 +3,7 @@ import { flushSync } from 'svelte';
 import { confirm } from '../lib/confirm.svelte';
 import { store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import { OWNER_ONLY_COMMANDS, OWNER_ONLY_IN_CHAT, OWNER_ONLY_IN_SETTINGS, menuValues, mountOnFake, paletteIds, press, query, showMobileThreads, test, waitFor } from '../test/app';
+import { OWNER_ONLY_COMMANDS, OWNER_ONLY_IN_ADVANCED, OWNER_ONLY_IN_CHAT, OWNER_ONLY_IN_SETTINGS, menuValues, mountOnFake, paletteIds, press, query, showMobileThreads, test, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
 
@@ -68,10 +68,10 @@ test('a paired device is offered none of the affordances the core refuses it', a
   // A paired device's project menu: no Remove, and no transcript import behind it.
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(menuValues()).toEqual(['new', 'copy', 'rename', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'archive-project']);
+  expect(menuValues()).toEqual(['back', 'secrets', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
   // The phone's own header manages no project at all.
@@ -79,10 +79,13 @@ test('a paired device is offered none of the affordances the core refuses it', a
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=machines-page]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
   // Neither a way to add a device nor a group to join: a device changes nothing in the group.
   expect(document.querySelector('[data-testid=group-join-input]')).toBeNull();
+  store.showSettings('advanced', 'phone');
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  for (const selector of OWNER_ONLY_IN_ADVANCED) expect(document.querySelector(selector)).toBeNull();
   expect(store.error).toBeNull();
 });
 
@@ -100,10 +103,10 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(menuValues()).toEqual(['new', 'copy', 'rename', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'auto-remove-worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'auto-remove-worktrees', 'windows', 'refresh-icon', 'secrets', 'archive-project', 'remove']);
   const policyProjectId = query('[data-testid=project-row]').getAttribute('data-project-id')!;
   const policy = query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]');
   expect(policy.getAttribute('role')).toBe('menuitemcheckbox');
@@ -147,7 +150,7 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   expect(preference.getAttribute('aria-checked')).toBe('false');
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(menuValues()).toEqual(['new', 'copy', 'rename', 'archived', 'manage']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
   // The phone's own header manages no project at all.
@@ -157,6 +160,9 @@ test('the desktop still has every one of them', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=group-add-device]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
+  store.showSettings('advanced', 'phone');
+  await waitFor(() => document.querySelector('[data-testid=phone-settings]') !== null);
+  for (const selector of OWNER_ONLY_IN_ADVANCED) expect(document.querySelector(selector)).not.toBeNull();
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
   for (const id of ['setting-focus-guard', 'setting-mute-agents']) {

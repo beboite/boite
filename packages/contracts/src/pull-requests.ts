@@ -67,6 +67,8 @@ export interface PullRequestWatchSeen {
   base: string;
   checks: { total: number; running: number; failed: number };
   conflicting: boolean;
+  /** Behind a base that requires branches up to date; absent from what a core older than it saw. */
+  behind?: boolean;
   /**
    * Its entry in the base branch's merge queue: 1 is next to merge. Null out
    * of the queue; absent from what a core older than it saw.

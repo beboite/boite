@@ -19,7 +19,7 @@ import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
 import { publishArtifact, readArtifact } from './artifacts.ts';
-import { publishView } from './views.ts';
+import { checkView, publishView } from './views.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -29,6 +29,8 @@ const TASK_STATUSES: readonly AgentTask['status'][] = ['pending', 'in_progress',
 export class AgentTokens {
   private readonly byThread = new Map<ThreadId, string>();
   private readonly byToken = new Map<string, ThreadId>();
+  /** Threads whose token opens nothing: the core reads their answer and gives them no method (a memory pass). */
+  private readonly sealed = new Set<ThreadId>();
 
   /** The thread's token, the same one for every process it launches. */
   tokenFor(threadId: ThreadId): string {
@@ -42,11 +44,22 @@ export class AgentTokens {
 
   /** The thread a token speaks for, or null: a wrong token says nothing about which. */
   authenticate(token: string): ThreadId | null {
-    return this.byToken.get(token) ?? null;
+    const threadId = this.byToken.get(token);
+    return threadId === undefined || this.sealed.has(threadId) ? null : threadId;
   }
 
-  forget(threadId: ThreadId): void {
+  /** From now on the thread's token, minted or not, authenticates nothing. */
+  seal(threadId: ThreadId): void {
+    this.sealed.add(threadId);
+  }
+
+  /**
+   * The thread's token opens nothing from now on. Its seal goes only with the
+   * thread itself (`removed`): an archived memory pass restored later stays sealed.
+   */
+  forget(threadId: ThreadId, removed = false): void {
     const held = this.byThread.get(threadId);
+    if (removed) this.sealed.delete(threadId);
     if (held === undefined) return;
     this.byThread.delete(threadId);
     this.byToken.delete(held);
@@ -204,8 +217,19 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.open', (params, { connection }) => core.devices.open(params, connection));
   core.router.register('devices.frame', (params, { connection }) => core.devices.frame(params, connection));
   core.router.register('devices.input', (params, { connection }) => core.devices.input(params, connection));
+  core.router.register('devices.stream', (params, { connection }) => core.devices.stream(params, connection));
+  core.router.register('devices.clipboard', (params, { connection }) => core.devices.clipboard(params, connection));
   core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
+  core.router.register('windows.list', (params, { connection }) => core.windows.list(params, connection));
+  core.router.register('windows.screenshot', (params, { connection }) => core.windows.screenshot(params, connection));
+  core.router.register('windows.clip', (params, { connection }) => core.windows.clip(params, connection));
+  core.router.register('windows.watch', (params, { connection }) => core.windows.watch(params, connection));
+  core.router.register('windows.frame', (params, { connection }) => core.windows.frame(params, connection));
+  core.router.register('windows.close', (params, { connection }) => core.windows.close(params, connection));
+  core.router.register('windows.consent', (params, { connection }) => core.windows.consent(params, connection));
+  core.router.register('windows.allowlist', params => core.windows.allowlist(params));
+  core.router.register('windows.revoke', params => core.windows.revoke(params));
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
@@ -216,6 +240,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('artifacts.read', (params) => readArtifact(core, params));
   core.router.register('artifacts.view', (params) => publishView(core, params));
+  core.router.register('artifacts.viewCheck', (params) => checkView(core, params));
   core.router.register('artifacts.preview', ({ threadId, path }) => {
     const preview = core.artifactPreviews.open(threadId, path);
     core.bus.emit('panel.requested', { threadId, surface: { kind: 'browser', url: preview.url, artifact: { path: preview.path, port: preview.port } }, at: Date.now() });
@@ -249,13 +274,25 @@ export function registerAgentMethods(core: Core): void {
   });
   // The page a pending question carries, for whoever answers it: a paired phone
   // names a question, never a surface, and only in the conversation it watches.
+  // Opening it again brings back the tab it opened, wherever its sign-in led it.
+  const pageTabs = new Map<string, string>();
   core.router.register('questions.openPage', async (params, { connection }) => {
     const thread = core.threads.require(params.threadId);
     if (connection.identity.principal !== 'owner' && (thread.archived || !connection.subscriptions.has(thread.id))) throw refused('subscribe to the active conversation before opening its page');
     const url = core.threads.listQuestions(thread.id).find((question) => question.id === params.questionId)?.open?.url;
     if (url === undefined) throw refused(`questions.openPage: ${params.questionId} is not a pending question with a page`, { questionId: params.questionId });
     const surface = checkSurface(thread.cwd, { kind: 'browser', url });
-    if (surface.kind === 'browser') await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (surface.kind !== 'browser') return { ok: true } as const;
+    const key = `${thread.id}:${params.questionId}`, opened = pageTabs.get(key);
+    if (opened !== undefined && core.browser.status({ threadId: thread.id }).tabs.some((tab) => tab.tabId === opened)) {
+      await core.browser.command({ threadId: thread.id, tabId: opened, action: { kind: 'activate' } });
+      return { ok: true } as const;
+    }
+    const reply = await core.browser.command({ threadId: thread.id, action: { kind: 'open', url: surface.url } });
+    if (reply.tabId !== undefined) {
+      pageTabs.set(key, reply.tabId);
+      if (pageTabs.size > 500) pageTabs.delete(pageTabs.keys().next().value!);
+    }
     return { ok: true } as const;
   });
   core.router.register('threads.tasks.set', (params) => setTasks(core, params));
@@ -267,22 +304,24 @@ export function registerAgentMethods(core: Core): void {
   registerGitMethods(core);
   registerWorkdirMethods(core);
 
-  // A thread that is gone or archived keeps no door open: its processes are
-  // stopped with it, and a token nobody can use is a token nobody can steal.
+  // A manual archive stops its processes. Automatic merged-PR Done lets the
+  // current prompt keep using Boite until it finishes, then closes its door.
   // Forgetting the token only stops the next hello, so a socket an agent
   // already opened goes too: it used to keep claiming cards and opening
   // panels on a thread the user had put away.
-  const shut = (threadId: ThreadId): void => {
+  const shut = (threadId: ThreadId, removed = false): void => {
     core.browser.release(threadId);
     core.devices.release(threadId);
-    core.agents.forget(threadId);
+    core.windows.release(threadId);
+    core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };
-  core.bus.onAny((name, payload) => {
-    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId);
+  // Committed events only: a rolled-back archive or removal keeps the thread's windows, agent and sockets.
+  core.bus.onCommitted((name, payload) => {
+    if (name === 'thread.removed') shut((payload as { threadId: ThreadId }).threadId, true);
     if (name === 'thread.updated') {
       const thread = payload as ThreadSummary;
-      if (thread.archived) shut(thread.id);
+      if (thread.archived && !(thread.archiveReason?.type === 'pr-merged' && (thread.status === 'running' || thread.status === 'waiting'))) shut(thread.id);
     }
   });
 }

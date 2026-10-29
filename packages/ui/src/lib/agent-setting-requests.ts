@@ -21,18 +21,29 @@ export function projectName(id: string, names: AgentSettingNames): string {
   return names.projects.find((project) => project.id === id)?.name ?? id;
 }
 
-/** `On`, `30 min`, `Claude Opus 5.5`, `High`, `boite, notes`. */
-export function agentSettingValueText(key: AgentSettingKey, value: unknown, names: AgentSettingNames): string {
+/**
+ * `On`, `Paused`, `Claude · Claude Opus 5.5`, `High`, `boite, notes`; instructions by their length, the card shows their text.
+ * `bare`: a model is an id of the agent's own provider, as a card drawn before cards named the provider holds it.
+ */
+export function agentSettingValueText(key: AgentSettingKey, value: unknown, names: AgentSettingNames, bare = false): string {
   const words = strings.agentSettingRequest;
   if (key === 'projects') {
     const ids = Array.isArray(value) ? value.map(String) : [];
     return ids.length === 0 ? words.noProjects : ids.map((id) => projectName(id, names)).join(', ');
   }
   if (key === 'effort' && (value === null || value === undefined)) return words.defaultEffort;
-  if (value === null || value === undefined) return words.none;
+  if (key === 'dailyBudget' && (value === null || value === undefined)) return words.noCap;
+  if (value === null || value === undefined || value === '') return words.none;
+  if (key === 'instructions' && typeof value === 'string') return fill(words.characters, { count: value.length.toLocaleString() });
+  if (key === 'status' && typeof value === 'string') return words.statuses[value as keyof typeof words.statuses] ?? value;
   if (typeof value === 'boolean') return value ? words.on : words.off;
-  if (key === 'maxRunMinutes' && typeof value === 'number') return fill(words.minutes, { count: String(value) });
+  if (key === 'dailyBudget' && typeof value === 'number') return fill(words.dollars, { amount: String(value) });
   if (key === 'model' && typeof value === 'string') {
+    // `<provider>/<model>`, unless `bare`: an id such as `openai/gpt-5` then names no provider.
+    const slash = value.indexOf('/');
+    const named = !bare && slash > 0 ? names.providers.find((provider) => provider.id === value.slice(0, slash)) : undefined;
+    const model = named?.models.find((entry) => entry.id === value.slice(slash + 1));
+    if (named && model) return `${named.name} · ${model.name}`;
     for (const provider of names.providers) {
       const model = provider.models.find((entry) => entry.id === value);
       if (model) return model.name;

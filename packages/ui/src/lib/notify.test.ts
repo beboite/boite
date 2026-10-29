@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ThreadSummary, Turn } from '@boite/contracts';
 import {
   finishNotifies,
+  limitsKey,
+  limitsMachine,
+  limitToast,
   NOTIFICATION_MUTED_STORAGE_KEY,
   NOTIFICATIONS_STORAGE_KEY,
   pushKinds,
@@ -19,7 +22,7 @@ import {
 } from './notify';
 
 describe('shouldNotify', () => {
-  const all = ['approvals', 'questions', 'finished', 'errors'] as const;
+  const all = ['approvals', 'questions', 'finished', 'errors', 'limits'] as const;
   const base = { kind: 'finished' as const, threadId: 't-1', openThreadId: 't-1', focused: true, enabled: true, kinds: all };
 
   test('the open thread on a focused window is already on the screen', () => {
@@ -53,8 +56,8 @@ describe('shouldNotify', () => {
 
 describe('finishNotifies', () => {
   const thread = (id: string, extra: Partial<ThreadSummary> = {}) => ({ id, status: 'idle', ...extra }) as ThreadSummary;
-  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation') =>
-    ({ threadId, status, ...(operation ? { execution: { operation } } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution'>;
+  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation' | 'routine', quiet = false) =>
+    ({ threadId, status, ...(operation ? { execution: { operation } } : {}), ...(quiet ? { quiet: true as const } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'>;
 
   test('a delegated agent never, its parent once the team is done', () => {
     const busy = [thread('root'), thread('child', { parentThreadId: 'root', status: 'running' })];
@@ -66,14 +69,30 @@ describe('finishNotifies', () => {
     expect(finishNotifies(idle, turn('root', 'done', 'delegation'))).toBe(true);
   });
 
-  test('a persistent agent only when it fails, compaction and stops never', () => {
+  test('a persistent agent like any thread unless its wake was quiet, compaction and stops never', () => {
     const threads = [thread('agent', { agentSessionId: 's-1', projectId: null }), thread('plain')];
-    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(false);
+    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(true);
+    expect(finishNotifies(threads, turn('agent', 'done', 'routine', true))).toBe(false);
     expect(finishNotifies(threads, turn('agent', 'error'))).toBe(true);
     expect(finishNotifies(threads, turn('plain', 'done', 'compact'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'stopped'))).toBe(false);
     expect(finishNotifies(threads, turn('plain', 'done'))).toBe(true);
     expect(finishNotifies(threads, turn('unknown', 'done'))).toBe(true);
+    // A thread this client does not hold yet keeps the turn's own exclusions: a quiet wake or a compaction is no news.
+    expect(finishNotifies([], turn('agent', 'done', 'routine', true))).toBe(false);
+    expect(finishNotifies([], turn('unknown', 'done', 'compact'))).toBe(false);
+  });
+
+  test('a persistent agent\'s memory pass never holds back the answer it follows, a subagent still does', () => {
+    const agent = thread('agent', { agentSessionId: 's-1', projectId: null });
+    const pass = thread('memory', { parentThreadId: 'agent', status: 'running', createdAt: 100 });
+    const finished = { ...turn('agent', 'done'), finishedAt: 100 };
+    // Started as the turn ended, before any snapshot named it.
+    expect(finishNotifies([agent, pass], finished, new Set())).toBe(true);
+    // Named by the snapshot, whenever it started.
+    expect(finishNotifies([agent, { ...pass, createdAt: 10 }], turn('agent', 'done'), new Set(['memory']))).toBe(true);
+    // A subagent the turn sent and left running is still work the answer waits on.
+    expect(finishNotifies([agent, thread('sub', { parentThreadId: 'agent', status: 'running', createdAt: 50 })], finished, new Set())).toBe(false);
   });
 });
 
@@ -91,17 +110,17 @@ describe('the switch', () => {
   });
 
   test('keeps every kind until one is turned off, stores the ones off, and tells push nothing while off', () => {
-    expect(readNotificationKinds()).toEqual(['approvals', 'questions', 'finished', 'errors']);
+    expect(readNotificationKinds()).toEqual(['approvals', 'questions', 'finished', 'errors', 'limits']);
     writeNotificationKinds(['errors', 'approvals']);
-    expect(JSON.parse(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY)!)).toEqual(['questions', 'finished']);
+    expect(JSON.parse(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY)!)).toEqual(['questions', 'finished', 'limits']);
     expect(readNotificationKinds()).toEqual(['approvals', 'errors']);
     expect(pushKinds()).toEqual(['approvals', 'errors']);
     writeNotifications(false);
     expect(pushKinds()).toEqual([]);
-    writeNotificationKinds(['approvals', 'questions', 'finished', 'errors']);
+    writeNotificationKinds(['approvals', 'questions', 'finished', 'errors', 'limits']);
     expect(window.localStorage.getItem(NOTIFICATION_MUTED_STORAGE_KEY)).toBeNull();
     window.localStorage.setItem(NOTIFICATION_MUTED_STORAGE_KEY, '{broken');
-    expect(readNotificationKinds()).toHaveLength(4);
+    expect(readNotificationKinds()).toHaveLength(5);
   });
 });
 
@@ -120,6 +139,18 @@ describe('toastFor', () => {
     expect(toastFor('errors', 't-1', 'Port the scheduler', null).body).toBe('Failed');
     expect(toastFor('questions', 't-1', 'Port the scheduler', null).body).toBe('Needs your answer');
     expect(toastFor('questions', 't-1', 'Port the scheduler', 'Which branch?').body).toBe('Which branch?');
+  });
+});
+
+describe('limitToast', () => {
+  test('names the account and the scoped window, says the share used and keeps the machine for the click', () => {
+    const alert = { accountId: 'a', providerId: 'claude', providerName: 'Claude', label: 'Perso', period: 'weekly' as const, threshold: 10,
+      window: { id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 91.6, resetsAt: null }, at: 1 };
+    expect(limitToast(alert, limitsKey('m1'))).toEqual({ title: 'Claude · Perso · Opus', body: 'Weekly limit: 8% left', threadId: 'boite-limits:m1', limits: true });
+    // A gateway entry's label already names its provider.
+    expect(limitToast({ ...alert, label: 'Claude Max · chris@', period: 'fiveHour', window: { ...alert.window, label: '5 hours' } }, limitsKey(null)))
+      .toEqual({ title: 'Claude Max · chris@', body: '5-hour limit: 8% left', threadId: 'boite-limits:', limits: true });
+    expect([limitsMachine('boite-limits:m1'), limitsMachine('boite-limits:'), limitsMachine('["m1","t1"]')]).toEqual(['m1', '', null]);
   });
 });
 
@@ -192,6 +223,22 @@ describe('sendNotification', () => {
       // No group id known: still the worker, and the window opens it by its own key.
       await sendNotification({ title: 'Which branch?', body: 'Needs you', threadId: '["m3","t-2"]', coreThreadId: 't-2', origin: 'https://other.test' });
       expect(showNotification).toHaveBeenLastCalledWith('Which branch?', expect.objectContaining({ tag: 'thread-["m3","t-2"]', data: { threadId: 't-2', key: '["m3","t-2"]' } }));
+      expect(browserNotification).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  test('a limit alert goes through the worker with the data of the core\'s push, never the constructor Android refuses', async () => {
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const browserNotification = vi.fn(function () { throw new TypeError('Illegal constructor'); });
+    Object.assign(browserNotification, { permission: 'granted' });
+    vi.stubGlobal('Notification', browserNotification);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ showNotification }) } });
+    const core = 'c'.repeat(64);
+    try {
+      await sendNotification({ title: 'Claude · Perso', body: 'Weekly limit: 92% used', threadId: 'boite-limits:', limits: true, origin: location.origin });
+      expect(showNotification).toHaveBeenLastCalledWith('Claude · Perso', expect.objectContaining({ data: { limits: true } }));
+      await sendNotification({ title: 'Codex · Work', body: '5-hour limit: 90% used', threadId: 'boite-limits:m2', limits: true, origin: 'https://remote.test', core });
+      expect(showNotification).toHaveBeenLastCalledWith('Codex · Work', expect.objectContaining({ data: { limits: true, core } }));
       expect(browserNotification).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
   });

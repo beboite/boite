@@ -34,14 +34,20 @@ export class ArtifactPreviews {
   }
 
   open(threadId: string, path: string): { url: string; port: number; path: string } {
-    this.unlisten ??= this.core.bus.onAny((name) => {
+    this.unlisten ??= this.core.bus.onCommitted((name) => {
       if (name !== 'thread.updated' && name !== 'thread.removed') return;
       for (const [key, preview] of this.previews) {
-        try { if (!this.core.threads.require(key.split('\0')[0]!).archived) continue; } catch { /* removed */ }
+        try {
+          const threadId = key.split('\0')[0]!;
+          this.core.sharedAccess.denyTool(threadId);
+          if (!this.core.threads.require(threadId).archived) continue;
+        } catch { /* removed or protected */ }
         preview.server.stop(true); this.previews.delete(key);
       }
     });
     const thread = this.core.threads.require(threadId);
+    // A live neighbouring-asset origin has no immutable dependency scope. Shared jobs use a checked inline view.
+    this.core.sharedAccess.denyTool(threadId);
     if (thread.archived) throw refused('artifacts.preview needs an active thread');
     const found = existingInside(thread.cwd, path, 'file', 'artifacts.preview path');
     if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.preview path must be an HTML file', { path });
@@ -65,8 +71,11 @@ export class ArtifactPreviews {
       fetch: request => {
         const notFound = () => new Response('preview asset not found', { status: 404 });
         if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('GET or HEAD only', { status: 405 });
-        // Do not keep serving a project after its conversation was removed or archived.
-        try { if (this.core.threads.require(threadId).archived) return notFound(); } catch { return notFound(); }
+        // Protection can change before a thread event closes the origin.
+        try {
+          this.core.sharedAccess.denyTool(threadId);
+          if (this.core.threads.require(threadId).archived) return notFound();
+        } catch { return notFound(); }
         const parsed = new URL(request.url);
         if (!parsed.pathname.startsWith(prefix)) return notFound();
         let relative: string;

@@ -59,7 +59,7 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
-  /** Antigravity's `start_subagent`, or an MCP tool of that title, once an update said which. */
+  /** Antigravity's `invoke_subagent`, or an MCP tool of that title, once an update said which. */
   subagent: 'subagent' | 'mcp' | null;
 }
 
@@ -310,10 +310,11 @@ export class AcpTurn {
     status: ToolCallStatus | null | undefined,
     content: ToolCallContent[] | null | undefined,
     subagent: 'subagent' | 'mcp' | null = null,
+    fallbackName: string | null = null,
   ): void {
     const entry = this.tools.get(toolCallId) ?? {
       index: this.takeIndex(),
-      name: toolCallId,
+      name: name ?? fallbackName ?? toolCallId,
       input: null,
       output: null,
       status: 'running' as ToolStatus,
@@ -336,7 +337,15 @@ export class AcpTurn {
       if (output !== undefined && output !== null) entry.output = boundText(toolOutputText(output));
     }
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
-    if (content !== null && content !== undefined) entry.documents = documentsOf(content);
+    if (content !== null && content !== undefined) {
+      // OpenCode 2 puts stdout in ACP content and only metadata in rawOutput.
+      // Text is the tool output; images and diffs are separate documents.
+      if (this.ctx.provider.id === 'opencode-v2') {
+        const text = content.flatMap(item => item.type === 'content' && item.content.type === 'text' ? [item.content.text] : []);
+        if (text.length > 0) entry.output = boundText(text.join('\n'));
+        entry.documents = documentsOf(content.filter(item => item.type !== 'content' || item.content.type !== 'text'));
+      } else entry.documents = documentsOf(content);
+    }
     this.tools.set(toolCallId, entry);
     this.part(entry.index, {
       type: 'tool',

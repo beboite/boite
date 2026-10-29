@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, ProviderDescriptor, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { choiceFor, mintUuidV7, museExecutable } from '../src/drivers/muse.ts';
+import { choiceFor, mintUuidV7, museExecutable, museHostArgs } from '../src/drivers/muse.ts';
 import { setMuseStartupDeadlineForTests } from '../src/drivers/muse/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -515,6 +515,7 @@ describe('muse driver', () => {
       outputTokens: 4,
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: null,
     });
     const thread = await client.call('threads.get', { threadId });
@@ -731,6 +732,29 @@ describe('muse wire helpers', () => {
       expect(museExecutable(descriptor(shim))).toBe(binary);
       // Anything but a `.cmd` is spawned as it is.
       expect(museExecutable(descriptor(binary))).toBe(binary);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the host runs without reminder agents only on a release that has the setting", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'muse-install-'));
+    try {
+      const binary = join(dir, 'muse');
+      // No version record: the host keeps its own reminders.
+      expect(museHostArgs(binary)).toEqual([]);
+      const off = ['-c', 'run.reminder_roster={}'];
+      for (const [version, args] of [
+        ['1.3.0-R3401.1', []],
+        ['1.4.12', []],
+        ['1.4.13-R6996.1', off],
+        ['1.5.0', off],
+        ['2.0.0', off],
+        ['nightly', []],
+      ] as const) {
+        writeFileSync(join(dir, '.muse-version'), `${version}\n`, 'utf8');
+        expect(museHostArgs(binary)).toEqual([...args]);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

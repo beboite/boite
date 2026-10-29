@@ -157,7 +157,7 @@ export class TranscriptReader {
     const at = timeOf(record);
     const prompt = promptOf(record);
     if (prompt !== null) {
-      if (this.cwd === null && typeof record.cwd === 'string') this.cwd = record.cwd;
+      if (!this.hasPrompt) this.cwd = typeof record.cwd === 'string' ? record.cwd : null;
       this.turns.push({ prompt: prompt.text, images: prompt.images, promptAt: at, parts: [], answerAt: null, lastAt: at });
       return;
     }

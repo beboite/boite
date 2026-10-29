@@ -3,6 +3,11 @@ import type { AgentCommand, BackgroundTask, ToolDocument, Usage } from '@boite/c
 import type { PromptCacheLife } from '../types.ts';
 import { stringify } from '../tool-text.ts';
 
+/** `api_retry`: the CLI is running a request that failed and will try again. */
+export function isApiRetry(message: SDKMessage): boolean {
+  return message.type === 'system' && message.subtype === 'api_retry';
+}
+
 /** The JSON boundary: the SDK types these through the Anthropic API package. */
 interface ContentBlock {
   type: string;
@@ -21,7 +26,7 @@ export interface StreamEvent {
   index?: number;
   message?: { id?: string; model?: string };
   content_block?: ContentBlock;
-  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string | null };
 }
 
 /** The SDK's `SlashCommand` as the contract's `AgentCommand`: an empty field becomes null. */
@@ -147,13 +152,19 @@ export function mapUsage(result: SDKResultMessage, costBefore: number | null): U
         output_tokens?: number;
         cache_read_input_tokens?: number;
         cache_creation_input_tokens?: number;
+        cache_creation?: { ephemeral_1h_input_tokens?: number };
       }
     | undefined;
+  const written = usage?.cache_creation_input_tokens ?? 0;
+  // Claude Code writes its cache for an hour unless the split says otherwise.
+  const split = usage?.cache_creation?.ephemeral_1h_input_tokens;
+  const hourWrites = typeof split === 'number' ? Math.min(Math.max(0, split), written) : written;
   return {
     inputTokens: usage?.input_tokens ?? 0,
     outputTokens: usage?.output_tokens ?? 0,
     cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+    cacheWriteTokens: written,
+    ...(hourWrites > 0 ? { cacheWriteHourTokens: hourWrites } : {}),
     // A total under what was already charged leaves this turn's share unknown:
     // the CLI restored less than the journal holds. Charging the whole total
     // would count the restored turns again, and the journal's sum, read back

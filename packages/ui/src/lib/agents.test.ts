@@ -1,9 +1,13 @@
-import { expect, test, vi } from 'vitest';
-import type { AgentEntities, AgentScope, AgentsSnapshot } from '@boite/contracts';
-import { AgentsView, agentChats, attentionOf, avatarText, liveThreads, missionPreset, missionsOf, previewOf } from './agents.svelte';
-import { AgentDirectory } from './agent-directory.svelte';
-import type { ThreadSummary } from '@boite/contracts';
+import { expect, vi } from 'vitest';
+import { RpcErrorCode, type AgentsSnapshot } from '@boite/contracts';
+import { RpcFailure } from './rpc-error';
+import { test } from '../test/fake-client';
+import { AgentsView, agentOfThread, agentRows, liveActivity, liveStep, openAgent, previewOf, avatarText } from './agents.svelte';
+import { AgentDirectory, agentDirectory } from './agent-directory.svelte';
+import { setExperiment } from './experiments';
 import { FakeAgents } from './fake-agents';
+import { openQuestionPage } from './question-page';
+import { rightPanel } from './right-panel.svelte';
 import type { Store } from './store.svelte';
 
 test('an invalidation arriving as a snapshot completes still refreshes the view', async () => {
@@ -28,8 +32,7 @@ test('background updates preserve a mutation error and a changed client gets a n
   const first = { call: vi.fn().mockResolvedValue(snapshot), on: vi.fn(() => off) };
   const second = { call: vi.fn().mockResolvedValue({ ...snapshot, revision: 3 }), on: vi.fn(() => () => {}) };
   const source = { client: first as unknown as Store['client'] };
-  const store = source as unknown as Store;
-  const view = new AgentsView(store);
+  const view = new AgentsView(source as unknown as Store);
   try {
     // On screen: the view follows `agents.changed`.
     view.start();
@@ -45,225 +48,170 @@ test('background updates preserve a mutation error and a changed client gets a n
   } finally { view.close(); }
 });
 
-test('older pages and records that left the snapshot window stay in seen, the later revision winning', async () => {
-  const base = new FakeAgents(() => {}).snapshot();
-  const scope = { kind: 'agent' as const, id: 'agent_1' };
-  const message = (id: string, at: number, revision = 1): AgentEntities['message'] => ({ id, revision, createdAt: at, updatedAt: at, scope, senderId: null, text: id, recipientIds: [], replyTo: null, episodeId: id, sourceRunId: null });
-  const empty = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
-  const call = vi.fn(async (method: string, params: { before?: { id: string } }) => {
-    if (method === 'agents.history') {
-      expect(params.before?.id).toBe('m2');
-      return { ...empty, messages: [message('m1', 1)], more: false };
-    }
-    return call.mock.calls.filter(([m]) => m === 'agents.snapshot').length === 1
-      ? { ...base, messages: [message('m2', 2), message('m3', 3)], more: { ...base.more, message: true } }
-      : { ...base, revision: 2, messages: [message('m3', 3, 2), message('m4', 4)], more: { ...base.more, message: true } };
-  });
-  const view = new AgentsView({ client: { call, on: () => () => {} } } as unknown as Store);
-  try {
-    await view.refresh();
-    expect(view.hasOlder('chat', 'message')).toBe(true);
-    await view.loadOlder('chat', { kind: 'message', scopes: [scope] }, view.seen.messages);
-    expect(view.hasOlder('chat', 'message')).toBe(false);
-    await view.refresh();
-    expect(view.seen.messages.map(m => `${m.id}@${m.revision}`)).toEqual(['m1@1', 'm2@1', 'm3@2', 'm4@1']);
-    view.fill('chat', { kind: 'message', scopes: [scope] }, view.seen.messages);
-    expect(call.mock.calls.filter(([m]) => m === 'agents.history')).toHaveLength(1);
-  } finally { view.close(); }
+test('the newest agent open wins over an older one answered last, and a navigation meanwhile drops it', async () => {
+  const answers = new Map<string, (value: { threadId: string }) => void>();
+  const call = vi.fn((_method: string, params: { agentId: string }) => new Promise(resolve => { answers.set(params.agentId, resolve); }));
+  const open = vi.fn(async (_threadId: string) => {});
+  const store = { client: { call, on: () => () => {} }, open, navigationGeneration: 0 } as unknown as Store & { navigationGeneration: number };
+  const a = openAgent(store, 'a');
+  const b = openAgent(store, 'b');
+  answers.get('b')!({ threadId: 'thread-b' });
+  await b;
+  answers.get('a')!({ threadId: 'thread-a' });
+  await a;
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-b']);
+  // Another thread or page opened while it waited: the agent's thread does not take the screen back.
+  const c = openAgent(store, 'c');
+  store.navigationGeneration++;
+  answers.get('c')!({ threadId: 'thread-c' });
+  await c;
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-b']);
 });
 
-test('old unfinished work does not move the work cursor past finished work', async () => {
-  const base = new FakeAgents(() => {}).snapshot();
-  const scope = { kind: 'agent' as const, id: 'agent_1' };
-  const work = (id: string, at: number, status: AgentEntities['work']['status']): AgentEntities['work'] => ({ id, revision: 1, createdAt: at, updatedAt: at, agentId: 'agent_1', scope, taskId: null, taskGeneration: null, messageId: null, episodeId: id, prompt: id, status, error: null, runId: null, notBefore: 0 });
-  const call = vi.fn(async (method: string, _params: unknown) => method === 'agents.history'
-    ? { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [], more: false }
-    : { ...base, work: [work('stuck', 1, 'interrupted'), work('w50', 50, 'done'), work('w51', 51, 'done')], more: { ...base.more, work: true } });
-  const view = new AgentsView({ client: { call, on: () => () => {} } } as unknown as Store);
-  try {
-    await view.refresh();
-    await view.loadOlder('activity', { kind: 'work', agentId: 'agent_1' }, view.seen.work);
-    expect(call.mock.calls.find(([m]) => m === 'agents.history')![1]).toMatchObject({ before: { updatedAt: 50, id: 'w50' } });
-  } finally { view.close(); }
+test('only an older core without agents.open falls back to the listed thread; another refusal is shown', async () => {
+  const snapshot = { profiles: [], status: [], sessions: [{ agentId: 'a', threadId: 'thread-a' }] } as unknown as AgentsSnapshot;
+  const refusal = { error: null as unknown };
+  const call = vi.fn(async () => { throw refusal.error; });
+  const open = vi.fn(async (_threadId: string) => {});
+  const store = { client: { call, on: () => () => {} }, open, navigationGeneration: 0, error: '' } as unknown as Store;
+  AgentsView.of(store).snapshot = snapshot;
+  refusal.error = new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'agent a is archived' });
+  expect(await openAgent(store, 'a')).toBeNull();
+  expect(open).not.toHaveBeenCalled();
+  expect(store.error).toContain('agent a is archived');
+  refusal.error = new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method agents.open' });
+  expect(await openAgent(store, 'a')).toBe('thread-a');
+  expect(open.mock.calls.map(([threadId]) => threadId)).toEqual(['thread-a']);
 });
 
-test('a snapshot that no longer touches kept history restarts that kind and drops a page in flight', async () => {
-  const base = new FakeAgents(() => {}).snapshot();
-  const scope = { kind: 'agent' as const, id: 'agent_1' };
-  const message = (id: string, at: number): AgentEntities['message'] => ({ id, revision: 1, createdAt: at, updatedAt: at, scope, senderId: null, text: id, recipientIds: [], replyTo: null, episodeId: id, sourceRunId: null });
-  const empty = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
-  let answer!: (page: unknown) => void;
-  let snapshots = 0;
-  const call = vi.fn((method: string, _params: unknown) => {
-    if (method === 'agents.history') return new Promise(done => { answer = done; });
-    snapshots++;
-    // The second window starts after everything the first one held: 100 messages arrived in between.
-    return Promise.resolve(snapshots === 1
-      ? { ...base, messages: [message('m1', 1), message('m2', 2)], more: { ...base.more, message: true } }
-      : { ...base, revision: 2, messages: [message('m200', 200), message('m201', 201)], more: { ...base.more, message: true } });
-  });
-  const view = new AgentsView({ client: { call, on: () => () => {} } } as unknown as Store);
-  try {
-    await view.refresh();
-    const loading = view.loadOlder('chat', { kind: 'message', scopes: [scope] }, view.seen.messages);
-    await view.refresh();
-    expect(view.seen.messages.map(m => m.id)).toEqual(['m200', 'm201']);
-    answer({ ...empty, messages: [message('m0', 0)], more: false });
-    await loading;
-    expect(view.seen.messages.map(m => m.id)).toEqual(['m200', 'm201']);
-    expect(view.hasOlder('chat', 'message')).toBe(true);
-  } finally { view.close(); }
+test('two users of one view keep it listening until the last one leaves', async () => {
+  const off = vi.fn();
+  const client = { call: vi.fn().mockResolvedValue(new FakeAgents(() => {}).snapshot()), on: vi.fn(() => off) };
+  const view = new AgentsView({ client } as unknown as Store);
+  view.start();
+  view.start();
+  await view.refresh();
+  view.pause();
+  expect(off).not.toHaveBeenCalled();
+  view.pause();
+  expect(off).toHaveBeenCalledOnce();
+  view.close();
 });
 
-/** A small directory: Mira and Atlas, Lin archived, a group whose team folds into it, and a team with no group. */
-function directory() {
-  const base = new FakeAgents(() => {}).snapshot();
-  const record = { revision: 1, createdAt: 1 };
-  const profile = (id: string, name: string, updatedAt: number, status: AgentEntities['profile']['status'] = 'active') => ({ ...record, id, updatedAt, name, domain: `${name} domain`, instructions: '', avatar: '', selection: { providerId: 'p', accountId: 'a', model: null, effort: null, permissionMode: 'default' as const }, status, tools: [] });
-  const snapshot: AgentsSnapshot = {
-    ...base,
-    profiles: [profile('mira', 'Mira', 10), profile('atlas', 'Atlas', 20), profile('lin', 'Lin', 90, 'archived')],
-    groups: [{ ...record, id: 'table', updatedAt: 5, name: 'Ideas table', memberIds: ['mira', 'atlas'], mode: 'round', maxTurns: 6, maxTurnsPerAgent: 2, paused: false }],
-    teams: [
-      { ...record, id: 'studio', updatedAt: 6, name: 'Studio', description: '', members: [{ agentId: 'mira', responsibility: 'Explore' }], projectIds: [], groupId: 'table', paused: false },
-      { ...record, id: 'crew', updatedAt: 4, name: 'Crew', description: '', members: [{ agentId: 'atlas', responsibility: 'Build' }], projectIds: [], groupId: null, paused: false }
-    ],
-    missions: [
-      { ...record, id: 'm-studio', updatedAt: 7, title: 'Studio work', objective: '', expectedResult: '', teamId: 'studio', projectId: null, agentIds: ['mira'], status: 'review', maxTurns: 6, maxDurationMs: 60000, maxTokens: null, resourceIds: [] },
-      { ...record, id: 'm-solo', updatedAt: 8, title: 'Solo', objective: '', expectedResult: '', teamId: null, projectId: null, agentIds: ['atlas'], status: 'open', maxTurns: 6, maxDurationMs: 60000, maxTokens: null, resourceIds: [] }
-    ],
-    tasks: [{ ...record, id: 't1', updatedAt: 7, missionId: 'm-studio', title: 'Check', instructions: '', dependsOn: [], assigneeId: 'mira', status: 'review', generation: 1, leaseUntil: null, workspace: null, result: 'Done' }]
-  };
-  const message = (id: string, scope: AgentScope, senderId: string | null, at: number): AgentEntities['message'] => ({ ...record, id, updatedAt: at, createdAt: at, scope, senderId, text: `**${id}**  text`, recipientIds: [], replyTo: null, episodeId: id, sourceRunId: null });
-  return { snapshot, message };
-}
-
-test('the chat list folds a team into its group, orders by activity and counts unread and attention', () => {
-  const { snapshot, message } = directory();
-  const messages = [
-    message('hello', { kind: 'agent', id: 'mira' }, null, 30),
-    message('reply', { kind: 'agent', id: 'mira' }, 'mira', 31),
-    message('later', { kind: 'agent', id: 'mira' }, 'mira', 32),
-    message('table', { kind: 'group', id: 'table' }, 'atlas', 25)
-  ];
-  const chats = agentChats(snapshot, messages, { 'profile:mira': 31 }, attentionOf(snapshot, []));
-  expect(chats.map(c => `${c.kind}:${c.id}`)).toEqual(['profile:mira', 'group:table', 'profile:atlas', 'team:crew']);
-  const [mira, table, , crew] = chats;
-  expect(mira).toMatchObject({ last: { id: 'later' }, unread: 1, status: 'idle', scope: { kind: 'agent', id: 'mira' } });
-  expect(table).toMatchObject({ teamId: 'studio', members: ['mira', 'atlas'], unread: 1, attention: 1 });
-  expect(crew).toMatchObject({ scope: null, teamId: 'crew', members: ['atlas'] });
-  expect(chats.some(c => c.id === 'lin' || c.id === 'studio')).toBe(false);
+test('the list puts the agent that spoke last first, leaves archived agents out and reads the live step from the thread row', () => {
+  const at = (n: number) => 1_700_000_000_000 + n;
+  const profile = (id: string, created: number, status: 'active' | 'archived' = 'active') => ({ id, name: id, domain: '', instructions: '', avatar: '', status, revision: 1, createdAt: at(created), updatedAt: at(created),
+    selection: { providerId: 'echo', accountId: 'echo', model: null, effort: null, permissionMode: 'default' as const } });
+  const status = (agentId: string, last: number | null, activity: string | null = null) => ({ agentId, threadId: `t-${agentId}`, state: 'idle' as const, activity, problem: null, nextWake: null, unread: 0,
+    last: last === null ? null : { text: 'hi', at: at(last) }, today: { turns: 0, wakes: 0, quiet: 0, costUsd: 0 } });
+  const snapshot = { profiles: [profile('old', 1), profile('new', 5), profile('gone', 9, 'archived'), profile('quiet', 3)], sessions: [{ id: 's', agentId: 'old', threadId: 't-old', revision: 1, createdAt: 0, updatedAt: 0 }],
+    status: [status('old', 10, 'Run the tests'), status('new', null), status('quiet', null)] } as unknown as AgentsSnapshot;
+  expect(agentRows(snapshot).map(r => r.profile.id)).toEqual(['old', 'new', 'quiet']);
+  expect(agentOfThread(snapshot, 't-old')?.id).toBe('old');
+  expect(agentOfThread(snapshot, 't-new')?.id).toBe('new');
+  const row = agentRows(snapshot)[0]!;
+  expect(liveStep(row.status, null)).toBe('Run the tests');
+  expect(liveStep(row.status, { status: 'running', progress: { turnId: 'x', phase: 'tool', detail: 'Read App.svelte', at: 0 } } as never)).toBe('Read App.svelte');
 });
 
-test('running and waiting work lights the conversation it belongs to and the agent doing it', () => {
-  const { snapshot } = directory();
-  const work = (id: string, agentId: string, scope: AgentScope, status: AgentEntities['work']['status'], at: number): AgentEntities['work'] => ({ id, revision: 1, createdAt: at, updatedAt: at, agentId, scope, taskId: null, taskGeneration: null, messageId: null, episodeId: id, prompt: id, status, error: null, runId: null, notBefore: 0 });
-  const busy = { ...snapshot, work: [work('w1', 'atlas', { kind: 'group', id: 'table' }, 'running', 50), work('w2', 'mira', { kind: 'mission', id: 'm-studio' }, 'waiting', 40)] };
-  const chats = agentChats(busy, [], {}, attentionOf(busy, []));
-  const of = (key: string) => chats.find(c => `${c.kind}:${c.id}` === key)!;
-  expect(of('group:table').status).toBe('waiting');
-  expect(of('profile:atlas').status).toBe('running');
-  expect(of('profile:mira').status).toBe('waiting');
-  expect(chats[0]!.id).toBe('table');
+test('a working row says what the step does, not the bare name of the tool it runs', () => {
+  const status = (activity: string | null) => ({ agentId: 'a', threadId: 't', state: 'working' as const, activity, problem: null, nextWake: null, unread: 0, last: null, today: { turns: 0, wakes: 0, quiet: 0, costUsd: 0 } });
+  const running = (phase: string, detail: string | null) => ({ status: 'running', progress: { turnId: 'x', phase, detail, at: 0 } }) as never;
+  // The driver reports "Bash"; the snapshot carries the call's title.
+  expect(liveActivity(status('Run the UI tests'), running('tool', 'Bash'))).toEqual({ kind: 'command', text: 'Run the UI tests' });
+  // A call with no title reads as what it is about, its tool as the glyph.
+  expect(liveActivity(status('Bash: git status'), running('tool', 'Bash'))).toEqual({ kind: 'command', text: 'git status' });
+  // Nothing more than the name yet: the family says it in words.
+  expect(liveActivity(status(null), running('tool', 'Read'))).toEqual({ kind: 'read', text: 'Reading a file' });
+  expect(liveActivity(status(null), running('tool', 'Sleep'))).toEqual({ kind: 'sleep', text: 'Waiting a moment' });
+  // Between calls the turn's phase speaks.
+  expect(liveActivity(status('Run the UI tests'), running('thinking', null))).toEqual({ kind: 'thinking', text: 'Thinking' });
+  expect(liveActivity(status(null), null)).toBeNull();
 });
 
-/** The threads agent sessions run in: Atlas in the group, Mira alone (waiting on the user), and Mira's archived one. */
-function sessionThreads() {
-  const { snapshot } = directory();
-  const record = { revision: 1, createdAt: 1, updatedAt: 1 };
-  const sessions = [
-    { ...record, id: 's-atlas-table', agentId: 'atlas', scope: { kind: 'group' as const, id: 'table' }, threadId: 't-atlas' },
-    { ...record, id: 's-mira', agentId: 'mira', scope: { kind: 'agent' as const, id: 'mira' }, threadId: 't-mira' },
-    { ...record, id: 's-mira-old', agentId: 'mira', scope: { kind: 'mission' as const, id: 'm-studio' }, threadId: 't-old' }
-  ];
-  const thread = (id: string, agentSessionId: string, status: ThreadSummary['status'], archived = false) => ({ id, agentSessionId, status, archived, runningSince: 100, parentThreadId: null } as unknown as ThreadSummary);
-  const threads = [thread('t-atlas', 's-atlas-table', 'running'), thread('t-mira', 's-mira', 'waiting'), thread('t-old', 's-mira-old', 'running', true), thread('t-plain', '', 'running')];
-  return { snapshot: { ...snapshot, sessions }, threads };
-}
-
-test('an agent at work lights its own row and the conversation its session belongs to', () => {
-  const { snapshot, threads } = sessionThreads();
-  const live = liveThreads(snapshot, threads);
-  expect(live.get('profile:atlas')?.id).toBe('t-atlas');
-  expect(live.get('group:table')?.id).toBe('t-atlas');
-  expect(live.get('profile:mira')?.id).toBe('t-mira');
-  // An archived session thread and an ordinary thread light nothing.
-  expect([...live.values()].some(t => t.id === 't-old' || t.id === 't-plain')).toBe(false);
+test('previews drop markdown and avatars fall back to initials', () => {
+  expect(previewOf('**Done**: see [the PR](https://x.test)\n\n```ts\ncode\n```')).toBe('Done: see the PR code');
+  expect(avatarText('Mira Scout', '')).toBe('MS');
 });
 
-test('the thread list names the agent of a thread and lists the agents at work, the one waiting on the user first', () => {
-  const { snapshot, threads } = sessionThreads();
-  const store = { threads: [...threads, { id: 't-child', parentThreadId: 't-atlas', status: 'running', archived: false } as unknown as ThreadSummary] } as unknown as Store;
-  const directory = new AgentDirectory(store);
-  expect(directory.ownerOf(threads[0]!)).toBeNull();
-  directory.snapshot = snapshot;
-  expect(directory.ownerOf(threads[0]!)?.name).toBe('Atlas');
-  // A delegated child belongs to its parent's agent.
-  expect(directory.ownerOf(store.threads.at(-1)!)?.name).toBe('Atlas');
-  expect(directory.ownerOf(threads[3]!)).toBeNull();
-  expect(directory.atWork.map(w => [w.agent.name, w.waiting])).toEqual([['Mira', true], ['Atlas', false]]);
-  // Work waiting on a decision counts after its turn ended: the thread is idle, the agent still needs the user.
-  const idle = threads.map(t => (t.id === 't-mira' ? { ...t, status: 'idle' as const } : t));
-  const waiting = { ...snapshot, runs: [{ id: 'r1', threadId: 't-mira' } as unknown as AgentsSnapshot['runs'][number]], work: [{ id: 'w1', agentId: 'mira', status: 'waiting', runId: 'r1' } as unknown as AgentsSnapshot['work'][number]] };
-  const later = new AgentDirectory({ threads: idle } as unknown as Store);
-  later.snapshot = waiting;
-  expect(later.atWork.map(w => [w.agent.name, w.thread.status, w.waiting])).toEqual([['Mira', 'waiting', true], ['Atlas', 'running', false]]);
-});
-
-test('a conversation lists its missions and starts a new one with its members and team', () => {
-  const { snapshot } = directory();
-  const table = { kind: 'group' as const, id: 'table', teamId: 'studio', members: ['mira', 'atlas'] };
-  expect(missionsOf(snapshot, table).map(m => m.id)).toEqual(['m-studio']);
-  expect(missionsOf(snapshot, { kind: 'profile', id: 'atlas', teamId: null, members: ['atlas'] }).map(m => m.id)).toEqual(['m-solo']);
-  expect(missionsOf(snapshot, { kind: 'team', id: 'crew', teamId: 'crew', members: ['atlas'] })).toEqual([]);
-  expect(missionPreset(snapshot, table)).toEqual({ teamId: 'studio', memberIds: ['mira'] });
-  expect(missionPreset(snapshot, { kind: 'profile', id: 'atlas', teamId: null, members: ['atlas'] })).toEqual({ teamId: null, memberIds: ['atlas'] });
-});
-
-test('avatars take a short avatar or the initials, previews drop markdown', () => {
-  expect(avatarText('Prototype studio')).toBe('PS');
-  expect(avatarText('mira', '🦊')).toBe('🦊');
-  expect(avatarText('Mira', 'a long avatar')).toBe('M');
-  expect(avatarText('  ')).toBe('?');
-  expect(previewOf('**Bold** and `code`\n\n- [a link](https://x)')).toBe('Bold and code - a link');
-});
-
-test('a read mark survives a new view of the same core', async () => {
-  const { snapshot } = directory();
-  localStorage.clear();
-  const store = { client: { call: vi.fn().mockResolvedValue(snapshot), on: () => () => {} }, core: { dataDir: 'D:/core' } } as unknown as Store;
-  const first = new AgentsView(store);
-  const second = new AgentsView(store);
-  try {
-    await first.refresh();
-    first.markRead('profile:mira', 40);
-    first.markRead('profile:mira', 30);
-    expect(first.readAt).toEqual({ 'profile:mira': 40 });
-    await second.refresh();
-    expect(second.readAt).toEqual({ 'profile:mira': 40 });
-  } finally { first.close(); second.close(); localStorage.clear(); }
-});
-
-test('a return visit draws the last snapshot at once and nothing is fetched while the page is away', async () => {
+test('while an agent works, the Agents page reads one snapshot a change with the open agent\'s desk, and the directory shares it', async () => {
+  vi.useFakeTimers();
   const snapshot = new FakeAgents(() => {}).snapshot();
-  let changed: (() => void) | null = null;
-  const off = vi.fn(() => { changed = null; });
-  const call = vi.fn().mockResolvedValue(snapshot);
-  const store = { client: { call, on: vi.fn((_: string, listener: () => void) => { changed = listener; return off; }) } } as unknown as Store;
-  const view = AgentsView.of(store);
+  const changed: (() => void)[] = [];
+  const calls: unknown[] = [];
+  const client = { call: vi.fn(async (_method: string, params: unknown) => { calls.push(params); return { ...snapshot, revision: calls.length }; }), on: vi.fn((_event: string, run: () => void) => { changed.push(run); return () => { changed.splice(changed.indexOf(run), 1); }; }) };
+  const store = { client, threads: [] } as unknown as Store;
+  const view = new AgentsView(store);
+  const directory = agentDirectory(store);
   try {
     view.start();
-    await expect.poll(() => view.snapshot).not.toBeNull();
+    view.showDesk('agt_open');
+    const release = directory.watch();
+    await vi.advanceTimersByTimeAsync(3000);
+    calls.length = 0;
+    // A working agent: one `agents.changed` a second, for 30 seconds.
+    for (let second = 0; second < 30; second++) { for (const run of changed) run(); await vi.advanceTimersByTimeAsync(1000); }
+    expect(calls).toHaveLength(30);
+    expect(new Set(calls.map(params => JSON.stringify(params)))).toEqual(new Set([JSON.stringify({ desk: 'agt_open' })]));
+    expect(directory.snapshot).toBe(view.snapshot);
+    // Off the page the directory reads its own snapshot again, with no desk.
     view.pause();
-    expect(off).toHaveBeenCalledOnce();
-    expect(changed).toBeNull();
-    const calls = call.mock.calls.length;
-    // The page comes back: the same view, its snapshot already there.
-    const again = AgentsView.of(store);
-    expect(again).toBe(view);
-    expect(again.snapshot).not.toBeNull();
-    again.start();
-    expect(changed).not.toBeNull();
-    await expect.poll(() => call.mock.calls.length).toBe(calls + 1);
-  } finally { view.close(); }
+    calls.length = 0;
+    for (const run of changed) run();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(calls).toEqual([{ desk: null }]);
+    release();
+  } finally { view.close(); vi.useRealTimers(); }
+});
+
+test('the directory counts an agent at work from its own status when this client has its thread row', () => {
+  const thread = { id: 't-a', agentSessionId: 's-a', status: 'idle', archived: false, runningSince: null } as never;
+  const store = { threads: [thread], client: null } as unknown as Store;
+  const directory = new AgentDirectory(store);
+  directory.snapshot = { profiles: [{ id: 'a', name: 'A', avatar: '' }], sessions: [{ id: 's-a', agentId: 'a', threadId: 't-a' }],
+    status: [{ agentId: 'a', threadId: 't-a', state: 'waiting' }] } as unknown as AgentsSnapshot;
+  expect(directory.atWork.map(w => [w.agent.id, w.waiting])).toEqual([['a', true]]);
+});
+
+test('an agent opens its own thread on the Agents page, and the thread list comes back to the thread it showed', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  try {
+    const { store, client } = await ready({ delayMs: 0, agentsDemo: true });
+    await store.open('t-trace');
+    expect(store.page).toBe('chat');
+    const view = AgentsView.of(store);
+    await view.refresh();
+    const mira = view.snapshot!.profiles.find(p => p.name === 'Mira')!;
+    store.showAgents();
+    const threadId = (await openAgent(store, mira.id))!;
+    expect(store.openThread?.id).toBe(threadId);
+    expect(store.page).toBe('agents');
+    // Its thread takes the user's messages like any thread: an ordinary turn, answered.
+    const turn = await client.call('turns.start', { threadId, prompt: 'hello' });
+    await vi.waitFor(() => expect(store.openThread?.turns.find(t => t.id === turn.id)?.status).toBe('done'));
+    store.showChat();
+    await vi.waitFor(() => expect(store.openThread?.id).toBe('t-trace'));
+    expect(store.page).toBe('chat');
+  } finally { setExperiment('resident-agents', false); }
+});
+
+test('Open on an agent\'s login question shows the page beside its conversation, on the Agents page', async ({ ready }) => {
+  setExperiment('resident-agents', true);
+  try {
+    const { store, client } = await ready({ delayMs: 0, agentsDemo: true });
+    const view = AgentsView.of(store);
+    await view.refresh();
+    const iris = view.snapshot!.profiles.find(p => p.name === 'Iris')!;
+    store.showAgents();
+    const threadId = (await openAgent(store, iris.id))!;
+    await vi.waitFor(() => expect(store.pendingQuestions.some(q => q.threadId === threadId && q.open)).toBe(true));
+    const question = store.pendingQuestions.find(q => q.threadId === threadId && q.open)!;
+    await openQuestionPage(store, threadId, question.id);
+    expect(store.page).toBe('agents');
+    expect(store.openThread?.id).toBe(threadId);
+    const panel = rightPanel.for(store.threadKey(threadId));
+    await vi.waitFor(() => expect(panel.active?.kind).toBe('agent-browser'));
+    expect(panel.isOpen).toBe(true);
+    expect((await client.call('browser.remoteStatus', { threadId })).tabs).toMatchObject([{ url: 'https://dashboard.example.com/login', active: true }]);
+  } finally { setExperiment('resident-agents', false); }
 });

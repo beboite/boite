@@ -1,0 +1,14 @@
+# Gradle and Android build output
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+
+# Signing secrets stay outside the repository.
+*.keystore
+*.jks
+
+*.apk
+*.aab
+*.idsig

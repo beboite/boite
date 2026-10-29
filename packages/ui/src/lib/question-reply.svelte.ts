@@ -1,6 +1,6 @@
 import type { QuestionRequest } from '@boite/contracts';
 import type { Store } from './store.svelte';
-import { unresolvedAssetId } from './draft-attachments';
+import { isLoading, unresolvedAssetId } from './draft-attachments';
 import { focusComposer } from './focus';
 import { strings } from './strings';
 
@@ -94,7 +94,8 @@ export function replyTarget(store: Store): QuestionRequest | null {
   const held = repliesOf(store);
   const open = store.pendingQuestions.filter((question) =>
     question.threadId === thread && question.allowText && !held.ignored[question.id] && (!held.waiting[question.id] || question.id === held.chosen));
-  const dockedElsewhere = held.docked !== null && store.pendingQuestions.some((question) => question.id === held.docked && question.threadId !== thread);
+  const dockedElsewhere = held.docked !== null && (store.pendingSecrets.some(request => request.id === held.docked)
+    || store.pendingQuestions.some((question) => question.id === held.docked && question.threadId !== thread));
   return open.find((question) => question.id === held.chosen)
     ?? open.find((question) => question.async !== true)
     ?? open.find((question) => question.id === held.docked)
@@ -122,6 +123,8 @@ export async function sendAnswer(store: Store, question: QuestionRequest): Promi
   const text = state?.text ?? '';
   const attachments = state?.attachments ?? [];
   if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return false; }
+  // The card's own button skips the composer's wait: a file still being read has no bytes to send.
+  if (attachments.some(isLoading)) { store.error = strings.errors.filesLoading; return false; }
   if (state) state.sending = true;
   try {
     if (!await store.answerQuestion(question.threadId, question.id, optionIds, text.trim(), attachments)) return false;
@@ -141,7 +144,7 @@ export function writeAnswer(store: Store, questionId: string): void {
   delete held.ignored[questionId];
   delete held.waiting[questionId];
   held.chosen = questionId;
-  focusComposer();
+  focusComposer({ typing: true });
 }
 
 /** The composer's way out: the open thread's questions wait, and it sends ordinary messages. */

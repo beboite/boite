@@ -4,7 +4,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import BrowserSurface from '../components/BrowserSurface.svelte';
 import { browserBridge, FakeBridge, type BrowserEvent } from './browser-bridge';
 import { RightPanelStore } from './right-panel.svelte';
-import { isExperimentEnabled, setExperiment } from './experiments';
+import { isFeatureEnabled, setFeature } from './features';
 import { strings } from './strings';
 import { installPreviewPicker, previewReferenceLabel, validPreviewSelection } from './preview-comments';
 import highlightPreviewElement from './preview-highlight.js';
@@ -151,8 +151,8 @@ test('an invalid native selection settles the picker, reports failure and permit
   let handler: (event: BrowserEvent) => void = () => {};
   const subscription = vi.spyOn(browserBridge, 'on').mockImplementation(callback => { handler = callback; return () => {}; });
   const annotate = vi.spyOn(browserBridge, 'annotate').mockImplementation(() => {});
-  const previewCommentsWasEnabled = isExperimentEnabled('preview-comments');
-  setExperiment('preview-comments', true);
+  const previewCommentsWasEnabled = isFeatureEnabled('preview-comments');
+  setFeature('preview-comments', true);
   const component = mount(BrowserSurface, { target: document.body, props: { store, panel, surface } });
   try {
     flushSync();
@@ -177,7 +177,7 @@ test('an invalid native selection settles the picker, reports failure and permit
     expect(store.composerStates['t-trace']?.previewReferences).toHaveLength(1);
   } finally {
     await unmount(component);
-    setExperiment('preview-comments', previewCommentsWasEnabled);
+    setFeature('preview-comments', previewCommentsWasEnabled);
     subscription.mockRestore();
     annotate.mockRestore();
   }
@@ -189,8 +189,8 @@ test('Escape in the address field cancels active picking and restores the curren
   const panel = new RightPanelStore().for('t-trace');
   const surface = panel.open('browser', 'https://example.test');
   const annotate = vi.spyOn(browserBridge, 'annotate').mockImplementation(() => {});
-  const previewCommentsWasEnabled = isExperimentEnabled('preview-comments');
-  setExperiment('preview-comments', true);
+  const previewCommentsWasEnabled = isFeatureEnabled('preview-comments');
+  setFeature('preview-comments', true);
   const component = mount(BrowserSurface, { target: document.body, props: { store, panel, surface } });
   try {
     flushSync();
@@ -212,7 +212,7 @@ test('Escape in the address field cancels active picking and restores the curren
     expect(store.composerStates['t-trace']?.previewReferences ?? []).toEqual([]);
   } finally {
     await unmount(component);
-    setExperiment('preview-comments', previewCommentsWasEnabled);
+    setFeature('preview-comments', previewCommentsWasEnabled);
     annotate.mockRestore();
   }
 });

@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import { threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, RpcErrorCode, threadActive, withoutTrailingSlashes, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
   forgetGroupOf,
   removeBrought,
@@ -17,12 +17,13 @@ import {
   type MainMachine,
   opens
 } from './endpoint';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 import { threadAddress } from './chat-links';
+import { RpcFailure } from './rpc-error';
 import { onReveal, reveal } from './reveal';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
 import { GroupLinks } from './group-links.svelte';
-import { setNotificationCore, setPushHomeClient } from './notify';
+import { limitsMachine, setNotificationCore, setPushHomeClient } from './notify';
 import { appPage } from './app-origin';
 import { bootWorkspace, byHand, hostOf, primaryMachine } from './workspace-boot';
 
@@ -43,6 +44,29 @@ export function isThisPC(machine: Machine): boolean {
   if (machine.store.localCore) return true;
   try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(machine.store.endpointUrl ?? machine.id).hostname); }
   catch { return false; }
+}
+
+/**
+ * A machine's name on screen. This computer under the default name goes by
+ * its own: in a group every PC is "this PC" to itself, which tells nobody apart.
+ */
+export function machineName(machine: Machine): string {
+  return isThisPC(machine) && localDefault(machine.label) && machine.store.core?.hostname ? machine.store.core.hostname : machine.label;
+}
+
+/**
+ * The default name of this computer, as saved in any language the app spoke
+ * then (English, French), or by an older version. The French one is written
+ * out rather than read: its catalogue loads only once the app speaks French.
+ */
+function localDefault(label: string): boolean {
+  return label === strings.machines.local || ['This PC', 'Ce PC', 'My computer', 'This computer'].includes(label);
+}
+
+/** A machine in a list of machines: this computer by its name and "(you)", once it has a name of its own. */
+export function listedName(machine: Machine): string {
+  const name = machineName(machine);
+  return isThisPC(machine) && !localDefault(name) ? fill(strings.machines.you, { machine: name }) : name;
 }
 
 /**
@@ -102,7 +126,7 @@ export class Workspace {
   error = $state<string | null>(null);
   /** Selections still landing: until they have, the screen is on its way somewhere (`view-history.svelte.ts`). */
   selecting = $state(0);
-  readonly settingsSync = new AutoSettingsSync(() => this.machines, profileKey);
+  readonly settingsSync = new AutoSettingsSync(() => this.machines, machineName);
   /** Connects the other machines of a group and drops the ones that left it. */
   readonly groups = new GroupLinks(this);
   /** The store of the core this page booted on: never removed, whatever a group says. */
@@ -508,8 +532,8 @@ export class Workspace {
     if (saved) storeEndpoint(saved);
   }
 
-  /** `fresh`: a project's new draft rather than the last one written there. */
-  async select(target: Store, threadId?: string, projectId?: string, options: { fresh?: boolean } = {}): Promise<void> {
+  /** A named draft, a project's fresh draft, or the machine's last visit when no destination is given. */
+  async select(target: Store, threadId?: string, projectId?: string | null, options: { fresh?: boolean; draftId?: string } = {}): Promise<void> {
     this.selecting += 1;
     try {
       await this.#select(target, threadId, projectId, options);
@@ -518,15 +542,17 @@ export class Workspace {
     }
   }
 
-  async #select(target: Store, threadId: string | undefined, projectId: string | undefined, options: { fresh?: boolean }): Promise<void> {
+  async #select(target: Store, threadId: string | undefined, projectId: string | null | undefined, options: { fresh?: boolean; draftId?: string }): Promise<void> {
     ++this.#generation;
     this.#moveTo(target);
-    target.showChat();
     target.visible = true;
     if (threadId) await target.open(threadId);
-    else if (projectId) target.startDraft(projectId, options.fresh ? { fresh: true } : {});
-    else if (target.openThread) await target.open(target.openThread.id);
-    else await target.openWhereLeft();
+    else if (projectId !== undefined || options.draftId !== undefined) target.startDraft(projectId, options);
+    else {
+      target.showChat();
+      if (target.openThread) await target.open(target.openThread.id);
+      else await target.openWhereLeft();
+    }
   }
 
   async addLocalProjects(paths: string[]): Promise<void> {
@@ -583,23 +609,44 @@ export class Workspace {
    * connecting. False when it is not connected within `patience`.
    */
   async openMemberThread(coreId: string, threadId: string, patience = 90_000): Promise<boolean> {
+    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
+    const target = await this.#memberStore(coreId, patience);
+    if (typeof target === 'string') return false;
+    await this.select(target, threadId);
+    return true;
+  }
+
+  /**
+   * The store of a machine of the group once it is connected. `superseded`
+   * when a newer tap, a closed workspace or the user opening something else
+   * took over meanwhile; `timeout` when it did not connect in time.
+   */
+  async #memberStore(coreId: string, patience: number): Promise<Store | 'superseded' | 'timeout'> {
     const lifecycle = this.#lifecycle;
-    // A newer tap takes over, and so does the user opening something else meanwhile.
     const tap = ++this.#memberTap;
     const active = this.active;
     const navigation = active.navigationGeneration;
-    // Longer than the group's own wait between two attempts at a machine (a minute), so one retry fits.
     const deadline = Date.now() + patience;
     for (;;) {
-      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return false;
+      if (tap !== this.#memberTap || !this.#current(lifecycle) || this.active !== active || active.navigationGeneration !== navigation) return 'superseded';
       const machine = this.machines.find((entry) => GroupLinks.coreOf(entry) === coreId && entry.store.connection === 'ready');
-      if (machine !== undefined) {
-        await this.select(machine.store, threadId);
-        return true;
-      }
-      if (Date.now() >= deadline) return false;
+      if (machine !== undefined) return machine.store;
+      if (Date.now() >= deadline) return 'timeout';
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+  }
+
+  /**
+   * What the worker posts when a notification is tapped with a window open:
+   * Limits, or a thread. True when a thread opens, so the phone shows the chat.
+   */
+  workerMessage(data: unknown): boolean {
+    const message = (data ?? {}) as { type?: unknown; threadId?: unknown; key?: unknown; core?: unknown };
+    if (message.type === 'boite.open-limits') { void this.openLimits(message.core); return false; }
+    if (message.type !== 'boite.open-thread' || typeof message.threadId !== 'string') return false;
+    if (typeof message.key === 'string' && message.core === undefined) void this.openNotification(message.key);
+    else void this.openFromWorker(message.threadId, message.core);
+    return true;
   }
 
   /** A notification the worker reports tapped: its thread on the machine it names, else on the core that served the page. */
@@ -613,7 +660,13 @@ export class Workspace {
   }
 
   /** The boot, on the thread a notification tapped with no window open named, on whichever machine it is. */
-  async bootAt(tapped: { thread: string | null; member: string | null; key?: string | null }): Promise<void> {
+  async bootAt(tapped: { thread: string | null; member: string | null; key?: string | null; limits?: boolean }): Promise<void> {
+    // A tapped limit alert: Limits, on the machine it names once the group has connected it.
+    if (tapped.limits) {
+      await this.boot(null);
+      await this.openLimits(tapped.member);
+      return;
+    }
     // A page notice about a machine with no group id: this window's own key names the machine.
     if (tapped.key) {
       await this.boot(null);
@@ -624,7 +677,34 @@ export class Workspace {
     if (tapped.member !== null && tapped.thread !== null) await this.openMemberThread(tapped.member, tapped.thread);
   }
 
+  /**
+   * A tapped limit alert the worker reports: Limits on the machine of the group
+   * it names, else on the core that served the page. A machine of the group
+   * still connecting gets the same few seconds a thread does.
+   */
+  async openLimits(member?: unknown): Promise<void> {
+    let target: Store | undefined;
+    if (typeof member === 'string' && /^[0-9a-f]{64}$/.test(member)) {
+      // The same guards as a thread's tap: a newer tap or the user's own navigation wins.
+      const found = await this.#memberStore(member, 10_000);
+      if (found === 'superseded') return;
+      if (found !== 'timeout') target = found;
+    }
+    target ??= this.machines.find((entry) => entry.store.endpointUrl !== null && servesThisPage(entry.store.endpointUrl))?.store ?? store;
+    await this.select(target);
+    target.showSettings('limits');
+  }
+
   async openNotification(key: string): Promise<void> {
+    // A limit alert names a machine and no thread: its Limits page opens.
+    const limits = limitsMachine(key);
+    if (limits !== null) {
+      const target = limits ? this.machines.find((m) => m.store.machineId === limits || m.id === limits)?.store : store;
+      if (!target) return;
+      await this.select(target);
+      target.showSettings('limits');
+      return;
+    }
     let machineId: string | null = null,
       threadId = key;
     try {
@@ -648,37 +728,61 @@ export class Workspace {
     return matches.find((machine) => machine.store.connection === 'ready') ?? matches[0] ?? null;
   }
 
-  /**
-   * A thread an answer names the way `boite agents` prints it: `thr_x`,
-   * `<machine>/thr_x` or `<core-id>/thr_x`, read in `from` on `owner`.
-   * A connected machine that lists the thread opens it: the owner's when no
-   * machine is named, the one named, only the owner for `here`. Otherwise the
-   * owner's contacts say which core holds it, and last the one machine listing
-   * the id, which the agent may know by another name.
-   */
+  /** Resolve an answer's thread address on its owning machine, including an unlisted archive. */
   async openThreadLink(owner: Store, from: string | undefined, where: string | null, threadId: string): Promise<void> {
+    const generation = ++this.#generation, lifecycle = this.#lifecycle;
+    const active = this.active, navigation = active.navigationGeneration;
+    const client = owner.client, ownerNavigation = owner.navigationGeneration;
+    const current = () => generation === this.#generation && lifecycle === this.#lifecycle && this.active === active
+      && active.navigationGeneration === navigation && owner.client === client
+      && owner.navigationGeneration === ownerNavigation;
     const core = where !== null && /^[0-9a-f]{64}$/.test(where) ? where : null;
     const slug = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
-    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase() || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
-    const holders = this.machines.filter(machine => machine.store.connection === 'ready' && machine.store.threads.some(thread => thread.id === threadId)
-      && (core === null || machine.store.core?.coreId === core));
-    const named = where === 'here' ? holders.filter(machine => machine.store === owner)
-      : holders.filter(machine => names(machine.label) || names(machine.store.core?.coreId ?? ''));
-    const pick = where === null ? holders.find(machine => machine.store === owner) ?? (holders.length === 1 ? holders[0] : undefined)
-      : named.length === 1 ? named[0] : undefined;
-    if (pick) { await this.select(pick.store, threadId); return; }
-    const client = owner.client;
-    if (client && from && owner.connection === 'ready') {
+    const names = (name: string) => where === null || where === 'here' || slug(name) === where.toLowerCase()
+      || (/^[0-9a-f]{6,}$/.test(where) && name.startsWith(where));
+    const connected = this.machines.filter(machine => machine.store.connection === 'ready');
+    const named = connected.filter(machine => core !== null ? machine.store.core?.coreId === core
+      : names(machine.label) || names(machine.store.core?.coreId ?? ''));
+    const target = where === null || where === 'here' ? owner : named.length === 1 ? named[0]!.store : undefined;
+    if (!current()) return;
+    if (where !== null && where !== 'here' && named.length > 1) { owner.error = strings.agentMessages.threadMissing; return; }
+    if (target?.client && target.connection === 'ready') {
+      const targetClient = target.client, targetNavigation = target.navigationGeneration;
+      const targetCurrent = () => current() && target.client === targetClient && target.connection === 'ready'
+        && target.navigationGeneration === targetNavigation;
+      try {
+        // The active list excludes archives. Probe only the contextual owner, without navigating or subscribing.
+        if (!target.threads.some(thread => thread.id === threadId))
+          await targetClient.call('threads.get', { threadId, limit: 1, maxBytes: INITIAL_PAGE_BYTES,
+            compactTools: true, compactFiles: true, compactImages: true, compactToolParts: true });
+        if (targetCurrent()) await this.select(target, threadId);
+        return;
+      } catch (error) {
+        if (!targetCurrent()) return;
+        if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.NotFound) {
+          owner.error = error instanceof Error ? error.message : String(error);
+          return;
+        }
+        // A resolved explicit owner stays authoritative even if a directory repeats its name elsewhere.
+        if (where !== null) { owner.error = strings.agentMessages.threadMissing; return; }
+      }
+    }
+    // An offline source can open an explicit ready target, but cannot resolve another address.
+    if (owner.connection !== 'ready') return;
+    // An unqualified address can still name the sole known remote holder after local NotFound.
+    const holders = this.machines.filter(machine => machine.store.connection === 'ready'
+      && machine.store.threads.some(thread => thread.id === threadId));
+    if (where === null && holders.length === 1) { await this.select(holders[0]!.store, threadId); return; }
+    if (client && from) {
       try {
         const [{ self }, { agents }] = await Promise.all([client.call('collaboration.get', { threadId: from }), client.call('collaboration.directory', { threadId: from })]);
+        if (!current() || owner.connection !== 'ready') return;
         const found = agents.filter(agent => agent.threadId === threadId && (core !== null ? agent.coreId === core
           : where === 'here' ? agent.coreId === self.coreId : names(agent.machine) || names(agent.coreId)));
         if (found.length === 1) { await this.openAgentThread(owner, self, found[0]!); return; }
       } catch { /* Coordination off on this thread: no contact names the core. */ }
     }
-    const only = where !== null && where !== 'here' && holders.length === 1 ? holders[0]! : null;
-    if (only) { await this.select(only.store, threadId); return; }
-    owner.error = strings.agentMessages.threadMissing;
+    if (current() && owner.connection === 'ready') owner.error = strings.agentMessages.threadMissing;
   }
 
   /** A click on a thread link `renderMarkdown` drew opens that thread; true when it was one. */

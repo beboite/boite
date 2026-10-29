@@ -133,19 +133,32 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     expect(await page.evaluate(`document.querySelector('${id('machine-add-open')}') === null`)).toBe(true);
     await b.call('settings.set', { warmProcessMinutes: 2, agentCpuCapPercent: 35 });
     await a.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 7, agentCpuCapPercent: 85 });
-    await page.click(id('group-sync'));
+    // The first core becomes the group's default machine: both cores store the choice, and the second takes its synced settings.
+    const home = (await a.call('group.get', {}))!.self;
+    await page.click(id('group-home-pick'));
+    await page.waitFor(`document.querySelector('${id('group-home-pick-menu')} [data-value="${home}"]:not([disabled])')`);
+    await page.click(`${id('group-home-pick-menu')} [data-value="${home}"]`);
     await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.asyncQuestions === false`);
+    expect((await a.call('group.get', {}))?.settingsHome).toBe(home);
+    // The second core hears of the choice by the roster exchange: wait for it, as for the rename below.
+    for (let attempt = 0; attempt < 50 && (await b.call('group.get', {}))?.settingsHome !== home; attempt++) await Bun.sleep(100);
+    expect((await b.call('group.get', {}))?.settingsHome).toBe(home);
+    await page.waitFor(`document.querySelector('[data-core-id="${home}"] ${id('machine-home')}') !== null && document.querySelectorAll('${id('machine-home')}').length === 1`);
     expect(await b.call('settings.get', {})).toMatchObject({ asyncQuestions: false, warmProcessMinutes: 2, agentCpuCapPercent: 35 });
-    expect(await page.evaluate(`!!document.querySelector('${id('machines-page')}') && !document.querySelector('${id('machine-settings')}')`)).toBe(true);
-    await page.click(`[data-machine-id="${second.url}"] ${id('machine-settings-open')}`);
-    await page.waitFor(`document.querySelector('${id('machine-settings')}')?.dataset.machineId === ${JSON.stringify(second.url)}`);
-    await page.type(`${id('machine-settings')} input[type=number]`, '45');
-    await page.evaluate(`document.querySelector('${id('machine-settings')} input[type=number]').closest('form').requestSubmit()`);
+    // Protection changes the machine its bar picks, here the second one, while the window stays on the first.
+    await page.click(id('settings-tab-resources'));
+    await page.waitFor(`document.querySelector('${id('resources-page')}') && document.querySelector('${id('settings-machine')}')`);
+    await page.click(id('settings-machine'));
+    await page.waitFor(`document.querySelector('${id('settings-machine-menu')} [data-value="${second.url}"]')`);
+    await page.click(`${id('settings-machine-menu')} [data-value="${second.url}"]`);
+    await page.waitFor(`document.querySelector('${id('settings-follows')}') && document.querySelector('${id('resources-page')} input[type=number]')?.value === '35'`);
+    await page.type(`${id('resources-page')} input[type=number]`, '45');
+    await page.evaluate(`document.querySelector('${id('resources-page')} input[type=number]').closest('form').requestSubmit()`);
     await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.agentCpuCapPercent === 45`);
     expect((await b.call('settings.get', {})).agentCpuCapPercent).toBe(45);
     expect((await a.call('settings.get', {})).agentCpuCapPercent).toBe(85);
+    expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.machineId`)).not.toBe(second.url);
     expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(ta.id)}`)).toBe(true);
-    await page.click(id('machine-settings-back'));
     await page.click(id('settings-back'));
     await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
     await page.click(`[data-thread-id="${tb.id}"]`);

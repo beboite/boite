@@ -72,7 +72,10 @@ for (const width of [1280, 390]) {
         await showThreadView(page, 'recent', prefix);
         await page.waitFor(`document.querySelector('${row(merged)}')`);
         await option('merged');
-        expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
+        // A badge can detect the merge before the fallback sweep runs.
+        await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.pullRequest', {threadId:${JSON.stringify(merged)}})`);
+        await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()');
+        expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:${JSON.stringify(merged)}}).then(t => ({archived:t.archived, reason:t.archiveReason?.type}))`)).toEqual({archived:true, reason:'pr-merged'});
         await page.waitFor(`!document.querySelector('${row(merged)}')`);
         await page.click(id(`${prefix}project-filter`));
         await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
@@ -224,9 +227,10 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`!document.querySelector('${root} ${id('project-shelf')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
-      await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
+      // The opened fold may still be scrolling to its header: bring the project at work on top back into view.
+      await page.waitFor(`(() => { document.querySelector('${building}')?.scrollIntoView({block:'center'}); return !!document.querySelector('${row(building, 't-building')}'); })()`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}') === null`)).toBe(true);
-      // Queued and background work also keep the project out of the fold of idle projects.
+      // Queued and background work also keep the project at work on top, out of the fold of idle projects.
       for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
           const states = [
@@ -238,13 +242,19 @@ for (const width of [1280, 390]) {
           const store = globalThis.__boiteTest.workspace.machines[0].store;
           store.threads = store.threads.map(t => t.id === 't-building' ? {...t, ...states[${index}]} : t);
         })()`);
-        await page.waitFor(`document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]')`);
-        expect(await page.evaluate(`!document.querySelector('${idleRow(busy)}')`)).toBe(true);
+        // The section sits above the fold the test opened: its rows draw once it scrolls back into view.
+        await page.waitFor(`(() => {
+          document.querySelector('${building}')?.scrollIntoView({block:'center'});
+          return !!document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]');
+        })()`);
+        expect(await page.evaluate(`!document.querySelector('${idleRow(busy)}') && !!document.querySelector('${root} ${id('working-projects')}')?.contains(document.querySelector('${building}'))`)).toBe(true);
       }
       // An idle project keeps its done history one click away, under its row.
       const finished = idleRow('p-notes');
       await page.waitFor(`document.querySelector('${finished}')`);
       await click(`${finished} ${id('project-done-toggle')}`);
+      // Open, the row's done pill keeps its fill inside the touch target: no opaque edge bars above and below it on a phone.
+      if (width < 720) expect(await page.evaluate(`getComputedStyle(document.querySelector('${finished} ${id('project-done-toggle')}')).borderTopColor`)).toBe('rgba(0, 0, 0, 0)');
       const done = `${root} ${id('done-thread')}[data-machine-id="${main}"][data-thread-id="t-descriptors"]`;
       const revealDone = () => page.waitFor(`(() => {
         document.querySelector('${finished} ${id('project-done')}')?.scrollIntoView({block:'center'});

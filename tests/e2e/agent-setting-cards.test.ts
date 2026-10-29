@@ -20,6 +20,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
+
 async function capture(name: string) {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   await page.screenshot(join(ARTIFACTS, name));
@@ -32,7 +33,7 @@ test('a thread asks to entrust a project to an agent; Apply entrusts it and the 
   // An agent with no project, and a thread of boite whose agent asks for it to be entrusted.
   const ids = await page.evaluate(`(async () => {
     const store = window.__boiteTest.workspace.active;
-    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scout', domain: 'Follows projects', instructions: '', avatar: '', status: 'active', projectIds: [],
       selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
     const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
     await window.__boiteTest.workspace.select(store, thread.id);
@@ -78,17 +79,27 @@ test('a persistent agent\'s card stands in its conversation', async () => {
   await page.navigate(`http://127.0.0.1:${port}/?fake=1&agents=1`);
   await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
   await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
-  await page.evaluate(`window.__boiteTest.workspace.active.showAgents()`);
-  const card = '[data-testid="agent-transcript"] [data-testid="agent-setting-card"][data-state="pending"]';
-  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-project"][data-project="p-notes"]')?.checked === true`);
-  expect(await page.text(`${card} [data-testid="agent-setting-heading"]`)).toBe('Suggested change to Mira');
+  // Mira, at rest in the demo, asks from its own thread for a project it lacks.
+  const ids = await page.evaluate<{ agent: string; project: string }>(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const snapshot = await store.client.call('agents.snapshot', {});
+    const mira = snapshot.profiles.find(p => p.name === 'Mira');
+    const threadId = snapshot.sessions.find(s => s.agentId === mira.id).threadId;
+    const project = store.projects.find(p => !(mira.projectIds ?? []).includes(p.id));
+    await store.client.call('agents.settings.request', { threadId, key: 'projects', value: [...(mira.projectIds ?? []), project.id], reason: 'I can follow its releases too.' });
+    store.showAgents(mira.id);
+    return { agent: mira.id, project: project.id };
+  })()`);
+  const card = '.agents-main [data-testid="agent-setting-card"][data-state="pending"]';
+  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-project"][data-project="${ids.project}"]')?.checked === true`);
+  expect(await page.text(`${card} [data-testid="agent-setting-reason"]`)).toContain('I can follow its releases too.');
   await page.evaluate(`document.querySelector('${card}').scrollIntoView({ block: 'center' })`);
   await capture('agent-desktop.png');
 
   await page.send('Emulation.setDeviceMetricsOverride', PHONE);
-  // A phone opens on the list of conversations.
-  await page.waitFor(`document.querySelector('[data-testid^="agent-entry-"]')?.getBoundingClientRect().width > 0 || document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
-  await page.evaluate(`document.querySelector('${card}')?.getBoundingClientRect().width > 0 || document.querySelector('[data-testid^="agent-entry-"]').click()`);
+  // A phone keeps the conversation open full screen, or shows the list first.
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${ids.agent}"]')?.getBoundingClientRect().width > 0 || document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
+  await page.evaluate(`document.querySelector('${card}')?.getBoundingClientRect().width > 0 || document.querySelector('[data-testid="agent-entry-${ids.agent}"]').click()`);
   await page.waitFor(`document.querySelector('${card}')?.getBoundingClientRect().width > 0`);
   await page.evaluate(`document.querySelector('${card}').scrollIntoView({ block: 'center' })`);
   expect(await page.evaluate(`(() => { const box = document.querySelector('${card}').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`)).toBe(true);
@@ -98,3 +109,87 @@ test('a persistent agent\'s card stands in its conversation', async () => {
   await page.click(`${card} [data-testid="agent-setting-refuse"]`);
   await page.waitFor(`!document.querySelector('${card}')`);
 }, 60000);
+
+test('a bot asks to change its name, picture and instructions; Apply renames it', async () => {
+  await page.navigate(`http://127.0.0.1:${port}/?fake=1&agents=1`);
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
+  const agent = await page.evaluate<string>(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const snapshot = await store.client.call('agents.snapshot', {});
+    const mira = snapshot.profiles.find(p => p.name === 'Mira');
+    const threadId = snapshot.sessions.find(s => s.agentId === mira.id).threadId;
+    const ask = (key, value, reason) => store.client.call('agents.settings.request', { threadId, key, value, reason });
+    await ask('name', 'Gargouille (Sécurité)', 'You asked me to take this name.');
+    await ask('avatar', 'bot:b.3.1.4.2', 'A face that matches the new name.');
+    await ask('instructions', 'Watch the security of every project.\\nReport each finding with its proof.\\n\\nNever push a fix without asking.', 'My role changed with my name.');
+    store.showAgents(mira.id);
+    return mira.id;
+  })()`);
+  // The three cards wait in the dock, one page each.
+  const card = (key: string) => `[data-testid="activity-question"] [data-testid="agent-setting-card"][data-state="pending"][data-key="${key}"]`;
+  const shows = (key: string) => `document.querySelector('${card(key)}')?.getBoundingClientRect().width > 0`;
+  await page.waitFor(shows('name'));
+  await capture('identity-name-desktop.png');
+  await page.click('[data-testid="activity-question-next"]');
+  await page.waitFor(shows('avatar'));
+  await capture('identity-avatar-desktop.png');
+  await page.click('[data-testid="activity-question-next"]');
+  await page.waitFor(shows('instructions'));
+  expect(await page.text(`${card('instructions')} [data-testid="agent-setting-text"]`)).toContain('Never push a fix without asking.');
+  await capture('identity-instructions-desktop.png');
+
+  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
+  await page.waitFor(`document.querySelector('[data-testid="agent-entry-${agent}"]')?.getBoundingClientRect().width > 0 || ${shows('instructions')}`);
+  await page.evaluate(`${shows('instructions')} || document.querySelector('[data-testid="agent-entry-${agent}"]').click()`);
+  await page.waitFor(shows('instructions'));
+  // A desk the wide layout opened beside the chat covers it on a phone.
+  await page.evaluate(`document.querySelector('[data-testid="panel-close"]')?.click()`);
+  await page.waitFor(`!document.querySelector('[data-testid="panel-close"]')?.getBoundingClientRect().width`);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  expect(await page.evaluate(`(() => { const box = document.querySelector('${card('instructions')}').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`)).toBe(true);
+  await capture('identity-instructions-phone.png');
+  await page.click('[data-testid="activity-question-prev"]');
+  await page.waitFor(shows('avatar'));
+  await capture('identity-avatar-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+
+  await page.click('[data-testid="activity-question-prev"]');
+  await page.waitFor(`document.querySelector('${card('name')} [data-testid="agent-setting-apply"]')?.getBoundingClientRect().width > 0`);
+  await page.click(`${card('name')} [data-testid="agent-setting-apply"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-setting-card"][data-outcome="applied"][data-key="name"]')`);
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agent)}).name)`)).toBe('Gargouille (Sécurité)');
+}, 60000);
+
+test('a native event wake setting card works at desktop and phone widths', async () => {
+  await page.navigate(`http://127.0.0.1:${port}/?fake=1`);
+  await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  const agentId = await page.evaluate(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const agent = await store.client.call('agents.profile.save', { value: { name: 'Scheduled scout', domain: '', instructions: '', avatar: '', status: 'active', projectIds: [], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
+    const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    await window.__boiteTest.workspace.select(store, thread.id);
+    await store.client.call('turns.start', { threadId: thread.id, prompt: 'Configure the bot.' });
+    await store.client.settled();
+    await store.client.call('agents.settings.request', { threadId: thread.id, agent: agent.id, key: 'eventWakes', value: true, reason: 'Hear project news as it lands, not only with the routines.' });
+    return agent.id;
+  })()`) as string;
+  const card = '[data-testid="agent-setting-card"][data-key="eventWakes"][data-state="pending"]';
+  await page.waitFor(`document.querySelector('${card} [data-testid="agent-setting-apply"]')?.getBoundingClientRect().width > 0`);
+  expect(await page.text(card)).toContain('Wake automatically for project and desk events');
+  await capture('event-wakes-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', PHONE);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('event-wakes-phone.png');
+  await page.click(`${card} [data-testid="agent-setting-show"]`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-event-wakes"]')`);
+  await page.evaluate(`document.querySelector('[data-testid="agent-event-wakes"]').scrollIntoView({ block: 'center' })`);
+  await capture('event-wakes-settings-phone.png');
+  await page.send('Emulation.setDeviceMetricsOverride', DESKTOP);
+  await page.evaluate(`document.querySelector('[data-testid="agent-event-wakes"]').scrollIntoView({ block: 'center' })`);
+  await capture('event-wakes-settings-desktop.png');
+  await page.click('[data-testid="agent-event-wakes"]');
+  await page.waitFor(`window.__boiteTest.workspace.active.client.call('agents.runtime.get', { agentId: ${JSON.stringify(agentId)} }).then(c => c.eventWakes === true)`);
+  expect(await page.evaluate(`window.__boiteTest.workspace.active.client.call('agents.snapshot', {}).then(s => s.profiles.find(p => p.id === ${JSON.stringify(agentId)}).status)`)).toBe('active');
+}, 60_000);

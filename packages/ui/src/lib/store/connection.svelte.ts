@@ -59,6 +59,8 @@ function askToFollowLink(url: string): Promise<boolean> {
 export class Connection {
   connection = $state<ClientState>('idle');
   core = $state<CoreInfo | null>(null);
+  /** How far the core's clock runs ahead of this device's (`Client.clockOffset`). */
+  clockOffset = $state(0);
   /** Owner on the core token, session on a paired one; what decides who may pair a phone. */
   principal = $state<Principal | null>(null);
   /** The address of the core this UI talks to; null on the fake client. */
@@ -157,7 +159,8 @@ export class Connection {
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
         // looked at on (`&copies=<n>` n more for the reading cache), `&heavy=1` the forty messages and 11.5 MiB of tool calls
-        // a long agent session leaves, `&working=<n>` n more threads at work, `&principal=session` answers as a paired
+        // a long agent session leaves, `&diagrams=1` an answer with diagrams and formulas,
+        // `&working=<n>` n more threads at work, `&principal=session` answers as a paired
         // phone, so the screens a device is refused can be walked without pairing one,
         // `&missing=<method>,...` answers those methods like an older machine,
         // and `&load=<n>` adds n threads that stream without end (`&loadtick=<ms>`).
@@ -166,6 +169,7 @@ export class Connection {
             long: params.get('long') === '1',
             ...(params.get('copies') ? { longCopies: Number(params.get('copies')) } : {}),
             heavy: params.get('heavy') === '1',
+            diagrams: params.get('diagrams') === '1',
             ...(params.get('working') ? { working: Number(params.get('working')) } : {}),
             ...(params.get('load') ? { load: Number(params.get('load')) } : {}),
             ...(params.get('loadtick') ? { loadTickMs: Number(params.get('loadtick')) } : {}),
@@ -174,6 +178,7 @@ export class Connection {
             subagentsDemo: params.get('subagents') === '1',
             boardDemo: params.get('board') === '1',
             watchDemo: params.get('watch') === '1',
+            windowsDemo: params.get('windows') === '1',
             uninstalled: params.get('uninstalled') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {}),
             ...(params.get('missing') ? { missing: params.get('missing')!.split(',') } : {})
@@ -349,15 +354,19 @@ export class Connection {
     s.groupKnown = false;
     s.ungrouped = false;
     s.projects = [];
+    // The next core's folds come from storage; unreadable storage must not carry these over to its ids.
+    s.collapsedProjects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
     s.harnessUpdates = [];
     s.todos = {};
     s.resources = [];
     s.trace = [];
+    this.ctx.accounts.proxyQuotas = null;
     this.ctx.workbench.tracedThreadId = null;
     this.principal = null;
     this.core = null;
+    this.clockOffset = 0;
     this.attachEndpoint(endpoint);
     await s.connect();
     await s.openWhereLeft();
@@ -432,13 +441,16 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      this.clockOffset = client.clockOffset ?? 0;
+      // Before the landing: a draft it opens unfolds its project over the restored folds.
+      this.ctx.projects.restoreFolds();
       if (this.localCore) noteThisComputer(core.hostname);
       this.connection = client.state;
       this.principal = client.principal;
       this.pairingRequired = false;
       void this.#handOverKey(client, core);
       void s.reload();
-      await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
+      await Promise.all([this.ctx.drafts.start().then(() => this.ctx.currentClient(client, generation) ? this.ctx.sync.resync() : undefined), this.reloading?.essential]);
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
@@ -556,6 +568,7 @@ export class Connection {
   /** Retire leases when a connection ends, including a reconnect on the same client. */
   invalidateReads(): void {
     this.#readEpoch++;
+    this.ctx.shared?.disconnected();
     this.reloading?.release();
     this.ctx.requests.cancelReads();
     this.ctx.threadReads.clear();
@@ -597,6 +610,12 @@ export class Connection {
     const questionRead = requests.questionRead(client, 'all');
     const open = s.openThread;
     const reopened = open && s.visible ? s.open(open.id, false, { requests: false }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
+    const secretRead = requests.secretRead(client, 'all', async () => {
+      await reopened;
+      const visible = requests.secretParts(s.openThread);
+      const seen = new Set(s.openThread?.messages.flatMap(message => message.parts.flatMap(part => part.type === 'secret_request' ? [part.requestId] : [])));
+      return [...requests.pendingSecrets.filter(row => !seen.has(row.id)), ...visible];
+    });
     // Publish each completed slice immediately. A secondary login snapshot must
     // never hold conversation catch-up or accepted input behind it.
     const slice = <T>(asked: Promise<T>, apply: (value: T) => void, cancel?: () => void): Promise<void> => asked.then(value => {
@@ -605,6 +624,7 @@ export class Connection {
     const primary = [
       slice(client.call('projects.list', {}), rows => {
         s.projects = retainRows(s.projects, this.ctx.projects.withPendingArchives(projectRead.apply(rows, s.projects)));
+        this.ctx.projects.pruneFolds();
         this.ctx.projects.bootListAt = Date.now();
         void this.ctx.projects.sendPendingArchives(rows);
       }, () => projectRead.cancel()),
@@ -614,7 +634,7 @@ export class Connection {
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));
         const stale = unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null);
-        rightPanel.prune(key => stale(key) && !rightPanel.drafts.get(key)?.size);
+        rightPanel.prune(key => stale(key) && !rightPanel.documents.drafted(key));
         work.settle(s.threads.length > 0 || onboardingSeen());
       }, () => threadRead.cancel()),
       slice(client.call('providers.list', {}), value => {
@@ -622,9 +642,12 @@ export class Connection {
         s.providers = value.loaded; s.rejectedProviders = value.rejected; s.installStates = installStatesOf(value.loaded);
       }),
       slice(client.call('accounts.list', {}), rows => { s.accounts = retainRows(s.accounts, accountRead.apply(rows, s.accounts)); this.ctx.models.restoreModels(); }, () => accountRead.cancel()),
-      slice(client.call('settings.get', {}), value => { if (revisions.settings === this.ctx.metadataRevision.settings) s.settings = value; }),
+      slice(client.call('settings.get', {}), value => {
+        if (revisions.settings === this.ctx.metadataRevision.settings) { s.settings = value; void accounts.readProxyQuotas(client); }
+      }),
       slice(permissionRead.promise, rows => permissionRead.apply(rows), permissionRead.cancel),
       slice(questionRead.promise, rows => questionRead.apply(rows), questionRead.cancel),
+      slice(secretRead.promise, rows => secretRead.apply(rows), secretRead.cancel),
       ...(reopened ? [reopened] : [])
     ];
     const secondary = [
@@ -642,7 +665,7 @@ export class Connection {
     try {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
-      void s.loadHarnessUpdates();
+      void s.loadHarnessUpdates().then(() => { if (current()) return s.freshenHarnessUpdates(); });
       // Beside the lists, not among them: the machines of the group are connected once it answers.
       void s.loadGroup();
       void s.refreshMemory();
@@ -654,7 +677,7 @@ export class Connection {
         if (held || !s.openThread.agentSessionId) void s.loadCoordination(open.id, held && s.coordinationDirectory !== null);
       }
     } finally {
-      projectRead.cancel(); threadRead.cancel(); accountRead.cancel(); permissionRead.cancel(); questionRead.cancel();
+      projectRead.cancel(); threadRead.cancel(); accountRead.cancel(); permissionRead.cancel(); questionRead.cancel(); secretRead.cancel();
     }
   }
 }

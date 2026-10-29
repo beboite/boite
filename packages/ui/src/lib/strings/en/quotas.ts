@@ -1,6 +1,13 @@
 export const strings = {
 
   quotas: {
+    pin: 'Pin model quotas',
+    unpin: 'Unpin model quotas',
+    pinnedTitle: 'Model quotas',
+    pinnedEmpty: 'No quota reading for this model provider.',
+    position: 'Move quota card',
+    dragHint: 'Drag to a corner or the sidebar. Use arrow keys to move, Home to dock.',
+    positions: { 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right', dock: 'Dock below threads' },
     machineAccounts: 'Account limits for {machine}',
     outdated: 'Update Boite on this machine to see its limits on this device.',
     usingCredits: 'Using credits',
@@ -67,5 +74,19 @@ export const strings = {
     /** A read of the limits failed; the core's reason follows. */
     readFailed: "Couldn't read the limits: {error}",
     quit: 'Quit Boite',
+    /** The bell of an account's card and the alert choices it opens. */
+    alerts: 'Alerts',
+    alertsOf: 'Alerts for {account}',
+    alertsHint: 'A notification each time a window falls to a share left you picked, once per window. Pick several, or add your own. The limits are read every five minutes while an alert is set.',
+    /** Beside the heading: the chips are shares left, as the bars show them. */
+    alertsLeft: '% left',
+    alertAt: '{percent}%',
+    alertCustom: 'Custom',
+    alertCustomLabel: 'Custom share left, 0 to 99',
+    alertCustomPlaceholder: '0-99',
+    alertRemove: 'Remove {percent}%',
+    alertPeriods: { fiveHour: '5 hours', weekly: 'Weekly' },
+    alertSet: '{period}: {percents} left',
+    alertFailed: "Couldn't save the alert: {error}",
   }
 } as const;

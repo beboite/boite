@@ -14,7 +14,7 @@
    */
   let { store, onchosen }: { store: Store; onchosen: () => void } = $props();
 
-  const DOC_URL = 'https://github.com/beboite/boite/blob/main/docs/analytics.md';
+  const DOC_URL = 'https://github.com/mtsu-dev/boite/blob/main/docs/analytics.md';
   /** How long the refusal clip plays before the tour closes. */
   const REFUSAL_MS = 2000;
   const reduced = document.documentElement.dataset.motion === 'reduced' || (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
@@ -49,11 +49,11 @@
     return () => { active = false; };
   });
 
-  async function choose(mode: TelemetryState['mode']): Promise<boolean> {
+  async function choose(mode: TelemetryState['mode'], countChoice = true): Promise<boolean> {
     const client = store.client;
     if (!client) return false;
     busy = true; error = '';
-    try { consent = await store.configureTelemetry(mode); consentFrom = client; return store.client === client; }
+    try { consent = await store.configureTelemetry(mode, countChoice); consentFrom = client; return store.client === client; }
     catch (reason) { if (store.client === client) error = String(reason); return false; }
     finally { busy = false; }
   }
@@ -79,7 +79,7 @@
     const saved = await savedMode();
     if (!saved) return;
     // A replay never turns counters back on after a saved opt-out.
-    if (!await choose(saved === 'off' ? 'off' : 'basic')) return;
+    if (!await choose(saved === 'off' ? 'off' : 'basic', saved !== 'off')) return;
     if (reduced) { onchosen(); return; }
     // The clip swaps at the size the first one had, so the rows do not jump.
     const box = clip?.getBoundingClientRect();
@@ -108,6 +108,9 @@
     <p class="intro">{strings.onboarding.privacy.intro}</p>
   </div>
   <p class="question">{strings.onboarding.privacy.question}<InfoTip topic={strings.onboarding.privacy.doc} text={strings.onboarding.privacy.details} testid="onboarding-telemetry-details" /></p>
+  {#if consent?.configured !== false}
+    <p class="intro" data-testid="telemetry-choice-notice">{strings.telemetry.choiceNotice}</p>
+  {/if}
   <div class="rows">
     <button class="row no" class:refused={refusing} disabled={busy || refusing || !consent} data-testid="onboarding-telemetry-basic" onclick={() => void enough()}>
       <span class="label">{strings.onboarding.privacy.basic}<small>{strings.onboarding.privacy.basicDefault}</small></span>
@@ -125,11 +128,12 @@
 </div>
 
 <style>
-  .deal { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; container-type: inline-size; }
-  .pitch { display: flex; flex-direction: column; gap: 8px; }
+  .deal { flex: 1; min-height: min-content; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; margin-top: 12px; container-type: inline-size; }
+  .pitch { display: flex; align-items: center; gap: 16px; }
   p { margin: 0; }
-  .clip { display: block; max-width: 100%; max-height: min(26vh, 200px); margin: 0 auto; border-radius: var(--radius-lg); animation: swap var(--dur-3) var(--ease-out-quint); }
+  .clip { display: block; flex: none; max-width: 30%; max-height: min(18vh, 112px); border-radius: var(--radius-lg); animation: swap var(--dur-3) var(--ease-out-quint); }
   .intro { max-width: 52ch; margin: 0 auto; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; text-align: center; }
+  .pitch .intro { flex: 1; min-width: 0; max-width: none; margin: 0; text-align: left; }
   .question { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 2px 0 0; font-size: var(--text-lg); font-weight: 800; }
   .rows { display: grid; gap: 8px; }
   .row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 8px 14px; white-space: normal; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 88%, var(--color-foreground) 12%); color: var(--color-foreground); cursor: pointer; transition: transform var(--dur-1) ease-out, border-color var(--dur-2) ease-out, background var(--dur-2) ease-out, color var(--dur-2) ease-out, box-shadow var(--dur-2) ease-out; }
@@ -137,7 +141,7 @@
   .row:disabled { opacity: .5; cursor: not-allowed; }
   .label { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: var(--text-base); font-weight: 700; }
   .label small { font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); }
-  .hint { font-size: var(--text-sm); line-height: 1.5; color: var(--color-muted-foreground); }
+  .hint { font-size: var(--text-sm); line-height: 1.5; text-wrap: pretty; color: var(--color-muted-foreground); }
   .no:hover:not(:disabled), .no:hover:not(:disabled) .hint { color: var(--color-danger); }
   .no:hover:not(:disabled) { background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface-2)); border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border)); }
   .no.refused, .no.refused:disabled { opacity: 1; color: var(--color-on-danger); background: var(--color-danger); border-color: var(--color-danger); box-shadow: 0 10px 28px color-mix(in srgb, var(--color-danger) 35%, transparent); }
@@ -149,11 +153,12 @@
   .link { align-self: center; height: auto; padding: 0; border: 0; background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); text-decoration: underline; cursor: pointer; }
   .link:hover:not(:disabled) { color: var(--color-foreground); }
   [role=alert] { color: var(--color-danger); overflow-wrap: anywhere; }
-  /* On a computer the clip sits beside what is counted, so the two rows stay in view without scrolling. */
+  /* Wide panels compare the tiers side by side; phones keep full-width choices. */
   @container (min-width: 480px) {
-    .pitch { flex-direction: row; align-items: center; gap: 16px; }
-    .clip { flex: none; max-height: min(18vh, 120px); margin: 0; }
-    .intro { max-width: none; margin: 0; text-align: left; }
+    .clip { max-width: 34%; max-height: min(22vh, 160px); }
+    .intro { max-width: none; }
+    .rows { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .row { padding: 14px; gap: 6px; }
   }
   @keyframes swap { from { opacity: 0; transform: scale(.96); } }
   /* A short window shrinks the clip, never the line that says what is counted. */

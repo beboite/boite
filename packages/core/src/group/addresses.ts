@@ -6,8 +6,10 @@
  * are read without the Tailscale CLI, which is not on every PATH and needs no
  * process here: the address is on Tailscale's own network interface, and the
  * name is the PTR record Tailscale's resolver at 100.100.100.100 answers for
- * it, which that interface routes to the local daemon. A machine with no
- * tailnet falls back to its LAN address, as a pairing link does.
+ * it, which that interface routes to the local daemon. The question goes out
+ * as one datagram (`magic-dns.ts`): the system resolver answers a machine's
+ * own address with its bare host name. A machine with no tailnet falls back
+ * to its LAN address, as a pairing link does.
  *
  * The name is for other cores, whose requests are sealed to this machine's
  * key: a name that resolved elsewhere would reach a machine that reads
@@ -36,7 +38,7 @@ export function isTailnetAddress(address: string): boolean {
 }
 
 /** fd7a:115c:a1e0::/48, the range Tailscale hands its IPv6 addresses from. */
-function isTailnetV6(address: string): boolean {
+export function isTailnetV6(address: string): boolean {
   return /^fd7a:115c:a1e0:/i.test(address);
 }
 
@@ -68,21 +70,12 @@ export function tailnetAddress(
 }
 
 /** The name MagicDNS gives that address, or null when the tailnet has none or the resolver is silent. */
-export async function magicName(ip: string): Promise<string | null> {
-  // Loaded here: only tailnet address lookups need a resolver, and the module costs every start.
-  const { Resolver } = await import('node:dns/promises');
-  const resolver = new Resolver({ timeout: MAGIC_DNS_TIMEOUT_MS, tries: 1 });
-  try {
-    resolver.setServers([MAGIC_DNS]);
-    const names = await resolver.reverse(ip);
-    const name = names[0]?.replace(/\.$/, '').toLowerCase();
-    // A hostname only: this goes into an address other machines dial.
-    return name !== undefined && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(name) ? name : null;
-  } catch {
-    return null;
-  } finally {
-    resolver.cancel();
-  }
+export async function magicName(ip: string, server = { host: MAGIC_DNS, port: 53 }): Promise<string | null> {
+  // Loaded here: only tailnet address lookups need a socket, and the module costs every start.
+  const { reverseLookup } = await import('./magic-dns.ts');
+  const name = (await reverseLookup(ip, server, MAGIC_DNS_TIMEOUT_MS))?.replace(/\.$/, '').toLowerCase();
+  // A hostname of two labels at least: this goes into an address other machines dial.
+  return name !== undefined && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(name) ? name : null;
 }
 
 export interface Listening {

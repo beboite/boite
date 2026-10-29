@@ -47,6 +47,17 @@ export interface InlineView {
   source?: string;
 }
 
+/** A private check's rendered page, never an artifact or a browser-panel tab. */
+export interface ViewCheckCapture {
+  /** Content width, without the frame's bleed. */
+  width: number;
+  height: number;
+  /** PNG bytes encoded as base64. The CLI writes these into its working directory. */
+  png: string;
+  /** The optional check script's JSON-serializable return value at this width. */
+  value?: unknown;
+}
+
 export function clampViewHeight(height: number): number {
   return Math.min(VIEW_MAX_HEIGHT, Math.max(VIEW_MIN_HEIGHT, Math.round(height)));
 }
@@ -276,11 +287,16 @@ export function viewTitleOf(html: string): string | null {
   return title ? title.slice(0, VIEW_TITLE_MAX) : null;
 }
 
-/** One line in the guide every agent reads when its session starts. */
-export const VIEW_GUIDE_LINE = '`boite view <file.html>` draws an HTML page beside the text it explains: diagram, chart, animated SVG, simulator. Use it when asked for a visual or a schema, or when a picture explains better than text. Read `boite view help` first.';
+/**
+ * One line in the guide every agent reads when its session starts, after the
+ * one sending diagrams, charts and formulas to the chat's own Mermaid and TeX.
+ */
+export const VIEW_GUIDE_LINE = 'Only a simulator, an animation or a custom page needs `boite view <file.html>`: read `boite view help` first.';
 
 /** `boite view help`: everything an agent needs to write a page that looks like part of the app. */
 export const VIEW_HELP = `boite view <file.html> [--title <text>]   publish a page to draw in your answer
+boite view check <file.html> [--script checks.js] [--scheme dark|light]
+                                         check and save captures without publishing
 boite view example                        a complete page in the app's look, to start from
 
 Write one HTML file per visual, for instance .boite/views/orbit.html, run
@@ -384,6 +400,25 @@ Motion
 - When the user asked for less motion (prefers-reduced-motion, or the
   data-reduced-motion attribute on <html>), draw the end state and move only
   on a control.
+
+Check before publishing
+Run boite view check <file.html> first, then open both PNGs it saved and fix
+what you see. It checks the embedded page with the same kit and sandbox as a
+published view, at ${VIEW_WIDTH}px and ${VIEW_NARROW_WIDTH}px content widths. It creates no message,
+artifact, browser tab or panel. PNGs get unique names in your current directory;
+existing files are never overwritten. --json returns their paths, not PNG bytes.
+The check uses the app's fallback palettes and fonts, not a connected client's
+custom theme or selected fonts. --scheme dark|light chooses the fallback palette
+and prefers-color-scheme; dark is the default.
+
+For controls, write checks.js as the BODY of an async function, without a
+function wrapper. --script reads that local file and runs it in the page after
+a fresh load at each width. Use the DOM, click controls, dispatch input/change
+events, await updates, assert results by throwing an Error, and return JSON
+values to print. A script error still keeps the available screenshots, after
+the script ran. Any error, or a browser that cannot check the page, exits
+nonzero after saving available captures. Fix errors and advice, rerun, and
+open the new captures before publishing with boite view <file.html>.
 
 The check at publish
 The page is loaded once in a headless browser before anything is shown. A

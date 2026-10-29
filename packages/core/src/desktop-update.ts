@@ -1,7 +1,7 @@
-import { hostname } from 'node:os';
 import type { DesktopUpdateStatus, ProviderId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
+import { machineName } from './paths.ts';
 import type { Connection } from './router.ts';
 
 const PHASES: ReadonlySet<DesktopUpdateStatus['phase']> = new Set(['idle', 'checking', 'current', 'available', 'downloading', 'ready', 'waiting', 'installing', 'error']);
@@ -74,7 +74,7 @@ export class DesktopUpdates {
   constructor(private readonly core: Core) {}
 
   /** The machine as an error names it: what the group shows comes from the same host name. */
-  private get machine(): string { return hostname(); }
+  private get machine(): string { return machineName(); }
 
   snapshot(): DesktopUpdateStatus | null {
     return this.reporter ? { ...this.reporter.status } : null;

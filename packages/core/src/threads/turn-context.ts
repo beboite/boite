@@ -19,9 +19,9 @@ import { agentEnvOf } from '../agent.ts';
 import { agentGuide, SHORT_ANSWERS } from '../agent-guide.ts';
 import { nativeSkillFiles } from '../brain.ts';
 import { takesSystemGuide } from '../drivers/index.ts';
-import { contextRulesBlock } from '@boite/contracts';
+import { effectiveCompaction, contextRulesBlock } from '@boite/contracts';
 import { prepareAttachments, FileReferences } from '../attachments.ts';
-import { continuationInput } from '../continuation.ts';
+import { continuationInput, tailInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
 import type { EmitSink, PermissionTicket, ToolPatch, QuestionAsk, QuestionTicket, SessionContext, TurnContext } from '../drivers/types.ts';
 import { newId } from '../ids.ts';
@@ -30,8 +30,10 @@ import { LazyMcp } from '../mcp/lazy.ts';
 import { noteStderr } from '../drivers/stderr-tail.ts';
 import { watchProviderProcess } from './provider-process-log.ts';
 import type { ThreadStore } from '../threads.ts';
+import { compactionTail } from './background-compact.ts';
 import { nativeCommandPrompt, systemOperation } from './operations.ts';
 import { stoppedInput } from './stopped-input.ts';
+import { sessionUsage } from '../usage.ts';
 
 /**
  * The parts of a turn's prompt that building it consumes: the async answers
@@ -72,7 +74,8 @@ export class TurnContexts {
     // Without log access the guide still lists the built-in skills; only report-issue needs the logs.
     const skills = builtinSkills(this.core.dataDir, message => { try { this.core.logs.warn(message, { source: 'skills', event: 'skills.write-failed' }); } catch { /* The guide is built without that skill. */ } });
     // Echo treats "question" as a test directive, including in injected help.
-    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills);
+    // A persistent agent's thread has no checkout of its own: no pull request to watch, no project to add.
+    return agentGuide(provider.protocol !== 'echo' && settings.asyncQuestions !== false, logAccess, skills, !!thread.agentSessionId);
   }
 
   /** The guide as a session option, for a driver that puts it in the system prompt. */
@@ -83,19 +86,22 @@ export class TurnContexts {
 
   /** Setup only: no journalled turn, no consumed deferred input and no message sink. */
   makeSessionContext(thread: ThreadSummary, provider: ProviderDescriptor, account: Account): SessionContext {
+    thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: null };
     const current = (): boolean => this.core.journal.getThread(threadId)?.selectionVersion === thread.selectionVersion;
     return {
       thread, provider, account,
+      protectedExecution: this.core.sharedAccess.execution.context(threadId),
       sessionId: thread.sessionId,
       resumeAt: thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, ''),
-      accountEnv: this.core.accounts.accountEnv(account, provider),
+      accountEnv: this.core.accounts.accountEnv(account, provider, thread),
       systemGuide: this.systemGuide(thread, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       log: (level, message, context) => {
         if (context?.kind === 'provider-output') noteStderr(threadId, message);
         this.core.log(level, message, { ...context, source: provider.id, threadId });
@@ -110,7 +116,7 @@ export class TurnContexts {
       background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null }),
-      finishStartup: () => this.core.procs.finishStartup(threadId),
+      finishStartup: () => this.core.procs.finishStartup(this.core.procs.protection.controlScope(threadId) ?? threadId),
       lazyMcp: this.lazyMcpFor(thread),
     };
   }
@@ -123,16 +129,21 @@ export class TurnContexts {
     carried: CarriedInput = {},
     resumePrompt?: string,
   ): TurnContext {
+    const hostContextMode = thread.contextMode;
+    thread = this.core.sharedAccess.contextThread(thread);
     const threadId = thread.id;
+    const protectedExecution = this.core.sharedAccess.execution.context(threadId);
     const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
-    const env = this.core.accounts.accountEnv(account, provider);
+    const env = this.core.accounts.accountEnv(account, provider, thread);
     // When each tool card first showed up and when it stopped running, by slot.
     const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
     const partProgress = new Map<string, { phase: import('@boite/contracts').ThreadProgress['phase']; detail: string | null }>();
     const progress = (phase: import('@boite/contracts').ThreadProgress['phase'], detail: string | null = null): void =>
       this.threads.progress.report(threadId, turn.id, phase, detail);
     const thinking = new Map<MessageId, { index: number; startedAt: number }>();
-    const publishPart = (messageId: MessageId, partIndex: number, part: MessagePart): void => {
+    const publishPart = (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
+      // A secret in use on the thread never reaches the journal or a client in clear (docs/secrets.md).
+      const part = this.core.secrets.maskPart(threadId, raw);
       this.core.journal.append(
         { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
         () => this.core.journal.setMessagePart(messageId, partIndex, part),
@@ -198,6 +209,11 @@ export class TurnContexts {
       if (!segment.open) return;
       finishThinking(segment.id);
       segment.open = false;
+      // Streamed text is masked delta by delta; a value cut across two deltas is caught here, once whole.
+      const parts = this.core.secrets.masks.empty ? [] : this.core.journal.getMessage(segment.id)?.parts ?? [];
+      parts.forEach((part, index) => {
+        if ((part.type === 'text' || part.type === 'thinking') && this.core.secrets.maskPart(threadId, part) !== part) publishPart(segment.id, index, part);
+      });
       this.core.journal.append(
         { type: 'message.completed', threadId, version: 1, payload: { messageId: segment.id, state } },
         () => {
@@ -242,14 +258,15 @@ export class TurnContexts {
         answers.set(id, { role, segments: [{ id, open: true, next: 0 }], parts: new Map() });
         return id;
       },
-      delta: (driverId: MessageId, driverIndex: number, text: string): void => {
+      delta: (driverId: MessageId, driverIndex: number, raw: string): void => {
+        const text = this.core.secrets.mask(threadId, raw);
         const answer = answers.get(driverId);
         let slot = answer?.parts.get(driverIndex);
         if (text.length && slot && (slot.type === 'text' || slot.type === 'thinking') && answer?.role === 'assistant'
           && (answerAfter.has(turn.id) || slot.segment !== answer.segments.at(-1))) {
           slot = continueText(driverId, driverIndex, slot);
         }
-        if (slot) slot.length += text.length;
+        if (slot) slot.length += raw.length;
         const { messageId, partIndex } = route(driverId, driverIndex);
         finishThinking(messageId, partIndex);
         const last = partProgress.get(`${messageId}:${partIndex}`);
@@ -306,15 +323,33 @@ export class TurnContexts {
     // scope, and a driver keeps the callbacks of its session between turns.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
     const carry = carrier(this.core, this.files, threadId, resumePrompt !== undefined ? null : turn.id, input, provider);
-    const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
+    const fresh = thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     let continued = input;
     if (fresh) continued = carry();
     else if (resumePrompt === undefined && !turn.execution?.operation && !turn.execution?.automatic && !nativeCommandPrompt(input.prompt)) {
-      const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => this.files.of(threadId, part, place));
+      const interrupted = stoppedInput(this.core.journal, threadId, turn.id, input, (part, place) => {
+        this.core.sharedAccess.uploads(threadId, [part]);
+        return this.files.of(threadId, part, place);
+      });
       // The first stopped prompt may never have created a native session or
       // advanced its generation. That fresh start still needs journal history.
-      continued = !thread.agentSessionId && thread.sessionId === null && interrupted !== input ? carry() : interrupted;
+      continued = thread.sessionId === null && interrupted !== input ? carry() : interrupted;
     }
+    // A session swapped in by a background compaction summarizes up to its fork:
+    // the turns since then go with the next prompt the agent reads as such.
+    const kind = turn.execution?.operation;
+    if (!fresh && resumePrompt === undefined && thread.sessionId !== null && kind !== 'compact' && kind !== 'keepalive' && kind !== 'background' && kind !== 'resume'
+      && !nativeCommandPrompt(input.prompt)) {
+      const tail = compactionTail(this.core, thread);
+      if (tail !== null) {
+        continued = tailInput(this.core.journal, threadId, tail.after, turn.id, continued, (part, place) => {
+          this.core.sharedAccess.uploads(threadId, [part]);
+          return this.files.of(threadId, part, place);
+        });
+        this.threads.backgroundCompact.carried(threadId, turn.id);
+      }
+    }
+    this.core.sharedAccess.uploads(threadId, continued.attachments);
     const prepared = prepareAttachments(this.core.dataDir, continued, provider);
     const operation = turn.execution?.operation;
     // A compaction or a cache keepalive goes to the agent as its command alone: nothing taken rides on it.
@@ -353,11 +388,14 @@ export class TurnContexts {
       // Every turn, not once a session: a style said once fades after a few answers.
       // Boite's own text, so the guide switch turns it off with the rest.
       const style = inject && guideEnabled && !bare && this.core.settings.get().shortAnswers !== false ? `${SHORT_ANSWERS}\n\n` : '';
-      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + style;
+      // A persistent agent's identity: whole on a fresh session or once it changed, else nothing (`agents/context.ts`).
+      const agent = bare || nativeCommandPrompt(body) ? '' : this.core.workforce.contextFor(thread, sessionId, turn.id);
+      const prefix = rules + (inject && !noGuides ? this.core.brain.instructions(provider.id, listedSkills) : '') + guide + agent + style;
       return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
       thread,
+      protectedExecution,
       account,
       provider,
       turn,
@@ -365,7 +403,7 @@ export class TurnContexts {
       systemGuide,
       continuation: freshStart(this.core.dataDir, carry, compose, provider),
       // A keepalive takes nothing while it runs: a result or a note waits for the turn after it.
-      coordination: () => operation === 'keepalive' ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
+      coordination: () => bare ? null : this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
         ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
@@ -375,6 +413,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       toolSummaries: this.core.settings.get().toolSummaries === true,
       shortAnswers: this.core.settings.get().shortAnswers !== false,
+      autoCompactTokens: () => effectiveCompaction(this.core.settings.get(), this.core.journal.getThread(threadId) ?? thread).autoCompact?.tokens ?? null,
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
@@ -398,8 +437,16 @@ export class TurnContexts {
       background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
       backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       wake: (text) => this.threads.deferred.wake(threadId, text),
-      requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
-        this.threads.cards.requestPermission(thread, turn, toolName, input, description),
+      requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket => {
+        // Shared contexts hide native tools. Approval of the attested protected
+        // facade still follows the host's original context and permission mode.
+        let permissionThread = thread;
+        if (protectedExecution?.toolsAllowed && (toolName === 'boite_exec' || toolName === 'boite_commit')) {
+          protectedExecution.check();
+          permissionThread = {...thread, contextMode: hostContextMode};
+        }
+        return this.threads.cards.requestPermission(permissionThread, turn, toolName, input, description);
+      },
       askQuestion: (ask: QuestionAsk): QuestionTicket => this.threads.cards.askQuestion(thread, turn, ask),
       withdrawQuestion: (questionId) => {
         this.threads.cards.withdrawQuestion(threadId, questionId);
@@ -411,6 +458,8 @@ export class TurnContexts {
       // own door goes into the environment: everything a thread launches finds
       // the core, its token and the `boite` CLI, grandchildren included.
       spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
+        this.core.sharedAccess.denyTool(threadId);
+        this.core.sharedCompute?.assertSpawn(threadId);
         const spawned = this.core.procs.spawn(threadId, cmd, args, {
           ...opts,
           env: agentEnvOf(this.core, threadId, { ...(opts?.env ?? process.env), ...env }),
@@ -423,7 +472,7 @@ export class TurnContexts {
         return spawned;
       },
       spawnChild: this.leasedSpawnChild(threadId, provider, { resume: thread.sessionId !== null, turnId: turn.id }),
-      finishStartup: () => this.core.procs.finishStartup(threadId),
+      finishStartup: () => this.core.procs.finishStartup(this.core.procs.protection.controlScope(threadId) ?? threadId),
       lazyMcp: this.lazyMcpFor(thread),
       killTree: () => {
         this.core.procs.killTree(threadId);
@@ -448,9 +497,13 @@ export class TurnContexts {
     session?: { resume: boolean; turnId?: TurnId },
   ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
     return (cmd, args, opts) => {
+      const execution = session ? this.core.sharedAccess.execution.context(threadId) : undefined;
+      if (!execution) this.core.sharedAccess.denyTool(threadId);
+      this.core.sharedCompute?.assertSpawn(threadId);
       // The SDK drivers hand a whole environment here, so the agent's own
       // variables are merged onto theirs rather than added to `process.env`.
-      const child = this.core.procs.spawnChild(threadId, cmd, args, {
+      const scope = execution ? this.core.procs.protection.control(threadId) : threadId;
+      const child = this.core.procs.spawnChild(scope, cmd, args, {
         ...opts,
         env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
       });
@@ -470,10 +523,10 @@ export class TurnContexts {
     };
   }
 
-  /** What the agent session this turn resumes already used (`Journal.sessionUsage`). */
+  /** What the agent session this turn resumes already used (`usage.ts` `sessionUsage`). */
   private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
     if (thread.sessionId === null) return { costUsd: 0, tokens: 0 };
-    return this.core.journal.sessionUsage(thread.id, thread.sessionGeneration ?? 0, turnId);
+    return sessionUsage(this.core, thread.id, thread.sessionGeneration ?? 0, turnId);
   }
 
   /**
@@ -532,8 +585,14 @@ type TurnInput = Parameters<typeof continuationInput>[3];
  * not every callback of the context.
  */
 function carrier(core: Core, files: FileReferences, threadId: ThreadId, turnId: TurnId | null, input: TurnInput, provider: ProviderDescriptor): () => { prompt: string; attachments: Attachment[] } {
-  const history = (): { prompt: string; attachments: Attachment[] } =>
-    continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => files.of(threadId, part, place));
+  const history = (): { prompt: string; attachments: Attachment[] } => {
+    const result = continuationInput(core.journal, threadId, turnId, input, provider, (part, place) => {
+      core.sharedAccess.uploads(threadId, [part]);
+      return files.of(threadId, part, place);
+    });
+    core.sharedAccess.uploads(threadId, result.attachments);
+    return result;
+  };
   // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
   const resumedHistory = turnId === null ? history() : null;
   return () => resumedHistory ?? history();

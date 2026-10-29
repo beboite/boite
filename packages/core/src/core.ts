@@ -3,7 +3,6 @@ import { PullRequests } from './pull-requests.ts';
 import { LinkedPullRequests } from './linked-pull-requests.ts';
 import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, CoreLogContext, ThreadId, UiRevealTarget } from '@boite/contracts';
@@ -23,7 +22,7 @@ import { KeybindingStore } from './keybindings.ts';
 import { DiagnosticLogs, type ThreadIdentity } from './logs.ts';
 import { Diagnostics } from './diagnostics.ts';
 import { registerModules } from './modules.ts';
-import { currentOs } from './paths.ts';
+import { currentOs, machineName } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { attachResourceLog } from './resource-log.ts';
@@ -46,6 +45,7 @@ import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
+import { DesktopWindows } from './windows/service.ts';
 import { LazyMcp } from './mcp/lazy.ts';
 import { QuotaStore } from './quotas.ts';
 import { dropRetiredAccounts } from './account-retirement.ts';
@@ -59,14 +59,23 @@ import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import { ContactStore } from './contacts/store.ts';
+import { SharedProjects } from './contacts/projects.ts';
+import { SharedBoard } from './contacts/board.ts';
 import type { RelaySink } from './group/relay.ts';
 import { Delegation } from './delegation.ts';
+import { SharedCompute } from './contacts/compute.ts';
+import { SharedAccess } from './contacts/access-policy.ts';
+import { SharedReview } from './contacts/review.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
+import { openSecretVault } from './platform/secret-vault.ts';
+import type { SecretVault } from './platform/types.ts';
+import { SecretStore } from './secrets/store.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 import { DesktopUpdates } from './desktop-update.ts';
+import { Composer } from './composer.ts';
 
 export { CORE_VERSION } from './version.ts';
 
@@ -97,6 +106,8 @@ export interface CoreOptions {
   dataDirKind?: 'default' | 'custom';
   /** How often a resident core runs its retention passes; a test shortens the minute. */
   retentionPassMs?: number;
+  /** Legacy vault cleanup only; tests substitute it so no system store is touched. */
+  secretVault?: (dir: string) => Promise<SecretVault>;
 }
 
 /**
@@ -161,6 +172,7 @@ export class Core {
   readonly scheduler: Scheduler;
   readonly threads: ThreadStore;
   readonly drafts: DraftPreparations;
+  readonly composer: Composer;
   readonly attachmentUploads: AttachmentUploads;
   readonly quotas: QuotaStore;
   readonly plugins: PluginStore;
@@ -189,17 +201,24 @@ export class Core {
   readonly group: GroupStore;
   /** Other owners' Boites linked for agent work on the projects each side opens. */
   readonly contacts: ContactStore;
+  readonly sharedProjects: SharedProjects;
+  readonly sharedBoard: SharedBoard;
+  readonly sharedCompute: SharedCompute;
+  readonly sharedAccess: SharedAccess;
+  readonly sharedReview: SharedReview;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
   /** What the user's own hooks did since this core started, for Settings. */
   readonly hooks: HookLedger;
   readonly terminals: TerminalStore;
+  readonly secrets: SecretStore;
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
   readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
+  readonly windows = new DesktopWindows(this);
   /** The user's stdio MCP servers, started when a conversation first calls one (`mcp/lazy.ts`). */
   readonly lazyMcp = new LazyMcp(this);
 
@@ -270,7 +289,7 @@ export class Core {
       // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
       // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
       || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
-      || threads.sideQuestions.busy || this.updates.busy
+      || threads.sideQuestions.busy || this.sharedReview.busy || this.updates.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return false;
@@ -340,7 +359,10 @@ export class Core {
     this.#stopMoves = scheduleInlineValueMoves(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
-    this.clients = new ClientPreferencesBook((preferences, before) => this.threads.cards.settleClient(preferences, before));
+    this.clients = new ClientPreferencesBook(
+      (preferences, before) => this.threads.cards.settleClient(preferences, before),
+      (experiments) => this.bus.emit('client.desktopExperiments', { experiments }),
+    );
     this.providers = new ProviderRegistry(this.dataDir);
     this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
@@ -359,6 +381,9 @@ export class Core {
     this.plugins = new PluginStore(this);
     this.sessions = new SessionStore(this);
     this.worktrees = new Worktrees(this);
+    // No thread row lands and no process starts in a checkout a removal holds, whichever path asks (`checkouts.ts`).
+    this.journal.admitThread = (thread) => this.worktrees.reservations.admit(thread);
+    this.procs.admitCwd = (cwd) => this.worktrees.reservations.assertFree(cwd, 'a process');
     this.keybindings = new KeybindingStore(this);
     this.imports = new ImportStore(this);
     // The journal erased the incognito conversations the last core left behind; their transcripts follow.
@@ -377,17 +402,26 @@ export class Core {
     this.group = new GroupStore(this);
     this.group.restore();
     this.contacts = new ContactStore(this);
+    this.sharedProjects = new SharedProjects(this);
+    this.sharedBoard = new SharedBoard(this);
     this.delegation = new Delegation(this);
+    this.sharedCompute = new SharedCompute(this);
+    this.sharedAccess = new SharedAccess(this);
+    this.sharedReview = new SharedReview(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
     this.hooks = new HookLedger(this);
     this.terminals = new TerminalStore(this);
+    this.secrets = new SecretStore(this, options.secretVault ?? openSecretVault);
+    this.logs.mask = text => this.secrets.maskAll(text);
+    this.procs.mask = (threadId, text) => this.secrets.mask(threadId, text);
 
     this.workforce = new AgentStore(this);
     this.pullRequests = new PullRequests(this);
     this.linkedPullRequests = new LinkedPullRequests(this, (threadId, url, refresh) => this.pullRequests.detail(threadId, url, refresh));
     this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
     registerModules(this);
+    this.composer = new Composer(this);
     phase('startup.stores-ready', 'Stores and RPC handlers ready', { methods: this.router.methods().length });
     this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
@@ -408,11 +442,14 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
-    // After recovery: a thread a usage limit stopped resumes at its window's reset, across restarts.
-    this.threads.limitResumes.start();
+    // After recovery: a resume planned before the previous core stopped, a usage limit's among them, goes on.
+    this.threads.resumes.start();
+    // Watched limits are read on their own, so an alert reaches a phone with no window open.
+    this.quotas.alerts.start();
     // What a dead core cut, and any resume planned before it died, goes on (`threads/auto-continue.ts`).
     this.threads.autoContinue.start(interrupted);
     this.threads.cards.restoreAsyncQuestions();
+    this.secrets.start();
     phase('startup.recovered', `Previous run recovered, ${recovered} unfinished turns`, { stuckTurns: recovered });
     queueMicrotask(() => {
       void this.drafts.recover().catch(error => this.log('warn', `draft recovery failed: ${String(error)}`));
@@ -420,6 +457,7 @@ export class Core {
     });
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
+    queueMicrotask(() => this.composer.start());
     this.brain.start();
     this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
     this.mergedPrArchive.start();
@@ -471,13 +509,14 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, draftPreparation: true, attachmentUploads: true, composerPersistence: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true },
       coreId: this.coordination.card().coreId,
-      hostname: hostname(),
+      hostname: machineName(),
       os: currentOs(),
       channel: this.channel,
       pid: process.pid,
       startedAt: this.startedAt,
+      now: Date.now(),
       endpoint: { ...this.endpoint },
       dataDir: this.dataDir,
       trace: this.procs.capability(),
@@ -507,11 +546,17 @@ export class Core {
     void this.pullRequestWatches.close();
     this.group.beginClose();
     this.contacts.beginClose();
+    this.sharedProjects.beginClose();
+    this.sharedBoard.beginClose();
+    this.sharedCompute.beginClose();
+    this.sharedReview.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
+    this.quotas.alerts.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -528,9 +573,11 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.composer.stop();
     const closingAt = performance.now();
     await this.browser.close();
     this.devices.stop();
+    this.windows.stop();
     this.lazyMcp.close();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
@@ -539,8 +586,9 @@ export class Core {
     await this.pullRequestWatches.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
+    this.threads.backgroundCompact.close();
     this.threads.cacheKeepalive.close();
-    this.threads.limitResumes.close();
+    this.threads.resumes.close();
     this.threads.autoContinue.close();
     await this.threads.codeCheckpoints.close();
     await this.agentRuntime.close();
@@ -556,9 +604,15 @@ export class Core {
     this.desktopUpdates.close();
     await this.drain();
     await this.delegation.close();
+    await this.workflows.close();
     await this.coordination.close();
     await this.group.close();
     await this.contacts.close();
+    await this.sharedProjects.close();
+    await this.sharedBoard.close();
+    await this.sharedCompute.close();
+    await this.sharedReview.close();
+    await this.delegation.worktrees.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();
@@ -567,6 +621,8 @@ export class Core {
       for (const threadId of this.threads.agentState.background.keys()) this.threads.agentState.cancelBackground(threadId);
     }
     shutdownDrivers();
+    await this.composer.close();
+    this.secrets.stop();
     await this.accounts.closeLogins();
     await this.terminals.closeAll();
     // Off Windows this waits out the SIGKILL of a group that ignored SIGTERM,

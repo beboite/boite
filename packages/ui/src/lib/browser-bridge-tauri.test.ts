@@ -141,3 +141,21 @@ test('the agent browser relay does not queue a call behind one still waiting, as
   release!({ done: true });
   await expect(ended).resolves.toEqual({ done: true });
 });
+
+test('a popup the shell made is live without a create, and its page closing it destroys the surface', async () => {
+  invoke.mockImplementation(async (command: string) => ({ ok: command }));
+  const bridge = new TauriBridge();
+  const events: unknown[] = [];
+  bridge.on(event => events.push(event));
+  bridge.create('agent-1', 'about:blank');
+  await vi.waitFor(() => expect(listen).toHaveBeenCalledTimes(1));
+  const shell = (listen.mock.calls[0] as unknown as [string, (message: { payload: unknown }) => void])[1];
+  shell({ payload: { type: 'popup', id: 'agent-1', popup: 'agent-popup-1-0', url: 'https://example.test/send-as' } });
+  expect(events).toContainEqual({ type: 'popup', id: 'agent-1', popup: 'agent-popup-1-0', url: 'https://example.test/send-as' });
+  await expect(bridge.relay('agent-popup-1-0', 'Runtime.evaluate', { expression: 'opener !== null' })).resolves.toEqual({ ok: 'browser_protocol' });
+  expect(invoke.mock.calls.filter(([command]) => command === 'browser_create')).toHaveLength(1);
+  shell({ payload: { type: 'closed', id: 'agent-popup-1-0' } });
+  expect(events).toContainEqual({ type: 'destroyed', id: 'agent-popup-1-0' });
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('browser_destroy', { id: 'agent-popup-1-0' }));
+  await expect(bridge.relay('agent-popup-1-0', 'Runtime.evaluate', {})).rejects.toThrow('closed');
+});

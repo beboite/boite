@@ -161,7 +161,7 @@ export type DelegationInput =
 export interface DelegationWorktree {
   branch: string;
   path: string;
-  /** The commit it branched from; null while pending. */
+  /** The reserved base commit; null until preparation reaches its first mutation. */
   base: string | null;
   state: 'pending' | 'active' | 'kept' | 'removed';
   /** Commits on the branch beyond `base` when it was last settled. */
@@ -213,11 +213,14 @@ export interface DelegationRpcMethods {
    * part of the user's setup; left out, it gets all of it.
    *
    * `worktree: true` runs the child in a git worktree of its own on a new
-   * `boite/sub-<id>` branch from the parent's current HEAD instead of the
-   * shared checkout; refused when the parent's project is not a git
-   * repository. Uncommitted edits of the parent are not copied.
+   * `boite/sub-<id>` branch from the parent's current HEAD (the entrusted
+   * project's for a bot) instead of the shared checkout; refused outside a
+   * git repository. Uncommitted edits are not copied.
+   * A bot can name an entrusted `project` by id, name or path. Without it,
+   * its sole entrusted project is used; otherwise the child stays personal.
+   * Project children of bots appear in that project's conversation list.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; project?: string; profileId?: string; model?: string; effort?: string; speed?: string; context?: ContextRequest | ContextPreset; task: string; title?: string; worktree?: boolean; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
   /**
    * From a parent to a child blocked on a question card, the text answers

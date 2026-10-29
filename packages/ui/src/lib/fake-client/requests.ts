@@ -1,6 +1,7 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, settledExperiment, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, isMachineSetting, MACHINE_SETTINGS, settledMachineSetting, settledExperiment, type SettingMachine, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { fakeCore } from './coordination';
 import { checkAnswer, checkAsk } from './checks';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
 import type { FakeContext, FakeMethods } from './context';
@@ -146,22 +147,57 @@ function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: Qu
  * experiment's once an app flipped its switch.
  */
 export function settleSettings(ctx: FakeContext, settings: Settings, report?: { preferences: ClientPreferences; before: readonly ExperimentId[] | null }): void {
+  settleWith(ctx, setting => (report ? settledExperiment(setting, report.preferences, report.before) : settledSetting(setting, settings)));
+}
+
+/** As the core's `setting.changed`: the cards of `ctx` about that machine's setting settle. */
+export function settleMachineSetting(ctx: FakeContext, coreId: string, key: string, value: unknown): void {
+  settleWith(ctx, setting => settledMachineSetting(setting, coreId, key, value));
+}
+
+function settleWith(ctx: FakeContext, pick: (setting: SettingAsk) => QuestionAnswer | null): void {
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
     const setting = pending.request.setting;
-    const answer = setting === undefined ? null : report ? settledExperiment(setting, report.preferences, report.before) : settledSetting(setting, settings);
+    const answer = setting === undefined ? null : pick(setting);
     if (answer === null) continue;
     ctx.pendingQuestions.delete(questionId);
     pending.resolve(answer);
   }
 }
 
+/** Another fake core of this page's group, as `memberNamed` finds it: by name, core id or a prefix of six hex digits. */
+export function fakeMember(ctx: FakeContext, query: string, method: string): SettingMachine {
+  const wanted = query.trim();
+  const fold = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase();
+  const roster = ctx.roster;
+  if (roster === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}.machine: this machine is in no group; --machine names another machine of its group`, data: { field: 'machine' } });
+  const refuse = (message: string, expected?: string[]) => new RpcFailure({ code: RpcErrorCode.Refused, message: `${method}.machine: ${message}`, data: { field: 'machine', ...(expected === undefined ? {} : { expected }) } });
+  const others = roster.cores.filter(core => core.coreId !== ctx.identity.coreId);
+  const found = others.filter(core => core.coreId === wanted || fold(core.name) === fold(wanted) || (/^[0-9a-f]{6,}$/.test(wanted) && core.coreId.startsWith(wanted)));
+  const self = roster.cores.find(core => core.coreId === ctx.identity.coreId);
+  if (self !== undefined && (self.coreId === wanted || (fold(self.name) === fold(wanted) && found.length === 0))) throw refuse(`${self.name} is this machine; leave --machine out`);
+  if (found.length === 1) return { coreId: found[0]!.coreId, name: found[0]!.name };
+  const names = others.map(core => roster.cores.some(other => other.coreId !== core.coreId && fold(other.name) === fold(core.name)) ? core.coreId.slice(0, 8) : core.name.replace(/\s+/g, '-'));
+  if (found.length === 0) throw refuse(`no machine ${wanted} in this group; ${names.length === 0 ? 'it has no other machine' : `the others are ${names.join(', ')}`}`, names);
+  throw refuse(`${found.length} machines are named ${wanted}; name one by a core id prefix: ${found.map(core => core.coreId.slice(0, 8)).join(', ')}`);
+}
+
 /** `settings.request` on a thread whose turn is known; the fake agent's `[settings]` markers come here too. */
 export function requestSetting(ctx: FakeContext, thread: Thread, turn: Turn, params: SettingRequestParams): { questionId: string; setting: SettingAsk } {
   const open = [...ctx.pendingQuestions.values()].flatMap((pending) => (pending.request.threadId === thread.id && pending.request.setting ? [pending.request.setting] : []));
-  const checked = checkSettingRequest(params, ctx.settings, (patch) => {
+  let settings = ctx.settings;
+  let machine: SettingMachine | null = null;
+  if (params.machine !== undefined) {
+    if (!isMachineSetting(params.key)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${String(params.key)} is this machine's own; a card for another machine asks about ${MACHINE_SETTINGS.join(', ')}`, data: { field: 'key' } });
+    machine = fakeMember(ctx, params.machine, 'settings.request');
+    const other = fakeCore(machine.coreId);
+    if (other === undefined) throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${machine.name} did not answer`, data: { field: 'machine' } });
+    settings = { ...ctx.settings, [params.key]: other.settings[params.key] };
+  }
+  const checked = checkSettingRequest(params, settings, (patch) => {
     const result = checkSettingsPatch(patch);
     return result.ok ? { ok: true, patch: result.patch } : { ok: false, message: result.message, field: result.field };
-  }, open, ctx.clientPreferences);
+  }, open, ctx.clientPreferences, machine);
   if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.Refused, message: checked.message, data: checked.data });
   return { questionId: askSetting(ctx, thread, turn, checked.reason, checked.options, checked.setting), setting: checked.setting };
 }
@@ -339,7 +375,7 @@ export function requestMethods(ctx: FakeContext) {
       ctx.clientApps.set(checked.preferences.app, checked.preferences);
       ctx.clientPreferences = checked.preferences;
       settleSettings(ctx, ctx.settings, { preferences: checked.preferences, before });
-      return { ok: true };
+      return { ok: true, desktop: ctx.desktopExperiments === null ? null : [...ctx.desktopExperiments] };
     },
     'questions.skip': async (params) => {
       const pending = ctx.pendingQuestions.get(params.questionId);

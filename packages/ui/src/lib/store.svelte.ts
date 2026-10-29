@@ -1,8 +1,9 @@
 import { startDiagnosticsReport } from './diagnostics-report';
 import { RpcErrorCode, type AgentShape, type Message, type MessageId, type PermissionMode, type ProjectId, type ProviderId, type ThreadId } from '@boite/contracts';
 import type { Client } from './client';
-import { RpcFailure, wasClosed } from './rpc-error';
+import { RpcFailure, wasClosed, wasDropped } from './rpc-error';
 import { readModelDefaults } from './model-defaults';
+import { followDesktopOf } from './experiments';
 import { modelFavorites } from './model-favorites.svelte';
 import { readLayout, readPrefs } from './prefs';
 import { watchIncognito } from './store/incognito.svelte';
@@ -115,9 +116,14 @@ export class Store {
     this.errorThreadId = null;
   }
 
-  /** Only explicitly minor action failures expire; unknown failures remain visible. */
+  /**
+   * Only explicitly minor action failures expire; unknown failures remain
+   * visible. A call that failed because its machine is gone says only what the
+   * machine's offline state already shows, so it is minor too.
+   */
   reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
-    this.#error = { message: this.#ctx.reason(error), severity, offline: wasClosed(error) };
+    const offline = wasClosed(error) || (wasDropped(error) && this.connection !== 'ready');
+    this.#error = { message: this.#ctx.reason(error), severity: offline ? 'minor' : severity, offline };
     this.errorThreadId = null;
   }
 
@@ -128,6 +134,7 @@ export class Store {
   }
   get clientGeneration(): number { return this.#ctx.clientGeneration; }
   get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
+  get shared() { return this.#ctx.shared; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -164,6 +171,7 @@ export class Store {
     listen(ctx, client);
     ctx.off.push(modelFavorites.register(ctx.models.favoritesTarget));
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.sync.watch());
     ctx.off.push(ctx.draftStartup.watch());
     ctx.off.push(watchIncognito(ctx));
     // Each machine hears about this window's own failures. Unit tests drive
@@ -173,7 +181,10 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.shared.reset();
+    ctx.requests.resetSecrets();
     ctx.clientGeneration++;
+    ctx.settings.brainCommands = [];
     ctx.models.flushModels();
     void ctx.threads.unsubscribe();
     ctx.threads.loadingThreadId = null;
@@ -181,6 +192,7 @@ export class Store {
     ctx.serverUpdater.reset();
     ctx.terminals.dropSessions();
     ctx.drafts.stop();
+    ctx.sync.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;
@@ -214,6 +226,7 @@ export class Store {
   set connection(value) { this.#ctx.connection.connection = value; }
   get core() { return this.#ctx.connection.core; }
   set core(value) { this.#ctx.connection.core = value; }
+  get clockOffset() { return this.#ctx.connection.clockOffset; }
   get principal() { return this.#ctx.connection.principal; }
   set principal(value) { this.#ctx.connection.principal = value; }
   get endpointUrl() { return this.#ctx.connection.endpointUrl; }
@@ -268,6 +281,7 @@ export class Store {
   loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
   createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
   renameGroup(...args: Parameters<Pairing['renameGroup']>) { return this.#ctx.pairing.renameGroup(...args); }
+  setSettingsHome(...args: Parameters<Pairing['setSettingsHome']>) { return this.#ctx.pairing.setSettingsHome(...args); }
   joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
   leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
   removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
@@ -330,6 +344,8 @@ export class Store {
 
   get scheduler() { return this.#ctx.settings.scheduler; }
   set scheduler(value) { this.#ctx.settings.scheduler = value; }
+  get brainCommands() { return this.#ctx.settings.brainCommands; }
+  loadBrainCommands() { return this.#ctx.settings.loadBrainCommands(); }
   get settings() { return this.#ctx.settings.settings; }
   set settings(value) { this.#ctx.settings.settings = value; }
   get keybindings() { return this.#ctx.settings.keybindings; }
@@ -337,6 +353,10 @@ export class Store {
   get bindings() { return this.#ctx.settings.bindings; }
 
   saveSettings(...args: Parameters<CoreSettings['saveSettings']>) { return this.#ctx.settings.saveSettings(...args); }
+  get settingsHome() { return this.#ctx.settings.settingsHome; }
+  kept(...args: Parameters<CoreSettings['kept']>) { return this.#ctx.settings.kept(...args); }
+  keep(...args: Parameters<CoreSettings['keep']>) { return this.#ctx.settings.keep(...args); }
+  followHome(...args: Parameters<CoreSettings['followHome']>) { return this.#ctx.settings.followHome(...args); }
   commandForKey(...args: Parameters<CoreSettings['commandForKey']>) { return this.#ctx.settings.commandForKey(...args); }
   isKey(...args: Parameters<CoreSettings['isKey']>) { return this.#ctx.settings.isKey(...args); }
   keyLabel(...args: Parameters<CoreSettings['keyLabel']>) { return this.#ctx.settings.keyLabel(...args); }
@@ -467,11 +487,14 @@ export class Store {
   checkAccount(...args: Parameters<Accounts['checkAccount']>) { return this.#ctx.accounts.checkAccount(...args); }
   reloadProviders(...args: Parameters<Accounts['reloadProviders']>) { return this.#ctx.accounts.reloadProviders(...args); }
   loadHarnessUpdates(...args: Parameters<Accounts['loadHarnessUpdates']>) { return this.#ctx.accounts.loadHarnessUpdates(...args); }
+  freshenHarnessUpdates(...args: Parameters<Accounts['freshenHarnessUpdates']>) { return this.#ctx.accounts.freshenHarnessUpdates(...args); }
   updateHarness(...args: Parameters<Accounts['updateHarness']>) { return this.#ctx.accounts.updateHarness(...args); }
   skipHarnessUpdate(...args: Parameters<Accounts['skipHarnessUpdate']>) { return this.#ctx.accounts.skipHarnessUpdate(...args); }
   installProvider(...args: Parameters<Accounts['installProvider']>) { return this.#ctx.accounts.installProvider(...args); }
   cancelInstall(...args: Parameters<Accounts['cancelInstall']>) { return this.#ctx.accounts.cancelInstall(...args); }
   uninstallProvider(...args: Parameters<Accounts['uninstallProvider']>) { return this.#ctx.accounts.uninstallProvider(...args); }
+  addLocalProvider(...args: Parameters<Accounts['addLocalProvider']>) { return this.#ctx.accounts.addLocalProvider(...args); }
+  removeLocalProvider(...args: Parameters<Accounts['removeLocalProvider']>) { return this.#ctx.accounts.removeLocalProvider(...args); }
 
   // -------------------------------------------------------------------------
   // Projects and the draft: store/projects.svelte.ts
@@ -497,6 +520,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  renameProject(...args: Parameters<Projects['renameProject']>) { return this.#ctx.projects.renameProject(...args); }
   refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
@@ -519,6 +543,8 @@ export class Store {
   get threads() { return this.#ctx.threads.threads; }
   set threads(value) { this.#ctx.threads.threads = value; }
   get openThread() { return this.#ctx.threads.openThread; }
+  /** Where a thread opens: an agent's own on the Agents page, any other in the chat. */
+  pageOf(thread: Parameters<Threads['pageOf']>[0]) { return this.#ctx.threads.pageOf(thread); }
   set openThread(value) { this.#ctx.threads.openThread = value; }
   get loadingOlder() { return this.#ctx.threads.loadingOlder; }
   set loadingOlder(value) { this.#ctx.threads.loadingOlder = value; }
@@ -547,6 +573,8 @@ export class Store {
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
   loadDisplayImage(...args: Parameters<DisplayImages['load']>) { return this.#ctx.displayImages.load(...args); }
+  /** A deferred video or audio attachment as a file URL, without putting its bytes in the message. */
+  loadMediaAttachment(...args: Parameters<DisplayImages['original']>) { return this.#ctx.displayImages.original(...args); }
   /** A copy whose address stopped loading, asked again by the next `loadDisplayImage`. */
   forgetDisplayImage(...args: Parameters<DisplayImages['forget']>) { this.#ctx.displayImages.forget(...args); }
   get loadingThreadId() { return this.#ctx.threads.loadingThreadId; }
@@ -584,6 +612,7 @@ export class Store {
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
   pin(...args: Parameters<Threads['pin']>) { return this.#ctx.threads.pin(...args); }
+  trustContactHistory(...args: Parameters<Threads['trustContactHistory']>) { return this.#ctx.threads.trustContactHistory(...args); }
   move(...args: Parameters<Threads['move']>) { return this.#ctx.threads.move(...args); }
   cancelMove(...args: Parameters<Threads['cancelMove']>) { return this.#ctx.threads.cancelMove(...args); }
   archive(...args: Parameters<Threads['archive']>) { return this.#ctx.threads.archive(...args); }
@@ -600,6 +629,7 @@ export class Store {
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
   discardDraft(id: string) { return this.#ctx.drafts.discard(id); }
+  cancelQueuedDraft(id: string) { return this.#ctx.drafts.unqueue(id); }
   get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
@@ -639,6 +669,7 @@ export class Store {
   get permissionRequests() { return this.#ctx.requests.permissionRequests; }
   set permissionRequests(value) { this.#ctx.requests.permissionRequests = value; }
   get pendingQuestions() { return this.#ctx.requests.pendingQuestions; }
+  get pendingSecrets() { return this.#ctx.requests.pendingSecrets; }
   set pendingQuestions(value) { this.#ctx.requests.pendingQuestions = value; }
   get questionRequests() { return this.#ctx.requests.questionRequests; }
   set questionRequests(value) { this.#ctx.requests.questionRequests = value; }
@@ -753,3 +784,5 @@ export class Store {
 }
 
 export const store = new Store();
+// The primary machine's desktop app is the one this device's experiments follow.
+followDesktopOf(store);

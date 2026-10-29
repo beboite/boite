@@ -84,6 +84,8 @@ export interface QuestionAsk {
 export type QuestionTicket = Promise<QuestionAnswer | null> & { readonly questionId: RequestId };
 
 export interface TurnContext {
+  /** Immutable additional restriction for externally supplied work, never a provider/account replacement. */
+  protectedExecution?: import('./protected.ts').ProtectedDriverExecution;
   thread: ThreadSummary;
   account: Account;
   provider: ProviderDescriptor;
@@ -142,6 +144,8 @@ export interface TurnContext {
   toolSummaries?: boolean;
   /** The agent is asked to stay quiet until its answer (`Settings.shortAnswers`); Claude's own progress reminder goes off. Absent means off. */
   shortAnswers?: boolean;
+  /** The owner's current independent token limit, read without a provider request. Null keeps native defaults. */
+  autoCompactTokens?(): number | null;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
   /**
@@ -223,8 +227,8 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp'>;
+  'accountEnv' | 'systemGuide' | 'warmProcessMinutes' | 'toolSummaries' | 'shortAnswers' | 'autoCompactTokens' | 'log' | 'diagnostic' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup' | 'killTree' | 'quota' | 'lazyMcp' | 'protectedExecution'>;
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 /** Scalars only: never a prompt, a tool input or output, a command line or a token. */
@@ -306,7 +310,7 @@ export interface TurnHandle {
    */
   steer?(message: string, attachments?: ImageAttachment[], onAccepted?: () => void): Promise<boolean>;
   /** Native user input, when system coordination uses a separate tool-boundary hook. */
-  steerUser?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
+  steerUser?(message: string, attachments?: ImageAttachment[], onAccepted?: () => void): Promise<boolean>;
 }
 
 /**
