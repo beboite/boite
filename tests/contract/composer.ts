@@ -34,6 +34,7 @@ async function batching(env: ContractEnv, incognito: boolean) {
     { id: `${prefix}-one`, text: 'first', attachments: [{ ...meta, assetId }], choice },
     { id: `${prefix}-two`, text: 'second', attachments: [], choice: { ...choice, speed: null } },
     { id: `${prefix}-three`, text: 'third', attachments: [], choice: { ...choice, permissionMode: 'plan' } },
+    { id: `${prefix}-four`, text: 'fourth', attachments: [], choice: { ...choice, permissionMode: 'plan' }, experiments: ['auto-goal'] },
   ] } };
   const put = { section: 'inputs' as const, id: thread.id, expectedRevision: 0, value };
   const first = await env.call('composer.put', put);
@@ -49,7 +50,7 @@ async function batching(env: ContractEnv, incognito: boolean) {
   const received = await env.call('threads.get', { threadId: thread.id });
   const messages = received.messages.filter(message => message.role === 'user');
   const texts = messages.map(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join(''));
-  check(JSON.stringify(texts) === JSON.stringify(['first\n\nsecond', 'third']), `choice batching drift: ${JSON.stringify(texts)}`);
+  check(JSON.stringify(texts) === JSON.stringify(['first\n\nsecond', 'third', 'fourth']), `choice or auto-goal batching drift: ${JSON.stringify(texts)}`);
   check(messages[0]?.parts.some(part => part.type === 'file' && part.data === attachment.data), 'batched attachment was lost');
   // Delivery collects no-longer-referenced uploads. An offline cache uploads its bytes again before replay.
   await env.call('composer.asset.put', { attachment, ...(incognito ? { incognito: true } : {}) });
@@ -60,7 +61,7 @@ async function batching(env: ContractEnv, incognito: boolean) {
 }
 
 export const COMPOSER_SCENARIOS: Record<string, Scenario> = {
-  'composer batches equal choices, splits distinct choices and replays accepted ids once': env => batching(env, false),
+  'composer batches equal choices, splits distinct choices and auto-goal flags, and replays accepted ids once': env => batching(env, false),
   'composer incognito batching and attachment delivery match ordinary queues': env => batching(env, true),
   'composer private records and assets are restricted to the originating connection': async env => {
     const peer = await env.peer();

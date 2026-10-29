@@ -1,8 +1,9 @@
-import { RpcErrorCode, type Attachment, type ComposerAttachment, type ComposerQueuedPrompt, type ComposerRecord, type ComposerValue, type PreviewReference } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode, type Attachment, type ComposerAttachment, type ComposerQueuedPrompt, type ComposerRecord, type ComposerValue, type PreviewReference } from '@boite/contracts';
 import { RpcFailure, type Client } from '../client';
 import { isLoading, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
-import { strings } from '../strings';
+import { bytes } from '../format';
 import { secureId } from '../secure-id';
+import { fill, strings } from '../strings';
 import type { Choice, Draft } from '../store.svelte';
 import type { QueuedPrompt } from './composer.svelte';
 import type { StoreContext } from './context';
@@ -52,6 +53,8 @@ const hasContent = (local: Local | null) => !!local && (!boxEmpty(local.input) |
 export class ComposerSync {
   /** True when this core answered that it has no composer records. */
   #refused = $state(false);
+  /** The over-limit warning this sync raised, and the box it is about: only that box, accepted, takes it back. */
+  #overLimit: { key: string; message: string } | null = null;
   #epoch = 0;
   #private = new Set<string>();
   #privateEntries = new Set<string>();
@@ -619,6 +622,13 @@ export class ComposerSync {
   // Sending
   // ---------------------------------------------------------------------------
 
+  /** The over-limit warning `key` raised ends once that box no longer has to reach the core. */
+  #fits(key: string): void {
+    if (this.#overLimit?.key !== key) return;
+    if (this.ctx.store.error === this.#overLimit.message) this.ctx.store.error = null;
+    this.#overLimit = null;
+  }
+
   async #flush(key: string): Promise<void> {
     const client = this.ctx.client;
     if (!client || client !== this.#client || !this.#listed || this.ctx.store.connection !== 'ready' || !this.active) return;
@@ -636,7 +646,7 @@ export class ComposerSync {
     if (files.some(isLoading)) return;
     const sendNow = this.#forced.has(key);
     let value = this.#shape(local);
-    if (!sendNow && this.#parts(value).hash === (known?.hash ?? EMPTY.hash)) { this.#dirty.delete(key); return; }
+    if (!sendNow && this.#parts(value).hash === (known?.hash ?? EMPTY.hash)) { this.#dirty.delete(key); this.#fits(key); return; }
     const epoch = this.#epoch;
     this.#inflight.add(key);
     this.#dirty.delete(key);
@@ -657,6 +667,7 @@ export class ComposerSync {
         const now = this.#localOf(this.#source(key));
         if (result.accepted) {
           if (sendNow) this.#forced.delete(key);
+          this.#fits(key);
           this.#know(key, result.record);
           const stored = this.#known.get(key)!;
           if (stored.hash === sent.hash) { if (this.#parts(this.#shape(now)).hash !== sent.hash) this.#dirty.add(key); return; }
@@ -690,10 +701,21 @@ export class ComposerSync {
         this.#apply(key, null);
         this.ctx.drafts.persist(id);
         this.#dirty.delete(key); this.#known.delete(key);
+        this.#fits(key);
         this.#saveMeta();
         return;
       }
       this.#dirty.add(key);
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.InvalidParams && error.message.startsWith('composer.attachments:')) {
+        // Past what one message may carry, no retry can fit: the box stays on this device, and the next edit tries again.
+        // An edit made while this put was on its way found the key busy: that edit is the next try.
+        const message = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+        // A background put never covers what the user's own action just said, such as Send refused over the same total.
+        this.ctx.store.error ??= message;
+        this.#overLimit = { key, message };
+        failed = this.#parts(this.#shape(this.#localOf(this.#source(key)))).hash === this.#parts(value).hash;
+        return;
+      }
       // A core that restarted dropped the assets nothing referenced: what this device holds the bytes of goes up again.
       if (error instanceof RpcFailure && error.message.includes('assetId') && this.#lost(this.#localOf(this.#source(key)))) return;
       failed = true;

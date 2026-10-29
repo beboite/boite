@@ -7,7 +7,6 @@
  */
 import type { AgentCommand, PreviewReference } from '@boite/contracts';
 import { AGENT_PREFIX, isAgentCommand } from './commands.svelte';
-import { experimentOn } from './experiments.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 
@@ -65,8 +64,7 @@ export function boiteSlashItems(chips: Record<string, ChipCommand>, sideQuestion
   return [
     ...(sideQuestions ? [{ id: 'btw', kind: 'command' as const, label: '/btw', hint: '<question>', description: strings.btw.description }] : []),
     { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
-    // Read inside the composer's derived list, so the Experiments switch adds or removes it live.
-    ...(experimentOn('goal2') ? [{ id: 'goal2', kind: 'command' as const, label: '/goal2', description: strings.activity.goal2Description }] : []),
+    { id: 'goal2', kind: 'command', label: '/goal2', description: strings.activity.goal2Description },
     { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
     ...Object.entries(chips).map(([name, chip]) => ({
       id: name,

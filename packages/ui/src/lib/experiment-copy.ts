@@ -14,8 +14,8 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'session-import': strings.experiments.sessionImport,
     'prompt-cache': strings.experiments.promptCache,
     'resident-agents': strings.experiments.residentAgents,
-    goal2: strings.experiments.goal2,
     whip: strings.experiments.whip,
-    contacts: strings.experiments.contacts
+    contacts: strings.experiments.contacts,
+    'auto-goal': strings.experiments.autoGoal
   };
 }

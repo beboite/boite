@@ -83,7 +83,7 @@ import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
-import { agentTodos, followGoal } from './todos';
+import { addGoalCard, agentTodos, followGoal, unlinkGoalCards } from './todos';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -258,6 +258,10 @@ export class FakeContext {
   usageSeeded = true;
   /** The project todo lists, every thread of a project reading the same cards. */
   todos: Todo[] = [];
+  /** Per thread, the user's message that started its automatic goal, as the core's `auto-goal:<thread>` row. */
+  readonly autoGoalMessages = new Map<string, string>();
+  /** The experiments a queued prompt was queued with, read by `turns.start` while the composer delivers it. */
+  queuedExperiments: readonly string[] | null = null;
   /** The working tree `files.list`, `files.read` and `files.write` share. */
   readonly files = new Map<string, string>(Object.entries(FAKE_TREE));
   readonly artifactUrls = new Set<string>();
@@ -589,6 +593,10 @@ export class FakeContext {
     this.emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks), history: structuredClone(thread.backgroundHistory) });
     this.emit('thread.updated', structuredClone(toSummary(thread)));
   }
+
+  /** An automatic goal's card and its unlinking, here so `activity.ts` reaches the board without importing it. */
+  addGoalCard(thread: Thread, prompt: string): void { addGoalCard(this, thread, prompt); }
+  unlinkGoalCards(thread: Thread): void { unlinkGoalCards(this, thread); }
 
   publishActivity(thread: Thread): void {
     this.emit('thread.activity', { threadId: thread.id, activity: structuredClone(thread.activity!) });

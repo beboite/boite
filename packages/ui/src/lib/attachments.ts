@@ -87,11 +87,13 @@ export interface AcceptResult {
  * a format no agent reads, a body over `ATTACHMENT_MAX_BYTES`, then more than
  * `ATTACHMENTS_PER_TURN` in one turn, then a turn heavier than
  * `ATTACHMENTS_TOTAL_MAX_BYTES` altogether. Everything that passes is kept, so
- * one bad file in a drop of five does not lose the other four.
+ * one bad file in a drop of five does not lose the other four. With `fit`, the
+ * total is left to `fitTurn` (`lib/turn-fit.ts`), which the caller runs next.
  */
 export function acceptAttachments(
   current: Attachment[],
-  incoming: Attachment[]
+  incoming: Attachment[],
+  options: { fit?: boolean } = {}
 ): AcceptResult {
   const accepted = [...current];
   let total = attachedBytes(current);
@@ -115,7 +117,7 @@ export function acceptAttachments(
       refuse(fill(strings.composer.attachTooMany, { name, max: String(ATTACHMENTS_PER_TURN) }));
       continue;
     }
-    if (total + weight > ATTACHMENTS_TOTAL_MAX_BYTES) {
+    if (!options.fit && total + weight > ATTACHMENTS_TOTAL_MAX_BYTES) {
       refuse(fill(strings.composer.attachTotalTooLarge, { name, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) }));
       continue;
     }

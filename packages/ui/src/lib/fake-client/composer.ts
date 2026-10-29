@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
-  answerAttachmentError, composerBatch, composerActivity, isComposerActivity, RpcErrorCode, type Attachment, type ComposerChoice, type ComposerQueuedPrompt,
-  type ComposerRecord, type ComposerValue, type PreviewReference, type RpcEventName, type RpcEvents,
+  answerAttachmentError, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes, composerBatch, composerActivity, isComposerActivity, RpcErrorCode, type Attachment, type ComposerChoice, type ComposerQueuedPrompt,
+  type ComposerRecord, type ComposerValue, type RpcEventName, type RpcEvents,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { secureId } from '../secure-id';
@@ -124,14 +124,17 @@ export class FakeComposerState {
         if (!outcome.accepted) { this.boundaries.delete(row.id); return; }
       } else {
         this.boundaries.delete(row.id);
-        const command = composerActivity(payload.prompt, head.experiments ?? ctx.clientPreferences?.experiments ?? []);
+        const command = composerActivity(payload.prompt);
         if (command) await methods['threads.activity.set']({ threadId: row.id, ...command, ...(payload.attachments.length ? { attachments: payload.attachments } : {}) });
         else {
           const chosen = head.request?.choice ?? head.choice;
           const selection = choiceOf(thread);
           if (chosen) Object.assign(thread, chosen, { permissionMode: selection.permissionMode });
           // `turns.start` fixes the turn's execution before its first await: the whole picker goes back at once, before any update can land.
+          // The experiments it was queued with decide an automatic goal, as in the core.
+          ctx.queuedExperiments = head.experiments ?? [];
           const started = methods['turns.start']({ threadId: row.id, ...payload, clientRequestId: requestId });
+          ctx.queuedExperiments = null;
           if (chosen) Object.assign(thread, selection);
           await started;
         }
@@ -226,6 +229,13 @@ export function composerMethods(ctx: FakeContext, methods: () => FakeMethods): P
           queued.sentFrom = previous?.sentFrom !== undefined ? previous.sentFrom : null;
         }
         for (const file of [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)]) if (!state.assets.has(file.assetId) || (state.assetOwners.has(file.assetId) && (!privateMode || state.assetOwners.get(file.assetId) !== ctx))) throw refusal(`assetId ${file.assetId}: expected an uploaded composer attachment`);
+        // The core's `validateAssets`: each prompt, box or queued, within what one message may carry.
+        for (const input of [value.input, ...value.input.queued]) {
+          if (input.attachments.length > ATTACHMENTS_PER_TURN) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_PER_TURN} attachments per input` });
+          if (input.attachments.reduce((sum, file) => sum + decodedBytes(state.assets.get(file.assetId)!.data), 0) > ATTACHMENTS_TOTAL_MAX_BYTES) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_TOTAL_MAX_BYTES} bytes per input` });
+          }
+        }
       }
       const record = state.write(params.section, params.id, value, privateMode ? ctx : undefined);
       if (params.section === 'inputs' && params.sendNow && value?.input.queued.length) state.sendNow(params.id);

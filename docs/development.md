@@ -1110,7 +1110,7 @@ zoom; plain browsers keep their native shortcut behavior.
 
 ### File attachments
 
-Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
+Desktop and paired devices can pick, paste or drop files. A turn accepts fifty
 attachments, at most 5 MB each and 10 MB together. On a core advertising
 `features.attachmentUploads`, selected files upload before Send through
 `attachments.upload`. Finished uploads replace the corresponding
@@ -1139,20 +1139,45 @@ source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
 
+Fifty of them weigh about 26 MB prepared, and the 10 MB total cannot grow: the
+user message travels in one `turns.start` frame and stays inline in the
+journal, and Claude refuses a request body over 32 MB, history included. So
+the composer fits the turn instead of refusing it (`lib/turn-fit.ts`). While
+the turn is under budget nothing moves. Past it, the budget is shared out: an
+image lighter than its share stays as it is, and each heavier one is encoded
+again from the copy it arrived with, at the least loss that fits its share,
+down a ladder of JPEG quality (0.75 to 0.35) and long edge (2000 to 1280 px).
+It never goes under 1280 px, where a screenshot's text stops being readable;
+past that floor the files that still do not fit are refused, by name, with the
+usual total message. A GIF keeps its frames, a transparent picture tries PNG
+first, and files count at their weight. Every way in goes through it: the
+paperclip, pasted and dropped files and a question's answer files, pictures
+pasted from another composer, and queued prompts taken back into the box. A
+message brought back for editing or after a failed retry already fitted one
+turn. Measured on 2026-10-28 with Bun's encoders
+(`packages/ui/src/lib/turn-fit.test.ts`): 50 generated screenshots, 1170x2532
+and 2560x1440 PNGs of 3.0 to 4.9 MB, went in as one 9.0 MB turn of 154 to
+204 KB JPEGs, 1440 to 1600 px on their long edge.
+
 None of this holds the box. A pasted, dropped or picked file shows at once as
 a loading tile, a picture with its `[Image N]` at the caret, and the box keeps
 taking keys while the file is read (`receiveFiles`, `lib/composer-attachments.ts`).
 The reduction runs in a worker (`lib/image-prepare.worker.ts`, `OffscreenCanvas`)
 and falls back to the page where a browser has neither. Files of one composer
 settle in the order they came, each into its placeholder's place, its undo
-steps included. A placeholder is never saved, synced or uploaded; when a sync
-conflict moves the words to a new draft, the file lands in that draft instead
-(`followRead`, `lib/draft-attachments.ts`). Send pressed meanwhile waits on a
-spinner and goes once every file is ready, in the box it was pressed in; typing
-on, or a sync that swaps the box, cancels it. A refused file drops its tile
-and its reference, in the box and in its undo steps, and says why. A file past
-the twenty, from the same drop or a later one, waits for one of them to be
-refused, and is refused itself only once they are all read.
+steps included. Files settle as they are read while the turn stays under its
+total; from the first that passes it, that file and the rest of its batch stay
+loading until the turn is fitted once with them, and the pictures already in
+take their lighter copies under the same tiles, in their undo steps too. A
+placeholder is never saved, synced or uploaded; when a sync conflict moves the
+words to a new draft, the file lands in that draft instead (`followRead`,
+`lib/draft-attachments.ts`). Send pressed meanwhile waits on a spinner and goes
+once every file is ready, in the box it was pressed in; typing on, or a sync
+that swaps the box, cancels it. Send pressed while pictures pasted from
+another composer are fitted waits for that fit too (`readyToSend`). A refused
+file drops its tile and its reference, in the box and in its undo steps, and
+says why. A file past the fifty, from the same drop or a later one, waits for
+one of them to be refused, and is refused itself only once they are all read.
 
 The Claude driver fits every prompt image to the same edge again before it
 goes in (`drivers/claude/images.ts`, Bun's image codec, same format), because

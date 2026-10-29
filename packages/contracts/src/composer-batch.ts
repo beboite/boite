@@ -19,8 +19,9 @@ export function composerBatch(queue: ComposerQueuedPrompt[], readAsset: (assetId
   let bytes = 0;
   const ids = new Set<string>();
   const choice = (item: ComposerQueuedPrompt) => stableComposerValue({ ...item.choice, speed: item.choice?.speed ?? null });
+  const autoGoal = (item: ComposerQueuedPrompt) => item.experiments?.includes('auto-goal') ?? false;
   for (const item of queue) {
-    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || stableComposerValue(first.sentFrom ?? null) !== stableComposerValue(item.sentFrom ?? null) || item.afterBoundary !== first.afterBoundary)) break;
+    if (result.entries.length && (first.request || item.request || isComposerActivity(first.text) || isComposerActivity(item.text) || choice(first) !== choice(item) || stableComposerValue(first.sentFrom ?? null) !== stableComposerValue(item.sentFrom ?? null) || item.afterBoundary !== first.afterBoundary || autoGoal(first) !== autoGoal(item))) break;
     const attachments = item.attachments.map(reference => readAsset(reference.assetId));
     const weight = attachments.reduce((sum, attachment) => sum + decodedBytes(attachment.data), 0);
     if (result.entries.length && (result.attachments.length + attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || result.previewReferences.length + (item.previewReferences?.length ?? 0) > PREVIEW_REFERENCES_PER_TURN)) break;

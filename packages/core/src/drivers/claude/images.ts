@@ -32,7 +32,7 @@ export async function fitImage(attachment: ImageAttachment): Promise<ImageAttach
 }
 
 /**
- * One image at a time: a turn takes twenty, and decoding them all at once at
+ * One image at a time: a turn takes fifty, and decoding them all at once at
  * the pixel cap would hold gigabytes. Most are within the edge and cost only
  * a header read.
  */

@@ -311,7 +311,8 @@ started. An existing native session receives stopped user messages and accepted
 follow-ups in order, until a user turn completes. This survives a core restart
 without adding messages to the timeline or starting work by itself. Native
 commands and automatic turns do not consume this context. Historical images
-beyond the native attachment limit remain available as local files. A fresh
+beyond what the current request leaves of one turn's 50 images and 10 MB
+remain available as local files, oldest first. A fresh
 native session receives the conversation's journal history instead.
 
 Edits and forks with live follow-ups use the fresh-session transfer rules below.
@@ -355,9 +356,9 @@ The core owns this work, so switching threads or closing a client does not
 cancel it. A goal continues through scheduled turns until the agent emits
 `[BOITE_GOAL_COMPLETE]` on its own line. The prompt requests that marker only
 after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
-With the Reviewed goals experiment, `/goal2` turns that marker into a claim
-that a fresh reviewer conversation must pass, and keeps a checklist of the
-user's requests that each turn hears ([experiments](experiments.md#the-checklist)).
+`/goal2` turns that marker into a claim that a fresh reviewer conversation
+must pass, and keeps a checklist of the user's requests that each turn hears
+([reviewed goals](goals.md#the-checklist)).
 A blocked goal is marked `blocked`: the bar asks for an answer, and the user's
 next message, other than a native `/command`, resumes the goal once that reply's
 turn ends. Escape also pauses a loop between runs. The activity bar has pause, resume,
@@ -394,7 +395,15 @@ transaction durability and a synchronous text backup in `localStorage` on each
 keystroke. The journal writes 800 ms after
 typing pauses and at least every five seconds while it continues. Attachments,
 failed backups, explicit flush, page hiding and navigation flush immediately.
-A local core changing port retains the same drafts.
+A local core changing port retains the same drafts. When attachment bytes push
+the backup past the `localStorage` quota, the backup keeps the text and
+attachment IDs; the journal supplies the bytes, and missing ones restore as
+placeholders. A prompt that left the box but has no core answer yet stays in
+the journal: a thread's prompt as an outbox entry under its `turns.start`
+request ID, a new conversation's as its draft. A crash before the answer
+brings it back without a duplicate turn: the owning core reads the receipt of
+that request ID, drops the entry when it already took it and starts it once
+when it never did.
 
 Incognito records use the same queue RPCs with connection-owned memory storage;
 their assets and device sync metadata never enter the durable composer cache.
@@ -408,8 +417,9 @@ Accepted durable queues run on the core without an open client, including after 
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
 Provider, account, model, effort and speed stay captured; permission modes follow
 the thread's current selection, including for queued input.
-Queued commands retain the enqueueing app's experiments, so a reviewed goal
-keeps its meaning after a restart or another device changes its preferences.
+Queued prompts retain the enqueueing app's experiments, so a prompt an
+experiment gives another meaning keeps it after a restart or another device
+changes its preferences.
 A restored ordinary queue whose previous acceptance cannot be proved stays
 paused until explicitly resumed.
 Input written while the core is unreachable stays on the device until a client
@@ -427,7 +437,15 @@ writes have a three-second deadline; a failed read cannot overwrite unread
 durable drafts. Once readable, the text backup merges with them. Missing
 attachment bytes keep removable placeholders and their IDs through text edits;
 removed IDs stay removed after recovery. Send waits for unreadable attachments
-to become available or be explicitly removed.
+to become available or be explicitly removed. When the core refuses a record
+over the per-message attachment limits, the device keeps it and shows why; the
+next edit tries again.
+
+Edit on a sent message, recall and the composer's other replacements are one
+undo step, and undo restores the edit marker. On a touch screen, where there is
+no Ctrl+Z, a box emptied in one edit or replaced by Edit shows a short Undo
+toast. A retry whose resend fails leaves text typed meanwhile in the box and
+holds the prompt at the head of the queue.
 
 Asynchronous creation and send retain the original core, thread and draft
 identity. Accepted work does not select a thread after newer navigation or

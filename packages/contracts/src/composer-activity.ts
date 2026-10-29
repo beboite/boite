@@ -1,13 +1,13 @@
 import type { RpcParams } from './index';
 export type ComposerActivityIssue = 'goalUsage' | 'goal2Usage' | 'loopUsage' | 'intervalError';
 
-export function isComposerActivity(text: string, experiments?: readonly string[]): boolean {
-  return (experiments && !experiments.includes('goal2') ? /^\/(goal|loop)(?:\s|$)/ : /^\/(goal2?|loop)(?:\s|$)/).test(text.trim());
+export function isComposerActivity(text: string): boolean {
+  return /^\/(goal2?|loop)(?:\s|$)/.test(text.trim());
 }
 
 /** Same user command grammar as the composer, executed without a live app. */
-export function composerActivity(text: string, experiments: readonly string[] = [], fail: (issue: ComposerActivityIssue, message: string) => Error = (_issue, message) => new Error(message)): Omit<RpcParams<'threads.activity.set'>, 'threadId' | 'attachments'> | null {
-  const match = (experiments.includes('goal2') ? /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/ : /^\/(goal|loop)(?:\s+([\s\S]*))?$/).exec(text.trim());
+export function composerActivity(text: string, fail: (issue: ComposerActivityIssue, message: string) => Error = (_issue, message) => new Error(message)): Omit<RpcParams<'threads.activity.set'>, 'threadId' | 'attachments'> | null {
+  const match = /^\/(goal2|goal|loop)(?:\s+([\s\S]*))?$/.exec(text.trim());
   if (!match) return null;
   const body = match[2]?.trim();
   if (!body) throw fail(match[1] === 'goal' ? 'goalUsage' : match[1] === 'goal2' ? 'goal2Usage' : 'loopUsage', `/${match[1]}: expected an objective or loop cadence and prompt`);
