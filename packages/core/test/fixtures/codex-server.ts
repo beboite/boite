@@ -21,6 +21,7 @@
  * `CODEX_FAKE_SKILLS=<json>` is what `skills/list` lists for the folder, and
  * each skill item of `turn/start` is logged as `skill <name> <path> text=<text>`.
  * `CODEX_FAKE_SLOW_SKILLS=<ms>` delays that answer.
+ * `CODEX_FAKE_OUTPUT_GATE=<path>` holds turn output until the file exists.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -66,6 +67,8 @@ let rateLimitsRead: (() => void) | null = null;
 let afterAnswer: (() => void) | null = null;
 
 const waiting = new Map<string, () => void>();
+/** Admission precedes streamed output and the point where a slow turn waits for interruption. */
+const activeTurns = new Set<string>();
 
 function awaitInterrupt(turnId: string): Promise<void> {
   if (interrupted.has(turnId)) return Promise.resolve();
@@ -243,6 +246,8 @@ function commandItem(itemId: string, status: string, output: string | null): unk
 }
 
 async function runTurn(turnId: string, text: string): Promise<void> {
+  const outputGate = process.env['CODEX_FAKE_OUTPUT_GATE'];
+  while (outputGate && !existsSync(outputGate)) await Bun.sleep(10);
   const instructions = instructionsOf(text);
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
   if (instructions.includes('[retry-progress]')) {
@@ -723,6 +728,7 @@ function handle(method: string, raw: unknown): unknown {
     case 'turn/start': {
       turnCounter += 1;
       const turnId = `codex-fake-turn-${turnCounter}`;
+      activeTurns.add(turnId);
       log(`turn/start model=${textOf(params['model'])} effort=${textOf(params['effort'])}`);
       log(JSON.stringify({ serviceTier: params['serviceTier'] }));
       for (const url of imageUrlsOf(params)) log(`image ${url}`);
@@ -730,13 +736,13 @@ function handle(method: string, raw: unknown): unknown {
       // After the response is written, never before: a real server answers the
       // request and streams the turn afterwards.
       setTimeout(() => {
-        void runTurn(turnId, promptOf(params));
+        void runTurn(turnId, promptOf(params)).finally(() => activeTurns.delete(turnId));
       }, 0);
       return { turn: turnRecord(turnId, 'inProgress') };
     }
     case 'turn/steer': {
       const active = textOf(params['expectedTurnId']);
-      if (!waiting.has(active) || params['threadId'] !== threadId) throw new Error('no matching active turn');
+      if (!activeTurns.has(active) || params['threadId'] !== threadId) throw new Error('no matching active turn');
       log(`turn/steer ${active} ${promptOf(params)}`);
       const images = Array.isArray(params['input']) ? params['input'].filter((input: Record<string, unknown>) => input['type'] === 'image') : [];
       if (images.length) log(`steer-images ${images.length} ${String(images[0]['url']).slice(0, 22)}`);

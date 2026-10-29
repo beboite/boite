@@ -1,5 +1,5 @@
 import { inspectJournal } from '../src/journal/integrity.ts';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -25,7 +25,7 @@ import { thrown } from './settle.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG', 'CODEX_FAKE_SKILLS', 'CODEX_FAKE_SLOW_SKILLS'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_OUTPUT_GATE', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG', 'CODEX_FAKE_SKILLS', 'CODEX_FAKE_SLOW_SKILLS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -49,6 +49,8 @@ test('Send now during Codex startup reaches its native turn once without a tool 
   const client = await startCore();
   const threadId = await codexThread(client);
   process.env['CODEX_FAKE_SLOW_START'] = '250';
+  const outputGate = join(harness!.dataDir, 'codex-output-ready');
+  process.env['CODEX_FAKE_OUTPUT_GATE'] = outputGate;
   const turn = await client.call('turns.start', { threadId, prompt: '[slow] Keep working' });
   await waitFor(() => harness!.core.threads.runner.handles.has(threadId));
   expect(harness!.core.threads.progress.get(threadId)?.phase).toBe('starting');
@@ -61,6 +63,9 @@ test('Send now during Codex startup reaches its native turn once without a tool 
   expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
   expect(harness!.core.journal.getTurn(turn.id)?.status).toBe('running');
   expect(harness!.core.composer.storage.get('inputs', threadId).value?.input.text).toBe('still typing');
+  expect(fakeLog()).not.toContain('waiting for interrupt');
+  writeFileSync(outputGate, 'ready');
+  await waitFor(() => fakeLog().includes('waiting for interrupt'));
   await client.call('turns.stop', { threadId });
 });
 
