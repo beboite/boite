@@ -56,6 +56,7 @@ import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
+import { ThreadListLog } from './threads/list-changes.ts';
 import { ProgressState } from './threads/progress.ts';
 import { eraseIncognito } from './threads/incognito.ts';
 import { removeTranscripts, threadSessions, type NativeSession } from './threads/transcript-purge.ts';
@@ -122,6 +123,8 @@ export class ThreadStore {
   private readonly recovery: ThreadRecovery;
   /** Turns a restart hands to the next core (`threads/handoff.ts`). */
   readonly handoff: RestartHandoff;
+  /** `threads.listChanges`: the threads changed since a client's last list. */
+  readonly listLog: ThreadListLog;
   private readonly removing = new Set<ThreadId>();
   /** The last purge's removal of native transcripts (`threads/transcript-purge.ts`), which tests wait for. */
   transcriptPurge: Promise<string[]> = Promise.resolve([]);
@@ -149,15 +152,16 @@ export class ThreadStore {
     this.autoContinue = new AutoContinues(core, this, this.resumes);
     this.recovery = new ThreadRecovery(core);
     this.handoff = new RestartHandoff(core, this);
+    this.listLog = new ThreadListLog(core);
   }
 
   // -- reads ----------------------------------------------------------------
 
   list(params: { projectId?: ThreadId; includeArchived?: boolean }): ThreadSummary[] {
     const threads = this.core.journal.listThreads(params.projectId);
-    const withLoad = threads.map((thread) => this.withLoad(thread));
-    if (params.includeArchived === true) return withLoad;
-    return withLoad.filter((thread) => !thread.archived);
+    // Archived rows are most of a long-lived journal: only the ones answered get their live state.
+    const shown = params.includeArchived === true ? threads : threads.filter((thread) => !thread.archived);
+    return shown.map((thread) => this.withLoad(thread));
   }
 
   require(threadId: ThreadId): ThreadSummary {

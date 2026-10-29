@@ -91,6 +91,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'accounts.list',
   // The threads themselves.
   'threads.list',
+  'threads.listChanges', // The same list after a reconnect, only the rows changed since: what a phone on a poor link reads.
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.

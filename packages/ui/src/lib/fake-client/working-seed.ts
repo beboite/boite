@@ -55,3 +55,21 @@ export function seedWorking(ctx: FakeContext, count: number): () => void {
   }, 1000);
   return () => clearInterval(timer);
 }
+
+/**
+ * `idle: n` seeds n threads at rest, what the sidebar of a machine used for
+ * months holds: the list a reconnect would read again whole.
+ */
+export function seedIdle(ctx: FakeContext, count: number): void {
+  const at = Date.now() - 86_400_000;
+  for (let index = 0; index < count; index += 1) {
+    const id = `t-idle-${index + 1}`;
+    ctx.threads.set(id, {
+      id, projectId: index % 3 === 2 ? 'p-notes' : 'p-boite', title: `Finished task ${index + 1}, kept in the sidebar`,
+      cwd: 'C:\\src\\boite', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null,
+      permissionMode: 'default', archived: false, pinned: false, branch: `boite/task-${index + 1}`, titleSource: 'prompt',
+      messagesBefore: null, commands: [], status: 'idle', unread: false, sessionId: `sess-idle-${index + 1}`,
+      load: null, context: null, createdAt: at + index, updatedAt: at + index, turns: [], messages: [],
+    });
+  }
+}

@@ -614,6 +614,27 @@ when the core advertises `chunkedAnswers`.
   only the fields that changed are written, so the sidebar redraws the rows that
   moved and no others. A `thread.load` sample patches the row's `load` alone,
   about 4x fewer bytes than the whole row an older client still gets.
+- A reconnect to the same running core reads only the sidebar rows that changed
+  while the socket was down (`threads.listChanges`, `features.listChanges`).
+  The core counts every committed `thread.created`, `thread.updated` and
+  `thread.removed` in a log of the last 4096 thread ids
+  (`LIST_CHANGES_IDS`, `packages/contracts/src/list-changes.ts`), under a run id
+  minted at each start. The client keeps the cursor of its last applied list and
+  sends it back; the answer holds the unarchived threads changed since, every
+  thread with live processes, with its load, and the ids deleted or archived
+  since. A held row left out keeps its fields and loses its load. The first
+  connection, a core restart (another run), a cursor older than the log, a new
+  client and an older core without the method all read the whole list as
+  before, an older core with no error shown. The delta is what a client that
+  stayed connected heard: a summary the core changed without its event is not
+  repaired by a reconnect. 2000 idle rows plus one pinned while away, UI test
+  `store-reconnect-list.test.ts` (2026-10-28): 1,088,237 bytes of list before,
+  1,320 bytes after. The core test `thread-list-changes.test.ts` measures the
+  same over the real journal with 2001 threads: 1,627,666 bytes whole, 869
+  after.
+  The other boot reads stay whole: the projects list is about 15 rows and is
+  recomputed from git and archived counts that no event announces, and the
+  pending cards, secrets and settings are small.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
@@ -1519,6 +1540,58 @@ Edge components and 198 MiB of caches. It now starts with
 loses those folders once before its next start
 ([browser](browser.md#processes-and-profiles)); the size of a profile after
 that was not measured.
+
+## Where an agent's tokens go
+
+Each model call re-reads its whole context, from the cache while it is warm,
+so a block costs its size times the calls it stays for.
+`scripts/token-audit.ts` reads Claude Code transcripts and splits that sum by
+what the context holds; its header explains the attribution.
+
+```sh
+bun scripts/token-audit.ts --days 7 --chars-per-token 2.5
+```
+
+The original audit on one owner's machine selected transcript files modified
+in the 7 days to 2026-10-27, including older calls inside those files:
+86,238 calls in 1,561 stretches
+between compactions, a mean context of 104k tokens, compaction at 166k (the
+`autoCompactWindow: 200000` of that user's settings) down to 44k at the median. At API rates relative
+to input, cache reads made 52% of the cost, 1 hour cache writes 28% and output
+20%.
+
+| What the context held | Share of the sum of context |
+|---|---|
+| System prompt and tool definitions | 17.7% |
+| Claude Code attachments: instructions files 5.4%, files attached again after a compaction 5.0%, skill listing 3.5% | 17.5% |
+| Read results | 16.6% |
+| Earlier thinking | 13.2% |
+| Shell results | 10.7% |
+| Compaction summaries, 20k characters at the median | 6.8% |
+| Grep results | 6.7% |
+| Text Boite adds: guide, notices, delegation and coordination messages | 1.3% |
+| Tool calls the agent wrote: shell 3.5%, Write 1.9%, Edit 1.4% | 7.8% |
+| The rest: the agent's and the user's text, other tool results, images | 1.7% |
+
+The original audit replayed the same calls under other policies. These are
+pre-hook estimates using the measured 44k base and a fixed 8.3k summary output;
+they do not measure a configured summary prompt:
+
+| Policy | Sum of context | Cost |
+|---|---|---|
+| Compact at 120k | −26.1% | −6.6% |
+| Compact at 150k | −11.7% | +0.8% |
+| Clear tool results older than 10 calls, cache rewrites not counted | −22.2% | not modelled |
+| Cap each tool result at 5k tokens | −2.2% | not modelled |
+| 5 minute cache instead of 1 hour | unchanged | +9.2% of input cache cost |
+
+The cache row uses input cache cost as its denominator in this historical
+measurement. The script now reports that difference against full cost, like
+the compaction rows. The original transcripts were not re-audited.
+
+A lower threshold costs a summary and a rewritten cache at each extra
+compaction, which is why the cost falls far less than the context. Automatic
+compaction is the owner's setting ([context](context.md#automatic-compaction)).
 
 ## Benches
 

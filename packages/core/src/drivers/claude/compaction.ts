@@ -1,4 +1,4 @@
-import type { Options, Query, SDKControlGetContextUsageResponse, Settings } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, Options, Query, SDKControlGetContextUsageResponse, Settings } from '@anthropic-ai/claude-agent-sdk';
 import { messageOf } from '../../errors.ts';
 import { PromptQueue, type QueryFn } from './query.ts';
 
@@ -7,6 +7,18 @@ const MIN_WINDOW = 100_000;
 const MAX_WINDOW = 1_000_000;
 
 type OpenQuery = { query: Query; prompts: PromptQueue };
+
+/**
+ * Claude Code 2.1.310 adds a PreCompact hook's `systemMessage` to the summary
+ * prompt's "Additional Instructions", after any the `/compact` command gave.
+ * A callback still runs under `disableAllHooks` and emits no hook event, so
+ * it never reaches the user's hook ledger (probed offline, 2026-10-27).
+ */
+export const compactFocus = (read: () => string | null): HookCallback => async (input) => {
+  if (input.hook_event_name !== 'PreCompact' || input.custom_instructions?.trim()) return {};
+  const focus = read()?.trim();
+  return focus ? { systemMessage: focus } : {};
+};
 
 /**
  * Claude Code 2.1.310 accepts the live flag but leaves appState.autoCompactWindow

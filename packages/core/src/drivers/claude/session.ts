@@ -14,7 +14,7 @@ import { SessionRetention } from '../session-retention.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
 import { userStdioServers, type LazyServerEntry } from '../../mcp/lazy.ts';
 import {protectedClaudeOptions} from './protected.ts';
-import { openWithCompaction } from './compaction.ts';
+import { compactFocus, openWithCompaction } from './compaction.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -56,71 +56,71 @@ export interface SessionHooks {
  * configured hooks when entering or leaving YOLO.
  */
 export class ClaudeSession {
-  private readonly retention = new SessionRetention();
-  private readonly abortController = new AbortController();
-  private prompts = new PromptQueue();
+  readonly #retention = new SessionRetention();
+  readonly #abortController = new AbortController();
+  #prompts = new PromptQueue();
   /** The launch policy. Changes take effect between turns, never by interrupting one. */
-  private compactionTokens: number | null = null;
-  private compactionModel: string | null = null;
-  private readonly timers = new Set<Timer>();
-  private readonly waiting: ClaudeTurn[] = [];
+  #compactionTokens: number | null = null;
+  #compactionModel: string | null = null;
+  readonly #timers = new Set<Timer>();
+  readonly #waiting: ClaudeTurn[] = [];
   /** Turns whose prompt was queued, or which adopted the CLI's own run. */
-  private readonly steerable = new WeakSet<ClaudeTurn>();
+  readonly #steerable = new WeakSet<ClaudeTurn>();
   /** What the CLI runs in the background, as its last `background_tasks_changed` said. */
-  private background: BackgroundTask[] = [];
-  private readonly backgroundFinishers = new Map<string, NonNullable<SessionContext['backgroundFinished']>[]>();
+  #background: BackgroundTask[] = [];
+  readonly #backgroundFinishers = new Map<string, NonNullable<SessionContext['backgroundFinished']>[]>();
   /** `task_started` by task id: the tool call that launched it and when. */
-  private readonly launched = new Map<string, { toolId: string | null; startedAt: number }>();
+  readonly #launched = new Map<string, { toolId: string | null; startedAt: number }>();
   /** What the CLI wrote with no turn attached, replayed into the turn the core opens for it. */
-  private orphans: SDKMessage[] = [];
+  #orphans: SDKMessage[] = [];
   /** The core was asked for a turn for the orphans and has not attached one yet. */
-  private woken = false;
+  #woken = false;
   /**
    * Results still owed to a run the CLI started by itself, which a user's turn
    * took over before that run finished: they close that run, not the turn.
    */
-  private foreignResults = 0;
+  #foreignResults = 0;
   /** The uuids of the messages each turn put in the prompt stream: its prompt and its steers. */
-  private readonly promptIds = new WeakMap<ClaudeTurn, Set<string>>();
+  readonly #promptIds = new WeakMap<ClaudeTurn, Set<string>>();
   /** No `init` yet: what the CLI writes before it is about an earlier process. */
-  private beforeInit = true;
+  #beforeInit = true;
   /**
    * A resume found background tasks the previous CLI left running. The CLI
    * reports each one before its first `init`, then closes that report with one
    * empty result (`num_turns` 0) before it runs the prompt (CLI 2.1.284,
    * probed on 2026-09-30). That result is not the turn's.
    */
-  private replayResult = false;
-  private linger: Timer | null = null;
+  #replayResult = false;
+  #linger: Timer | null = null;
 
-  private query: Query | null = null;
-  private ctx: SessionContext;
-  private sessionId: string | null;
-  private idle: Timer | null = null;
-  private started = false;
+  #query: Query | null = null;
+  #ctx: SessionContext;
+  #sessionId: string | null;
+  #idle: Timer | null = null;
+  #started = false;
   /** When the CLI was spawned, for the time it took to say init. */
-  private spawnedAt: number | null = null;
-  private closing = false;
-  private ended = false;
-  private loginRejected = false;
+  #spawnedAt: number | null = null;
+  #closing = false;
+  #ended = false;
+  #loginRejected = false;
   /** An `authentication_failed` frame whose result has not said yet whether it was a 401 or a 403. */
-  private authSuspect = false;
+  #authSuspect = false;
   /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
-  private costSoFar = 0;
+  #costSoFar = 0;
   /** A resumed session's earlier turns, until the first result says whether the CLI restored them. */
-  private carried: { costUsd: number; tokens: number } | null;
+  #carried: { costUsd: number; tokens: number } | null;
   /** What the query was last told to be: the options it opened on, plus every setter since. */
-  private applied: LiveSetup | null = null;
+  #applied: LiveSetup | null = null;
   /** The setup setters of one turn finish before the next turn's prompt. */
-  private pending: Promise<void> = Promise.resolve();
+  #pending: Promise<void> = Promise.resolve();
   /** An unanswered live control makes the query unsafe to retain for another turn. */
-  private permissionTurn: ClaudeTurn | null = null;
+  #permissionTurn: ClaudeTurn | null = null;
   /** Callers waiting for the fast mode state of the next `init` frame. */
-  private fastReports: ((state: string | undefined) => void)[] = [];
-  private readonly ready: Promise<void>;
-  private markReady: () => void = () => undefined;
+  #fastReports: ((state: string | undefined) => void)[] = [];
+  readonly #ready: Promise<void>;
+  #markReady: () => void = () => undefined;
   /** The permission callback and the tool hooks, reading the turn the CLI is on. */
-  private readonly gate = toolGate({ head: () => this.head(), ctx: () => this.ctx });
+  readonly #gate = toolGate({ head: () => this.#head(), ctx: () => this.#ctx });
 
   constructor(
     readonly key: string,
@@ -129,11 +129,11 @@ export class ClaudeSession {
     private readonly hooks: SessionHooks,
     ctx: SessionContext,
   ) {
-    this.ctx = ctx;
-    this.sessionId = ctx.sessionId;
-    this.carried = ctx.sessionId === null ? null : (ctx.sessionBefore ?? null);
-    this.ready = new Promise<void>((resolve) => {
-      this.markReady = resolve;
+    this.#ctx = ctx;
+    this.#sessionId = ctx.sessionId;
+    this.#carried = ctx.sessionId === null ? null : (ctx.sessionBefore ?? null);
+    this.#ready = new Promise<void>((resolve) => {
+      this.#markReady = resolve;
     });
   }
 
@@ -143,112 +143,112 @@ export class ClaudeSession {
    * setting says: starting another would kill what it runs.
    */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && (this.retention.reusable(warmMs, this.warmMs) || this.holding());
+    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.warmMs) || this.holding());
   }
 
   setViewed(viewed: boolean): void {
-    this.retention.setViewed(viewed);
-    this.clearIdle();
-    if (!viewed) this.afterTurns();
+    this.#retention.setViewed(viewed);
+    this.#clearIdle();
+    if (!viewed) this.#afterTurns();
   }
 
   prepare(forTurn = false): Promise<void> {
-    this.retention.prepare(forTurn);
-    if (!this.started) {
-      this.started = true;
-      this.applied = liveSetup(this.ctx.thread, !!this.ctx.protectedExecution);
-      void this.run();
+    this.#retention.prepare(forTurn);
+    if (!this.#started) {
+      this.#started = true;
+      this.#applied = liveSetup(this.#ctx.thread, !!this.#ctx.protectedExecution);
+      void this.#run();
     }
-    return this.ready;
+    return this.#ready;
   }
 
   /** Background work, or output of the CLI's own that no turn took yet: the CLI must stay. */
   holding(): boolean {
-    return this.background.length > 0 || this.woken || this.linger !== null;
+    return this.#background.length > 0 || this.#woken || this.#linger !== null;
   }
 
   /** The CLI went on by itself and wrote something the next turn is opened for. */
   adoptable(): boolean {
-    return !this.ended && !this.closing && this.woken;
+    return !this.#ended && !this.#closing && this.#woken;
   }
 
   /** A turn is running or queued on it, so nothing may take the CLI away yet. */
   busy(): boolean {
-    return this.waiting.length > 0;
+    return this.#waiting.length > 0;
   }
 
   attach(turn: ClaudeTurn, warmMs: number): void {
-    this.retention.beginTurn();
+    this.#retention.beginTurn();
     this.warmMs = warmMs;
-    this.ctx = turn.ctx;
-    this.clearIdle();
-    this.clearLinger();
-    this.waiting.push(turn);
-    if (this.woken) {
+    this.#ctx = turn.ctx;
+    this.#clearIdle();
+    this.#clearLinger();
+    this.#waiting.push(turn);
+    if (this.#woken) {
       // The turn opened for what the CLI writes on its own takes that output
       // and sends no prompt; any other turn takes it first, without its result.
-      this.woken = false;
+      this.#woken = false;
       const adopted = turn.ctx.turn.execution?.operation === 'background';
-      const replay = this.orphans;
-      this.orphans = [];
+      const replay = this.#orphans;
+      this.#orphans = [];
       for (const message of replay) {
         if (!adopted && message.type === 'result') continue;
-        this.receive(message, true);
+        this.#receive(message, true);
       }
       if (adopted) {
-        this.steerable.add(turn);
+        this.#steerable.add(turn);
         return;
       }
       // The CLI's own run is still going: its result is not this turn's.
-      if (!replay.some(message => message.type === 'result')) this.foreignResults += 1;
+      if (!replay.some(message => message.type === 'result')) this.#foreignResults += 1;
     } else {
       // Bookkeeping that no output followed was already applied as it came.
-      this.orphans = [];
+      this.#orphans = [];
       if (turn.ctx.turn.execution?.operation === 'background') {
         // Nothing to adopt: whatever woke the core is already gone.
-        this.waiting.pop();
+        this.#waiting.pop();
         turn.settle();
-        this.afterTurns();
+        this.#afterTurns();
         return;
       }
     }
-    if (!this.started) {
-      this.started = true;
+    if (!this.#started) {
+      this.#started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
-      this.applied = liveSetup(turn.ctx.thread, !!turn.ctx.protectedExecution);
+      this.#applied = liveSetup(turn.ctx.thread, !!turn.ctx.protectedExecution);
       if ((turn.ctx.autoCompactTokens?.() ?? null) === null) {
-        this.send(turn, turn.promptText(), turn.ctx.attachments);
-        this.forgetPrompt(turn);
-        this.steerable.add(turn);
-        void this.run(turn);
+        this.#send(turn, turn.promptText(), turn.ctx.attachments);
+        this.#forgetPrompt(turn);
+        this.#steerable.add(turn);
+        void this.#run(turn);
         return;
       }
-      void this.run(turn);
+      void this.#run(turn);
     }
     // A warm query takes a changed model, effort, speed or mode through the SDK's own
     // setters, and this turn's prompt only goes in once they landed. The chain
     // keeps the prompts in the order the turns attached.
-    this.pending = this.pending.then(() => this.follow(turn));
+    this.#pending = this.#pending.then(() => this.#follow(turn));
   }
 
   /** User follow-ups enter the active query's stream with its existing setup. */
   async steer(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
-    if (this.head() !== turn || !this.steerable.has(turn) || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
+    if (this.#head() !== turn || !this.#steerable.has(turn) || turn.settled || turn.isStopped || !this.#query || this.#closing || this.#ended) return false;
     // The CLI reads this live stream while working, without interrupting its agent loop.
-    this.send(turn, text, attachments);
+    this.#send(turn, text, attachments);
     return true;
   }
 
-  private send(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments']): void {
-    const id = this.prompts.push(text, attachments);
-    const ids = this.promptIds.get(turn);
-    if (ids === undefined) this.promptIds.set(turn, new Set([id]));
+  #send(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments']): void {
+    const id = this.#prompts.push(text, attachments);
+    const ids = this.#promptIds.get(turn);
+    if (ids === undefined) this.#promptIds.set(turn, new Set([id]));
     else ids.add(id);
   }
 
   /** The result names one of this turn's messages: the CLI took it into the run this result ends. */
-  private answers(turn: ClaudeTurn, result: Extract<SDKMessage, { type: 'result' }>): boolean {
-    const ids = this.promptIds.get(turn);
+  #answers(turn: ClaudeTurn, result: Extract<SDKMessage, { type: 'result' }>): boolean {
+    const ids = this.#promptIds.get(turn);
     if (ids === undefined) return false;
     const named = result.user_message_uuids ?? (result.user_message_uuid === undefined ? [] : [result.user_message_uuid]);
     return named.some(id => ids.has(id));
@@ -256,15 +256,15 @@ export class ClaudeSession {
 
   async setPermissionMode(turn: ClaudeTurn, mode: PermissionMode): Promise<boolean> {
     if (turn.ctx.protectedExecution) return false;
-    await this.ready;
-    await this.pending;
-    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return false;
-    const query = this.query;
-    const applied = this.applied;
-    const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
-      this.query === query && this.applied === applied && !this.closing && !this.ended;
+    await this.#ready;
+    await this.#pending;
+    if (this.#head() !== turn || turn.settled || turn.isStopped || !this.#query || !this.#applied || this.#closing || this.#ended) return false;
+    const query = this.#query;
+    const applied = this.#applied;
+    const current = () => this.#head() === turn && !turn.settled && !turn.isStopped &&
+      this.#query === query && this.#applied === applied && !this.#closing && !this.#ended;
     const wanted = liveSetup({ ...turn.ctx.thread, permissionMode: mode }, !!turn.ctx.protectedExecution);
-    this.permissionTurn = turn;
+    this.#permissionTurn = turn;
     try {
       if (wanted.disableHooks !== applied.disableHooks) {
         await query.applyFlagSettings({ disableAllHooks: wanted.disableHooks ? true : null });
@@ -279,7 +279,7 @@ export class ClaudeSession {
       turn.ctx.thread.permissionMode = mode;
       return true;
     } finally {
-      if (this.permissionTurn === turn) this.permissionTurn = null;
+      if (this.#permissionTurn === turn) this.#permissionTurn = null;
     }
   }
 
@@ -292,13 +292,13 @@ export class ClaudeSession {
    * way (see `applyLive`): both are left to the next turn.
    */
   async applySettings(turn: ClaudeTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
-    await this.ready;
-    await this.pending;
-    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return {};
-    const query = this.query;
-    const applied = this.applied;
-    const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
-      this.query === query && this.applied === applied && !this.closing && !this.ended;
+    await this.#ready;
+    await this.#pending;
+    if (this.#head() !== turn || turn.settled || turn.isStopped || !this.#query || !this.#applied || this.#closing || this.#ended) return {};
+    const query = this.#query;
+    const applied = this.#applied;
+    const current = () => this.#head() === turn && !turn.settled && !turn.isStopped &&
+      this.#query === query && this.#applied === applied && !this.#closing && !this.#ended;
     const taken: LiveTurnSettings = {};
     if ('effort' in change && change.effort !== PROMPT_EFFORT) {
       const effort = change.effort ?? null;
@@ -324,42 +324,42 @@ export class ClaudeSession {
   }
 
   /** The fast mode state of the next `init` frame, or undefined when none comes in time. */
-  private nextFastState(): Promise<string | undefined> {
+  #nextFastState(): Promise<string | undefined> {
     return new Promise((resolve) => {
       const report = (state: string | undefined): void => {
         clearTimeout(timer);
         resolve(state);
       };
       const timer = setTimeout(() => {
-        const at = this.fastReports.indexOf(report);
-        if (at >= 0) this.fastReports.splice(at, 1);
+        const at = this.#fastReports.indexOf(report);
+        if (at >= 0) this.#fastReports.splice(at, 1);
         resolve(undefined);
       }, FAST_REPORT_MS);
       timer.unref?.();
-      this.fastReports.push(report);
+      this.#fastReports.push(report);
     });
   }
 
   /** Apply the next turn's settings before its prompt enters the warm stream. */
-  private async follow(turn: ClaudeTurn): Promise<void> {
-    if (turn.isStopped || this.closing || this.ended) return;
+  async #follow(turn: ClaudeTurn): Promise<void> {
+    if (turn.isStopped || this.#closing || this.#ended) return;
     // The query is built after the SDK import: a turn that arrives during it
     // would otherwise send its prompt with nothing applied.
-    await this.ready;
-    if (turn.isStopped || this.closing || this.ended) return;
+    await this.#ready;
+    if (turn.isStopped || this.#closing || this.#ended) return;
     const tokens = turn.ctx.autoCompactTokens?.() ?? null;
-    if (tokens !== this.compactionTokens || (tokens !== null && turn.ctx.thread.model !== this.compactionModel)) {
-      if (this.head() === turn && !this.holding()) {
-        this.strand(turn, 'native compaction launch settings changed');
+    if (tokens !== this.#compactionTokens || (tokens !== null && turn.ctx.thread.model !== this.#compactionModel)) {
+      if (this.#head() === turn && !this.holding()) {
+        this.#strand(turn, 'native compaction launch settings changed');
         return;
       }
       turn.ctx.log('warn', 'claude: native compaction settings wait for active and background work to finish; keeping the between-turn fallback');
     }
-    if (!(await this.applyLive(turn))) return;
-    if (turn.isStopped || this.closing || this.ended) return;
-    this.send(turn, turn.promptText(), turn.ctx.attachments);
-    this.forgetPrompt(turn);
-    this.steerable.add(turn);
+    if (!(await this.#applyLive(turn))) return;
+    if (turn.isStopped || this.#closing || this.#ended) return;
+    this.#send(turn, turn.promptText(), turn.ctx.attachments);
+    this.#forgetPrompt(turn);
+    this.#steerable.add(turn);
   }
 
   /**
@@ -369,10 +369,10 @@ export class ClaudeSession {
    * turn. The turn's own context stays whole, since a stranded turn pushes it
    * again elsewhere; `thread` stays shared with it.
    */
-  private forgetPrompt(turn: ClaudeTurn): void {
-    if (this.ctx !== turn.ctx) return;
+  #forgetPrompt(turn: ClaudeTurn): void {
+    if (this.#ctx !== turn.ctx) return;
     const { prompt: _prompt, attachments: _attachments, continuation: _continuation, ...kept } = turn.ctx;
-    this.ctx = kept;
+    this.#ctx = kept;
   }
 
   /**
@@ -381,9 +381,9 @@ export class ClaudeSession {
    * it in place, so nothing is sent on a turn that changed nothing. False means
    * the turn is no longer this session's.
    */
-  private async applyLive(turn: ClaudeTurn): Promise<boolean> {
-    const query = this.query;
-    const applied = this.applied;
+  async #applyLive(turn: ClaudeTurn): Promise<boolean> {
+    const query = this.#query;
+    const applied = this.#applied;
     if (query === null || applied === null) return true;
     const wanted = liveSetup(turn.ctx.thread, !!turn.ctx.protectedExecution);
     const live = { ...applied };
@@ -407,7 +407,7 @@ export class ClaudeSession {
         // `off` with `extra_usage_disabled`, while the same account gets fast
         // answers from a process launched with the setting. Only that frame
         // tells, so anything but `on` moves the turn to a new process.
-        const reported = wanted.fastMode ? this.nextFastState() : null;
+        const reported = wanted.fastMode ? this.#nextFastState() : null;
         await query.applyFlagSettings({ fastMode: wanted.fastMode });
         if (reported !== null && (await reported) !== 'on') throw new Error('fast mode stays off on the running process');
         live.fastMode = wanted.fastMode;
@@ -421,11 +421,11 @@ export class ClaudeSession {
         live.disableHooks = wanted.disableHooks;
       }
     } catch (error) {
-      this.applied = live;
-      this.strand(turn, messageOf(error));
+      this.#applied = live;
+      this.#strand(turn, messageOf(error));
       return false;
     }
-    this.applied = live;
+    this.#applied = live;
     return true;
   }
 
@@ -436,9 +436,9 @@ export class ClaudeSession {
    * what a changed model did before the setters existed. One warning, never a
    * failed turn.
    */
-  private strand(turn: ClaudeTurn, reason: string): void {
-    const at = this.waiting.indexOf(turn);
-    const moved = at < 0 ? [turn] : this.waiting.splice(at);
+  #strand(turn: ClaudeTurn, reason: string): void {
+    const at = this.#waiting.indexOf(turn);
+    const moved = at < 0 ? [turn] : this.#waiting.splice(at);
     turn.ctx.log('warn', `claude: the warm session refused the new setup (${reason}); starting a new one`);
     this.close(null);
     this.hooks.stranded(moved);
@@ -447,7 +447,7 @@ export class ClaudeSession {
   stopTurn(turn: ClaudeTurn): void {
     if (turn.settled) return;
     turn.markStopped();
-    const index = this.waiting.indexOf(turn);
+    const index = this.#waiting.indexOf(turn);
     if (index < 0) {
       turn.settle();
       return;
@@ -455,30 +455,30 @@ export class ClaudeSession {
     // A turn the CLI has not reached yet leaves the queue on its own; the running
     // one is interrupted, and a stopped turn always ends the session with it.
     if (index > 0) {
-      this.waiting.splice(index, 1);
+      this.#waiting.splice(index, 1);
       turn.settle();
       return;
     }
-    const running = this.query;
+    const running = this.#query;
     if (running !== null) void running.interrupt().catch(() => undefined);
     this.close(null, STOP_GRACE_MS);
   }
 
   /** Archive, shutdown, a changed setup: end the CLI and settle whatever is left. */
   close(reason: string | null, graceMs = FINISH_GRACE_MS): void {
-    if (this.closing || this.ended) return;
-    this.closing = true;
-    this.clearIdle();
-    if (reason !== null) this.ctx.log('warn', `claude session: ${reason}`);
-    this.prompts.end();
-    if (!this.started) {
-      this.finish(null);
+    if (this.#closing || this.#ended) return;
+    this.#closing = true;
+    this.#clearIdle();
+    if (reason !== null) this.#ctx.log('warn', `claude session: ${reason}`);
+    this.#prompts.end();
+    if (!this.#started) {
+      this.#finish(null);
       return;
     }
-    this.arm(graceMs, () => {
-      this.abortController.abort();
+    this.#arm(graceMs, () => {
+      this.#abortController.abort();
       try {
-        this.query?.close();
+        this.#query?.close();
       } catch {
         // the query is already closed
       }
@@ -487,42 +487,42 @@ export class ClaudeSession {
 
   // -- the query ------------------------------------------------------------
 
-  private async run(first?: ClaudeTurn): Promise<void> {
-    const lazy = this.lazyServers(this.ctx);
+  async #run(first?: ClaudeTurn): Promise<void> {
+    const lazy = this.#lazyServers(this.#ctx);
     try {
-      const options = this.options(this.ctx, lazy?.entries ?? null);
-      if (this.ctx.protectedExecution) {
-        this.ctx.protectedExecution.check();
-        const protectedOptions = await protectedClaudeOptions(() => this.head(), this.ctx.protectedExecution.toolsAllowed !== false);
+      const options = this.#options(this.#ctx, lazy?.entries ?? null);
+      if (this.#ctx.protectedExecution) {
+        this.#ctx.protectedExecution.check();
+        const protectedOptions = await protectedClaudeOptions(() => this.#head(), this.#ctx.protectedExecution.toolsAllowed !== false);
         Object.assign(options, protectedOptions, {settings: {...options.settings as object, ...protectedOptions.settings as object}});
       }
-      this.compactionTokens = this.ctx.autoCompactTokens?.() ?? null;
-      this.compactionModel = this.ctx.thread.model;
+      this.#compactionTokens = this.#ctx.autoCompactTokens?.() ?? null;
+      this.#compactionModel = this.#ctx.thread.model;
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
-      if (!first?.isStopped && !this.closing) {
+      if (!first?.isStopped && !this.#closing) {
         // This frame lives as long as the CLI: holding the first turn here would
         // keep its tool outputs and images for the whole warm session.
         first = undefined;
-        const opened = await openWithCompaction(queryFn, options, this.compactionTokens,
-          () => this.closing || this.abortController.signal.aborted,
-          reason => this.ctx.log('warn', reason), this.prompts);
-        if (opened === null) { this.finish(null); return; }
-        this.query = opened.query;
-        this.prompts = opened.prompts;
+        const opened = await openWithCompaction(queryFn, options, this.#compactionTokens,
+          () => this.#closing || this.#abortController.signal.aborted,
+          reason => this.#ctx.log('warn', reason), this.#prompts);
+        if (opened === null) { this.#finish(null); return; }
+        this.#query = opened.query;
+        this.#prompts = opened.prompts;
         // The next turn's setters have something to talk to from here on.
-        this.markReady();
+        this.#markReady();
         // Not awaited: an older CLI that has no answer for this is one warning,
         // never a reason to hold up the turn's own messages.
-        void this.query
+        void this.#query
           .supportedCommands()
-          .then((commands) => this.ctx.commands(commandsOf(commands)))
-          .catch((error) => this.ctx.log('warn', `claude: supportedCommands failed: ${messageOf(error)}`));
-        for await (const message of this.query) this.receive(message);
+          .then((commands) => this.#ctx.commands(commandsOf(commands)))
+          .catch((error) => this.#ctx.log('warn', `claude: supportedCommands failed: ${messageOf(error)}`));
+        for await (const message of this.#query) this.#receive(message);
       }
-      this.finish(null);
+      this.#finish(null);
     } catch (error) {
-      this.finish(messageOf(error));
+      this.#finish(messageOf(error));
     } finally {
       // The CLI is gone: the servers it started through the core go too.
       lazy?.release();
@@ -535,7 +535,7 @@ export class ClaudeSession {
    * that starts without MCP, and the servers as configured when the core
    * cannot take them over.
    */
-  private lazyServers(ctx: SessionContext): ReturnType<NonNullable<SessionContext['lazyMcp']>> {
+  #lazyServers(ctx: SessionContext): ReturnType<NonNullable<SessionContext['lazyMcp']>> {
     if (ctx.protectedExecution) return null;
     const mode = ctx.thread.contextMode ?? null;
     if (ctx.lazyMcp === undefined || (mode !== null && !mode.mcp)) return null;
@@ -549,44 +549,44 @@ export class ClaudeSession {
   }
 
   /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
-  private receive(message: SDKMessage, replayed = false): void {
-    if (authenticationSuspectOf(message)) this.authSuspect = true;
-    const authFailure = authenticationFailureOf(message, this.authSuspect);
-    if (message.type === 'result' && subagentOf(message) === null) this.authSuspect = false;
+  #receive(message: SDKMessage, replayed = false): void {
+    if (authenticationSuspectOf(message)) this.#authSuspect = true;
+    const authFailure = authenticationFailureOf(message, this.#authSuspect);
+    if (message.type === 'result' && subagentOf(message) === null) this.#authSuspect = false;
     if (authFailure !== null) {
-      this.loginRejected = true;
-      (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
-      if (this.head() === null) { this.finish(authFailure); return; }
+      this.#loginRejected = true;
+      (this.#head()?.ctx ?? this.#ctx).authenticationFailed?.();
+      if (this.#head() === null) { this.#finish(authFailure); return; }
     }
     const sessionId = (message as { session_id?: string }).session_id;
-    if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
-    if (message.type === 'system') this.noteTasks(message);
+    if (typeof sessionId === 'string' && sessionId.length > 0) this.#sessionId = sessionId;
+    if (message.type === 'system') this.#noteTasks(message);
     // A stop makes the CLI write an error result for the interrupt: that is the stop, not a failure.
-    if (!replayed && !(message.type === 'result' && (this.closing || this.head()?.isStopped === true))) noteClaudeMessage(this.head()?.ctx ?? this.ctx, message, this.spawnedAt);
-    if (message.type === 'system' && message.subtype === 'init') this.spawnedAt = null;
+    if (!replayed && !(message.type === 'result' && (this.#closing || this.#head()?.isStopped === true))) noteClaudeMessage(this.#head()?.ctx ?? this.#ctx, message, this.#spawnedAt);
+    if (message.type === 'system' && message.subtype === 'init') this.#spawnedAt = null;
     if (message.type === 'system' && message.subtype === 'init') {
-      for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
+      for (const report of this.#fastReports.splice(0)) report(message.fast_mode_state);
     }
-    if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status')) this.noteMode(message.permissionMode);
-    if (this.replayed(message)) return;
+    if (message.type === 'system' && (message.subtype === 'init' || message.subtype === 'status')) this.#noteMode(message.permissionMode);
+    if (this.#replayed(message)) return;
     // Counted once here, with or without a turn: an adopted message is handed
     // to the turn that opens for it later.
-    if (message.type === 'system' && message.subtype === 'hook_response') (this.head()?.ctx ?? this.ctx).hook?.(hookReport(message));
-    const turn = this.head();
+    if (message.type === 'system' && message.subtype === 'hook_response') (this.#head()?.ctx ?? this.#ctx).hook?.(hookReport(message));
+    const turn = this.#head();
     if (turn === null) {
-      this.adopt(message);
+      this.#adopt(message);
       return;
     }
-    if (this.sessionId !== null) turn.noteSession(this.sessionId);
-    if (message.type === 'result' && this.foreignResults > 0) {
+    if (this.#sessionId !== null) turn.noteSession(this.#sessionId);
+    if (message.type === 'result' && this.#foreignResults > 0) {
       // A prompt that reaches the CLI while its own run is still between tool
       // rounds is folded into that run (CLI 2.1.300): one result answers both,
       // and it names the prompt. Without that name it is the CLI's own result.
-      if (this.answers(turn, message)) {
-        this.foreignResults = 0;
+      if (this.#answers(turn, message)) {
+        this.#foreignResults = 0;
       } else {
-        this.foreignResults -= 1;
-        if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+        this.#foreignResults -= 1;
+        if (typeof message.total_cost_usd === 'number') this.#costSoFar = message.total_cost_usd;
         return;
       }
     }
@@ -595,19 +595,19 @@ export class ClaudeSession {
     // turn is told what was already charged before it reads the result. A cold
     // process that resumed a session starts from that session's restored total.
     if (message.type === 'result') {
-      const restored = this.carried === null ? this.costSoFar : restoredCost(message, this.carried);
-      if (restored !== null) this.costSoFar = restored;
-      this.carried = null;
+      const restored = this.#carried === null ? this.#costSoFar : restoredCost(message, this.#carried);
+      if (restored !== null) this.#costSoFar = restored;
+      this.#carried = null;
       turn.noteCostBefore(restored);
     }
     turn.handle(message);
     // One result per user message: that is the end of this turn, not of the CLI.
     if (message.type === 'result') {
-      if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      if (typeof message.total_cost_usd === 'number') this.#costSoFar = message.total_cost_usd;
       // A CLI that could not resume holds no session worth keeping warm: the
       // retry the core sends next must get a query of its own, with no resume.
-      if (turn.sessionLost || this.loginRejected) this.close(null);
-      this.endTurn(turn);
+      if (turn.sessionLost || this.#loginRejected) this.close(null);
+      this.#endTurn(turn);
     }
   }
 
@@ -618,34 +618,34 @@ export class ClaudeSession {
    * see the drift and put the thread's own mode back, instead of sending
    * nothing because the thread's setting did not move.
    */
-  private noteMode(mode: string | undefined): void {
-    if (typeof mode !== 'string' || mode.length === 0 || this.applied === null) return;
-    this.applied.permissionMode = mode as LiveSetup['permissionMode'];
+  #noteMode(mode: string | undefined): void {
+    if (typeof mode !== 'string' || mode.length === 0 || this.#applied === null) return;
+    this.#applied.permissionMode = mode as LiveSetup['permissionMode'];
   }
 
   /** True for the empty result that closes a resume's report of dead background tasks. */
-  private replayed(message: SDKMessage): boolean {
-    if (message.type === 'system' && message.subtype === 'init') this.beforeInit = false;
-    if (message.type === 'system' && message.subtype === 'task_notification' && this.beforeInit) this.replayResult = true;
-    if (message.type !== 'result' || !this.replayResult) return false;
-    this.replayResult = false;
+  #replayed(message: SDKMessage): boolean {
+    if (message.type === 'system' && message.subtype === 'init') this.#beforeInit = false;
+    if (message.type === 'system' && message.subtype === 'task_notification' && this.#beforeInit) this.#replayResult = true;
+    if (message.type !== 'result' || !this.#replayResult) return false;
+    this.#replayResult = false;
     return message.num_turns === 0;
   }
 
-  private endTurn(turn: ClaudeTurn): void {
+  #endTurn(turn: ClaudeTurn): void {
     // Retire this transport instead of waiting indefinitely for its control reply.
-    if (this.permissionTurn === turn) this.close(null, STOP_GRACE_MS);
-    this.waiting.shift();
+    if (this.#permissionTurn === turn) this.close(null, STOP_GRACE_MS);
+    this.#waiting.shift();
     turn.settle();
-    this.afterTurns();
+    this.#afterTurns();
   }
 
   /** Nothing attached any more: keep the CLI for its background work, else the warm rule. */
-  private afterTurns(): void {
-    if (this.closing || this.ended || this.waiting.length > 0) return;
-    if (this.background.length > 0 || this.woken) return;
-    if (this.retention.viewed) return;
-    if (this.retention.idleMs(this.warmMs) > 0) this.armIdle();
+  #afterTurns(): void {
+    if (this.#closing || this.#ended || this.#waiting.length > 0) return;
+    if (this.#background.length > 0 || this.#woken) return;
+    if (this.#retention.viewed) return;
+    if (this.#retention.idleMs(this.warmMs) > 0) this.#armIdle();
     else this.close(null);
   }
 
@@ -654,29 +654,29 @@ export class ClaudeSession {
    * names the tool call behind a task. Ambient tasks (watchers the CLI runs
    * for itself) are not work anyone waits on.
    */
-  private noteTasks(message: Extract<SDKMessage, { type: 'system' }>): void {
-    if (this.ended || this.closing) return;
+  #noteTasks(message: Extract<SDKMessage, { type: 'system' }>): void {
+    if (this.#ended || this.#closing) return;
     if (message.subtype === 'task_notification') {
-      const owners = this.backgroundFinishers.get(message.task_id);
+      const owners = this.#backgroundFinishers.get(message.task_id);
       const finish = owners?.shift();
       const state = message.status === 'completed' ? 'completed' : message.status === 'failed' ? 'error' : 'cancelled';
       finish?.(message.task_id, state);
-      if (!owners?.length) this.backgroundFinishers.delete(message.task_id);
+      if (!owners?.length) this.#backgroundFinishers.delete(message.task_id);
       return;
     }
     if (message.subtype === 'task_started') {
-      if (this.ctx.backgroundFinished) {
-        const owners = this.backgroundFinishers.get(message.task_id) ?? [];
-        if (owners.at(-1) !== this.ctx.backgroundFinished) owners.push(this.ctx.backgroundFinished);
-        this.backgroundFinishers.set(message.task_id, owners);
+      if (this.#ctx.backgroundFinished) {
+        const owners = this.#backgroundFinishers.get(message.task_id) ?? [];
+        if (owners.at(-1) !== this.#ctx.backgroundFinished) owners.push(this.#ctx.backgroundFinished);
+        this.#backgroundFinishers.set(message.task_id, owners);
       }
-      this.launched.set(message.task_id, { toolId: message.tool_use_id ?? null, startedAt: Date.now() });
+      this.#launched.set(message.task_id, { toolId: message.tool_use_id ?? null, startedAt: Date.now() });
       return;
     }
     if (message.subtype !== 'background_tasks_changed') return;
     const next = message.tasks.filter(task => task.ambient !== true).map((task): BackgroundTask => {
-      if (!this.backgroundFinishers.has(task.task_id) && this.ctx.backgroundFinished) this.backgroundFinishers.set(task.task_id, [this.ctx.backgroundFinished]);
-      const known = this.launched.get(task.task_id) ?? this.background.find(entry => entry.id === task.task_id);
+      if (!this.#backgroundFinishers.has(task.task_id) && this.#ctx.backgroundFinished) this.#backgroundFinishers.set(task.task_id, [this.#ctx.backgroundFinished]);
+      const known = this.#launched.get(task.task_id) ?? this.#background.find(entry => entry.id === task.task_id);
       return {
         id: task.task_id,
         kind: backgroundKind(task.task_type),
@@ -685,19 +685,19 @@ export class ClaudeSession {
         startedAt: known?.startedAt ?? Date.now(),
       };
     });
-    const ended = this.background.length > 0 && next.length === 0;
-    this.background = next;
-    for (const id of [...this.launched.keys()]) if (!next.some(task => task.id === id)) this.launched.delete(id);
-    this.ctx.background?.(next);
-    if (!ended || this.waiting.length > 0 || this.closing) return;
+    const ended = this.#background.length > 0 && next.length === 0;
+    this.#background = next;
+    for (const id of [...this.#launched.keys()]) if (!next.some(task => task.id === id)) this.#launched.delete(id);
+    this.#ctx.background?.(next);
+    if (!ended || this.#waiting.length > 0 || this.#closing) return;
     // The CLI usually answers the task's notification by itself within a
     // second; the linger gives it that moment before the warm rule applies.
-    this.clearLinger();
-    this.linger = setTimeout(() => {
-      this.linger = null;
-      this.afterTurns();
+    this.#clearLinger();
+    this.#linger = setTimeout(() => {
+      this.#linger = null;
+      this.#afterTurns();
     }, LINGER_MS);
-    this.linger.unref?.();
+    this.#linger.unref?.();
   }
 
   /**
@@ -705,66 +705,66 @@ export class ClaudeSession {
    * work it started finished. It is kept, and the core is asked, once, for a
    * turn to hold it. Only real output asks: bookkeeping alone opens nothing.
    */
-  private adopt(message: SDKMessage): void {
-    if (this.closing || this.ended) return;
+  #adopt(message: SDKMessage): void {
+    if (this.#closing || this.#ended) return;
     // A background subagent still talking after the turn is not the CLI going
     // on by itself: no turn opens for it, and the turn that comes drops it.
     if (subagentOf(message) !== null) return;
     // The result closes the adopted turn: it is kept beyond the cap.
-    if (this.orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
-    this.orphans.push(message);
+    if (this.#orphans.length >= ORPHANS_MAX && message.type !== 'result') return;
+    this.#orphans.push(message);
     // Bookkeeping before any output (a task list, a notification) is kept for
     // the turn that may come, but holds nothing: the linger and the warm rule
     // still close the CLI if no output follows.
     // A retried API call is the CLI's own run already under way, before any
     // output: an unavailable or rate-limited model retries for minutes, and the
     // idle window must not end the CLI in the middle and lose the wake.
-    if (!this.woken && message.type !== 'assistant' && message.type !== 'stream_event' && !isApiRetry(message)) return;
-    this.clearIdle();
-    this.clearLinger();
-    if (this.woken) return;
-    this.woken = true;
-    this.ctx.wake?.(WAKE_TEXT);
+    if (!this.#woken && message.type !== 'assistant' && message.type !== 'stream_event' && !isApiRetry(message)) return;
+    this.#clearIdle();
+    this.#clearLinger();
+    if (this.#woken) return;
+    this.#woken = true;
+    this.#ctx.wake?.(WAKE_TEXT);
   }
 
-  private clearLinger(): void {
-    if (this.linger === null) return;
-    clearTimeout(this.linger);
-    this.linger = null;
+  #clearLinger(): void {
+    if (this.#linger === null) return;
+    clearTimeout(this.#linger);
+    this.#linger = null;
   }
 
   /** The loop is over: the CLI is gone, so nothing of this session survives. */
-  private finish(reason: string | null): void {
-    if (this.ended) return;
+  #finish(reason: string | null): void {
+    if (this.#ended) return;
     // A CLI gone between its `authentication_failed` frame and the result that
     // would have named the status: the label is all there is to go on.
-    if ((reason !== null && isAuthenticationFailure(reason)) || this.authSuspect) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
-    this.authSuspect = false;
-    this.ended = true;
+    if ((reason !== null && isAuthenticationFailure(reason)) || this.#authSuspect) (this.#head()?.ctx ?? this.#ctx).authenticationFailed?.();
+    this.#authSuspect = false;
+    this.#ended = true;
     // Nothing waits on a query that will never open.
-    this.markReady();
-    this.clearIdle();
-    this.clearLinger();
-    this.orphans = [];
-    this.woken = false;
-    this.foreignResults = 0;
-    this.replayResult = false;
-    this.backgroundFinishers.clear();
+    this.#markReady();
+    this.#clearIdle();
+    this.#clearLinger();
+    this.#orphans = [];
+    this.#woken = false;
+    this.#foreignResults = 0;
+    this.#replayResult = false;
+    this.#backgroundFinishers.clear();
     // The CLI no longer tracks what it ran in the background. The command itself
     // can outlive it (Windows kills no tree): the registry's orphan sweep, which
     // the core schedules when it releases the thread, stops that.
-    if (this.background.length > 0) {
-      this.background = [];
-      this.ctx.background?.([]);
+    if (this.#background.length > 0) {
+      this.#background = [];
+      this.#ctx.background?.([]);
     }
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
+    for (const timer of this.#timers) clearTimeout(timer);
+    this.#timers.clear();
     try {
-      this.query?.close();
+      this.#query?.close();
     } catch {
       // the query is already closed
     }
-    const left = this.waiting.splice(0, this.waiting.length);
+    const left = this.#waiting.splice(0, this.#waiting.length);
     for (const turn of left) {
       if (reason !== null && !turn.isStopped) turn.fail(reason);
       turn.settle();
@@ -774,39 +774,39 @@ export class ClaudeSession {
     // on the error result it wrote for the interrupt, which the SDK then
     // reports as the exit's cause: that is the end Boite asked for.
     if (reason !== null && left.length === 0) {
-      this.ctx.log(this.closing ? 'info' : 'error', `the warm claude session ended: ${reason}`);
+      this.#ctx.log(this.#closing ? 'info' : 'error', `the warm claude session ended: ${reason}`);
     }
     this.hooks.ended(this);
   }
 
-  private head(): ClaudeTurn | null {
-    return this.waiting[0] ?? null;
+  #head(): ClaudeTurn | null {
+    return this.#waiting[0] ?? null;
   }
 
-  private armIdle(): void {
-    this.idle = setTimeout(() => {
-      this.idle = null;
+  #armIdle(): void {
+    this.#idle = setTimeout(() => {
+      this.#idle = null;
       this.close(null);
-    }, this.retention.idleMs(this.warmMs));
-    this.idle.unref?.();
+    }, this.#retention.idleMs(this.warmMs));
+    this.#idle.unref?.();
   }
 
-  private clearIdle(): void {
-    if (this.idle === null) return;
-    clearTimeout(this.idle);
-    this.idle = null;
+  #clearIdle(): void {
+    if (this.#idle === null) return;
+    clearTimeout(this.#idle);
+    this.#idle = null;
   }
 
-  private arm(ms: number, run: () => void): void {
+  #arm(ms: number, run: () => void): void {
     const timer = setTimeout(() => {
-      this.timers.delete(timer);
+      this.#timers.delete(timer);
       run();
     }, ms);
     timer.unref?.();
-    this.timers.add(timer);
+    this.#timers.add(timer);
   }
 
-  private options(ctx: SessionContext, lazyMcp: Record<string, LazyServerEntry> | null = null): Options {
+  #options(ctx: SessionContext, lazyMcp: Record<string, LazyServerEntry> | null = null): Options {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -865,20 +865,21 @@ export class ClaudeSession {
       // same thinking tokens. Only the display moves: whether and how much the
       // model thinks stays the CLI's call (effort, `alwaysThinkingEnabled`).
       extraArgs: { [THINKING_DISPLAY_FLAG]: 'summarized' },
-      abortController: this.abortController,
+      abortController: this.#abortController,
       env: cliEnv(ctx),
-      canUseTool: this.gate.canUseTool,
+      canUseTool: this.#gate.canUseTool,
       hooks: {
-        PreToolUse: [{ hooks: [this.gate.preToolUse] }],
-        PostToolUse: [{ hooks: [this.gate.postToolUse] }],
+        PreToolUse: [{ hooks: [this.#gate.preToolUse] }],
+        PostToolUse: [{ hooks: [this.#gate.postToolUse] }],
+        PreCompact: [{ hooks: [compactFocus(() => this.#ctx.compactionSummary?.() ?? null)] }],
       },
-      spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => this.spawnCli(options),
+      spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => this.#spawnCli(options),
     };
   }
 
-  private spawnCli(options: SdkSpawnOptions): SpawnedChild {
-    this.spawnedAt = Date.now();
-    const child = this.ctx.spawnChild(options.command, options.args, {
+  #spawnCli(options: SdkSpawnOptions): SpawnedChild {
+    this.#spawnedAt = Date.now();
+    const child = this.#ctx.spawnChild(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,
     });
@@ -887,7 +888,7 @@ export class ClaudeSession {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       const text = chunk.trim();
-      if (text.length > 0) this.ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
+      if (text.length > 0) this.#ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
     });
     return child;
   }

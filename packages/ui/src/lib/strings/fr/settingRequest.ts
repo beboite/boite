@@ -55,6 +55,7 @@ export const fr: Translation = {
       browserOrigins: 'Origines de navigateur autorisées',
       warmProcessMinutes: 'Garder un agent chaud après son tour',
       autoCompact: 'Compaction automatique',
+      compactionSummary: 'Consignes du résumé Claude',
       compactionByType: "Compaction par type d'agent",
       autoResumeLimitedThreads: 'Reprendre les conversations après une limite d\'usage',
       deviceStream: "Flux en direct de l'appareil",

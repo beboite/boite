@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { CircleCheck, Hourglass, Ruler, Timer } from '@lucide/svelte';
-  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment, type CompactionTarget } from '@boite/contracts';
+  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment, type CompactionPolicy, type CompactionTarget } from '@boite/contracts';
   import { compactionPatch, compactionPolicy } from '../lib/compaction-settings';
   import { fill, strings } from '../lib/strings';
   import { formatTokens } from '../lib/format';
@@ -44,10 +44,14 @@
   /** Every control builds the whole rule from the saved one, so none moves while a save is on its way. */
   let saving = $state(false);
   let inflight: Promise<boolean> | null = null;
-  async function save(next: AutoCompact | null, input?: HTMLInputElement, machine = store, scope = target) {
+  async function savePolicy(patch: Partial<CompactionPolicy>, machine = store, scope = target) {
+    while (inflight) await inflight.catch(() => false);
     saving = true;
-    const sent = inflight = machine.saveSettings(compactionPatch(machine.settings, scope, { autoCompact: next })).finally(() => { saving = false; if (inflight === sent) inflight = null; });
-    const ok = await sent;
+    const sent = inflight = machine.saveSettings(compactionPatch(machine.settings, scope, patch)).finally(() => { saving = false; if (inflight === sent) inflight = null; });
+    return sent;
+  }
+  async function save(next: AutoCompact | null, input?: HTMLInputElement, machine = store, scope = target) {
+    const ok = await savePolicy({ autoCompact: next }, machine, scope);
     if (!ok && input) input.checked = !input.checked;
     return ok;
   }
@@ -84,9 +88,24 @@
   }, () => valid ? null : strings.settings.autosave.invalid);
   export async function flush() {
     await sizeSave.flush();
+    await summarySave.flush();
     while (inflight) await inflight.catch(() => false);
   }
   $effect(() => () => void sizeSave.flush());
+  let summary = $state('');
+  let summaryDirty = $state(false);
+  let summaryFor: { store: Store; target?: CompactionTarget } | null = null;
+  const currentSummary = $derived(compactionPolicy(store.settings, target).compactionSummary ?? '');
+  $effect(() => { const value = currentSummary; untrack(() => { if (!summaryDirty) summary = value; }); });
+  const summarySave = new Autosave(async () => {
+    while (inflight) await inflight.catch(() => false);
+    const destination = summaryFor ?? { store, target };
+    const sent = summary;
+    await saved(savePolicy({ compactionSummary: sent.trim() || null }, destination.store, destination.target));
+    if (summary === sent) summaryDirty = false;
+  });
+  $effect(() => () => void summarySave.flush());
+
   function typeTokens(delay: number, value = tokens) {
     tokens = value;
     dirty = true;
@@ -156,10 +175,20 @@
         </div>
       </div>
     {/if}
+    <div class="summary">
+      <span class="name"><label for="{uid}-summary">{strings.settings.compactionSummary}</label><InfoTip topic={strings.settings.compactionSummary} text={strings.settings.compactionSummaryHint} /><SaveStatus save={summarySave} /><SyncMark {store} key={target ? 'compactionByType' : 'compactionSummary'} /></span>
+      <textarea id="{uid}-summary" data-testid="compaction-summary" rows="3" bind:value={summary} disabled={!store.settings}
+        placeholder={strings.settings.compactionSummaryPlaceholder}
+        oninput={() => { summaryDirty = true; summaryFor = { store, target }; summarySave.change('', TYPING_MS); }}
+        onblur={() => void summarySave.flush()}></textarea>
+    </div>
   </section>
 {/if}
 
 <style>
+  .summary { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 22px; }
+  .summary .name { grid-column: auto; grid-row: auto; }
+  textarea { width: 100%; min-height: 80px; resize: vertical; }
   .master { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; cursor: pointer; }
   .master .words { display: grid; gap: 6px; flex: 1; min-width: 0; }
   .master h2 { margin: 0; }
