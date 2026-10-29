@@ -122,13 +122,17 @@ export class ClaudeSession {
   /** The permission callback and the tool hooks, reading the turn the CLI is on. */
   readonly #gate = toolGate({ head: () => this.#head(), ctx: () => this.#ctx });
 
+  #warmMs: number;
+  readonly #deps: ClaudeDeps;
+  readonly #hooks: SessionHooks;
+
   constructor(
     readonly key: string,
-    private warmMs: number,
-    private readonly deps: ClaudeDeps,
-    private readonly hooks: SessionHooks,
+    warmMs: number,
+    deps: ClaudeDeps,
+    hooks: SessionHooks,
     ctx: SessionContext,
-  ) {
+  ) { this.#warmMs = warmMs; this.#deps = deps; this.#hooks = hooks;
     this.#ctx = ctx;
     this.#sessionId = ctx.sessionId;
     this.#carried = ctx.sessionId === null ? null : (ctx.sessionBefore ?? null);
@@ -143,7 +147,7 @@ export class ClaudeSession {
    * setting says: starting another would kill what it runs.
    */
   usable(key: string, warmMs: number): boolean {
-    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.warmMs) || this.holding());
+    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.#warmMs) || this.holding());
   }
 
   setViewed(viewed: boolean): void {
@@ -179,7 +183,7 @@ export class ClaudeSession {
 
   attach(turn: ClaudeTurn, warmMs: number): void {
     this.#retention.beginTurn();
-    this.warmMs = warmMs;
+    this.#warmMs = warmMs;
     this.#ctx = turn.ctx;
     this.#clearIdle();
     this.#clearLinger();
@@ -441,7 +445,7 @@ export class ClaudeSession {
     const moved = at < 0 ? [turn] : this.#waiting.splice(at);
     turn.ctx.log('warn', `claude: the warm session refused the new setup (${reason}); starting a new one`);
     this.close(null);
-    this.hooks.stranded(moved);
+    this.#hooks.stranded(moved);
   }
 
   stopTurn(turn: ClaudeTurn): void {
@@ -498,7 +502,7 @@ export class ClaudeSession {
       }
       this.#compactionTokens = this.#ctx.autoCompactTokens?.() ?? null;
       this.#compactionModel = this.#ctx.thread.model;
-      const queryFn = await this.deps.loadQuery();
+      const queryFn = await this.#deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first?.isStopped && !this.#closing) {
         // This frame lives as long as the CLI: holding the first turn here would
@@ -645,7 +649,7 @@ export class ClaudeSession {
     if (this.#closing || this.#ended || this.#waiting.length > 0) return;
     if (this.#background.length > 0 || this.#woken) return;
     if (this.#retention.viewed) return;
-    if (this.#retention.idleMs(this.warmMs) > 0) this.#armIdle();
+    if (this.#retention.idleMs(this.#warmMs) > 0) this.#armIdle();
     else this.close(null);
   }
 
@@ -776,7 +780,7 @@ export class ClaudeSession {
     if (reason !== null && left.length === 0) {
       this.#ctx.log(this.#closing ? 'info' : 'error', `the warm claude session ended: ${reason}`);
     }
-    this.hooks.ended(this);
+    this.#hooks.ended(this);
   }
 
   #head(): ClaudeTurn | null {
@@ -787,7 +791,7 @@ export class ClaudeSession {
     this.#idle = setTimeout(() => {
       this.#idle = null;
       this.close(null);
-    }, this.#retention.idleMs(this.warmMs));
+    }, this.#retention.idleMs(this.#warmMs));
     this.#idle.unref?.();
   }
 

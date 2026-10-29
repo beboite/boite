@@ -22,8 +22,8 @@ import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from
 import { OpenCommands } from './commands.ts';
 import { ModelRefused, SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
-import { AGENT_OWN_MODEL } from './models.ts';
-import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
+import { AGENT_OWN_MODEL, agentModelsOf } from './models.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, isHermes, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
@@ -91,6 +91,8 @@ export class AcpSession {
   #canDelete = false;
   /** This process resumed the thread's session with `session/load`, rather than creating one. */
   #loaded = false;
+  /** This process already opened the session that reads the agent's own model: a refusal is not asked again. */
+  #ownModelAsked = false;
   /**
    * The thread's session this process could not load and replaced with a new
    * one: the turn that asked for it is sent the conversation so far.
@@ -126,15 +128,21 @@ export class AcpSession {
   #catalogValid = true;
   #protection: ReturnType<typeof protectedAcp> = null;
 
+  #warmMs: number;
+  readonly #deps: AcpDeps;
+  readonly #memory: AcpMemory;
+  readonly #onEnded: (session: AcpSession) => void;
+  readonly #onOptions: (options: SessionConfigOption[], ownModel?: string | null) => void;
+
   constructor(
     readonly key: string,
-    private warmMs: number,
-    private readonly deps: AcpDeps,
-    private readonly memory: AcpMemory,
-    private readonly onEnded: (session: AcpSession) => void,
+    warmMs: number,
+    deps: AcpDeps,
+    memory: AcpMemory,
+    onEnded: (session: AcpSession) => void,
     /** The config options a session answered with, for the next session of the account to start from. */
-    private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
-  ) {}
+    onOptions: (options: SessionConfigOption[], ownModel?: string | null) => void = () => undefined,
+  ) { this.#warmMs = warmMs; this.#deps = deps; this.#memory = memory; this.#onEnded = onEnded; this.#onOptions = onOptions;}
 
   async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
     const setup = this.#ctx;
@@ -165,8 +173,41 @@ export class AcpSession {
     this.#catalogValid = false;
   }
 
-  seedConfig(options: SessionConfigOption[]): void {
+  /**
+   * The thread's model, options and mode, sent at the start of the process and
+   * of every turn. A thread going back to the agent's own model on an agent
+   * that lists models needs to know which one that is: a `session/load`
+   * reports the model the session was left on, or no models at all, and a
+   * reloaded descriptor drops the account's probe. Then one throwaway session
+   * says it, on a cold start or a warm turn alike, and the account keeps it.
+   */
+  async #applyControls(ctx: SessionContext): Promise<void> {
+    const agent = this.#agent;
+    if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
+      && (this.#controls.hasModels() || this.#loaded) && !this.#controls.hasModelOption() && !this.#controls.knowsOwnListedModel() && !this.#ownModelAsked) {
+      this.#ownModelAsked = true;
+      // Only a lookup: a refusal leaves the session where it is, and the next
+      // process asks again.
+      const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] }).catch((error: unknown) => {
+        ctx.log('warn', `acp: ${ctx.provider.id} refused the session that reads its own model: ${messageOf(error)}`);
+        return null;
+      });
+      if (discovered !== null) {
+        const listed = agentModelsOf(discovered);
+        this.#controls.seedOwnListedModel(listed?.currentModelId ?? null);
+        this.#controls.seedListedModels(listed);
+        this.#onOptions(discovered.configOptions ?? [], listed?.currentModelId ?? null);
+        await discardSession(agent, this.#canDelete, discovered.sessionId);
+      }
+    }
+    await this.#controls.applyModel(ctx);
+    await this.#controls.applyConfig(ctx);
+    await this.#controls.applyMode(ctx);
+  }
+
+  seedConfig(options: SessionConfigOption[], ownModel?: string | null): void {
     this.#controls.seed(options);
+    this.#controls.seedOwnListedModel(ownModel);
   }
 
   /**
@@ -175,7 +216,7 @@ export class AcpSession {
    * the warm window: a new process would end that command.
    */
   usable(key: string, warmMs: number): boolean {
-    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.warmMs) || this.#commands.outlived());
+    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.#warmMs) || this.#commands.outlived());
   }
 
   setViewed(viewed: boolean): void {
@@ -200,7 +241,7 @@ export class AcpSession {
   }
 
   attach(turn: AcpTurn, warmMs: number): void {
-    this.warmMs = warmMs;
+    this.#warmMs = warmMs;
     this.#retention.beginTurn();
     this.#running += 1;
     this.#clearIdle();
@@ -380,9 +421,7 @@ export class AcpSession {
     // sends nothing when what it carries has not moved. A model the agent did
     // not take ends the turn here: the prompt would run on the previous one.
     try {
-      await this.#controls.applyModel(turn.ctx);
-      await this.#controls.applyConfig(turn.ctx);
-      await this.#controls.applyMode(turn.ctx);
+      await this.#applyControls(turn.ctx);
     } catch (error) {
       if (!(error instanceof ModelRefused)) throw error;
       // A stop closes the agent under a switch it has not answered.
@@ -424,8 +463,8 @@ export class AcpSession {
     // A resumed session whose first total came in below what the session
     // already cost: this agent counts each process from zero.
     const total = turn.costUsdEquivalent;
-    if (judged && total !== null && total < turn.costBefore && !this.memory.costPerProcess.has(turn.ctx.provider.id)) {
-      this.memory.costPerProcess.add(turn.ctx.provider.id);
+    if (judged && total !== null && total < turn.costBefore && !this.#memory.costPerProcess.has(turn.ctx.provider.id)) {
+      this.#memory.costPerProcess.add(turn.ctx.provider.id);
       turn.ctx.log('info', `acp: ${turn.ctx.provider.id} reports a resumed session's cost from zero; its cold turns are charged their whole total`);
     }
     this.#endTurn(turn, turn.isStopped);
@@ -445,7 +484,7 @@ export class AcpSession {
       turn.costBefore = this.#reportedCost;
       return false;
     }
-    if (!this.#loaded || this.memory.costPerProcess.has(turn.ctx.provider.id)) {
+    if (!this.#loaded || this.#memory.costPerProcess.has(turn.ctx.provider.id)) {
       turn.costBefore = 0;
       return false;
     }
@@ -462,7 +501,7 @@ export class AcpSession {
     // A command the prompt left running keeps the process: closing it would
     // end the command, which Stop on the idle thread does when asked.
     const outlived = !drop && !this.#closing && turn.antigravity && this.#commands.promote(turn.ctx);
-    const dropping = drop || this.#closing || (!outlived && this.#retention.idleMs(this.warmMs) <= 0);
+    const dropping = drop || this.#closing || (!outlived && this.#retention.idleMs(this.#warmMs) <= 0);
     turn.settle();
     this.#running = Math.max(0, this.#running - 1);
     if (dropping) {
@@ -479,9 +518,7 @@ export class AcpSession {
         await this.#open(ctx);
         this.#protection?.assertReady();
         this.#protection?.assertMcpReady();
-        await this.#controls.applyModel(ctx);
-        await this.#controls.applyConfig(ctx);
-        await this.#controls.applyMode(ctx);
+        await this.#applyControls(ctx);
         if (this.#ended) throw new Error('the acp session was closed while it started');
       }, () => ({
         text: this.#loaded ? ', loaded the saved session' : this.#replaces !== null ? ', a new one replacing a session it cannot load' : '',
@@ -493,7 +530,7 @@ export class AcpSession {
   }
 
   async #open(ctx: SessionContext): Promise<void> {
-    const sdk = await this.deps.loadSdk();
+    const sdk = await this.#deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
     if (this.#ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
     const profile = profileFor(ctx.provider);
@@ -587,16 +624,16 @@ export class AcpSession {
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
         ctx.diagnostic?.('warn', `session/load refused with code ${errorCodeOf((error as { code?: unknown }).code) ?? 'unknown'}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: errorCodeOf((error as { code?: unknown }).code), kind } });
-        if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
+        if (kind === 'gone' || (kind === 'unsure' && this.#memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.
-          this.memory.refusedLoads.delete(refusedKey);
+          this.#memory.refusedLoads.delete(refusedKey);
           throw new LoadRefused(
             `${ctx.provider.name} no longer has this conversation (${reason}). Send the message again: Boite starts a new session that carries the conversation so far.`,
             true,
           );
         }
-        if (kind === 'unsure') this.memory.refusedLoads.add(refusedKey);
+        if (kind === 'unsure') this.#memory.refusedLoads.add(refusedKey);
         // Signed out, or a failure on the agent's side: the session may well
         // still be there, and the next turn loads it again.
         throw new LoadRefused(
@@ -604,19 +641,35 @@ export class AcpSession {
           false,
         );
       }
-      this.memory.refusedLoads.delete(refusedKey);
+      if (isHermes(ctx.provider) && (loaded === null || loaded.modes === undefined || loaded.modes === null)) {
+        // Hermes answers an id it does not have with an empty result instead
+        // of an error, and a prompt on it then stops as a refusal. Each session
+        // it does have comes back with its modes, so their absence is the "no".
+        this.#memory.refusedLoads.delete(refusedKey);
+        ctx.log('warn', `acp: ${ctx.provider.id} answered session/load ${ctx.sessionId} with no session`);
+        ctx.diagnostic?.('warn', 'session/load answered with no session, read as gone', { event: 'driver.session.load-refused', data: { code: null, kind: 'gone' } });
+        throw new LoadRefused(
+          `${ctx.provider.name} no longer has this conversation (it answered the load with no session). Send the message again: Boite starts a new session that carries the conversation so far.`,
+          true,
+        );
+      }
+      this.#memory.refusedLoads.delete(refusedKey);
       this.#sessionId = ctx.sessionId;
       this.#loaded = true;
-      this.#controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
+      this.#controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded, false);
       // A load may omit its controls; both OpenCode majors answer them, so no
       // empty session is opened for nothing. With no probe cache either, a
       // throwaway session reads them once for the account, and the next cold
       // turn of any thread starts from what it found.
+      // A load that listed models answers the model question: only an effort
+      // still has to be looked for.
       if (!isGrok(ctx.provider) && !this.#controls.hasOptions()
-        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
+        && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.#controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-        this.seedConfig(discovered.configOptions ?? []);
-        this.onOptions(discovered.configOptions ?? []);
+        const discoveredModels = agentModelsOf(discovered);
+        this.seedConfig(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
+        this.#controls.seedListedModels(discoveredModels);
+        this.#onOptions(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
         await discardSession(connection.agent, this.#canDelete, discovered.sessionId);
       }
       return;
@@ -634,9 +687,9 @@ export class AcpSession {
       mcpServers: [],
     });
     this.#sessionId = created.sessionId;
-    this.#controls.noteSession(created.modes, created.configOptions ?? null, created);
+    this.#controls.noteSession(created.modes, created.configOptions ?? null, created, true);
     this.#controls.noteOwnModel(created.configOptions ?? null);
-    this.onOptions(created.configOptions ?? []);
+    this.#onOptions(created.configOptions ?? [], agentModelsOf(created)?.currentModelId ?? null);
   }
 
   #watch(child: SpawnedChild, ctx: SessionContext): void {
@@ -694,7 +747,7 @@ export class AcpSession {
     const child = this.#child;
     this.#child = null;
     releaseChild(child, this.#killTree);
-    this.onEnded(this);
+    this.#onEnded(this);
   }
 
   #armIdle(): void {
@@ -704,7 +757,7 @@ export class AcpSession {
     this.#idle = setTimeout(() => {
       this.#idle = null;
       this.#drop();
-    }, this.#retention.idleMs(this.warmMs));
+    }, this.#retention.idleMs(this.#warmMs));
     this.#idle?.unref?.();
   }
 
@@ -754,7 +807,7 @@ export class AcpSession {
     if (this.#ctx?.provider.quirks?.includes('antigravity') === true && params.sessionId === this.#sessionId
       && this.#commands.note(update) && !this.busy()) {
       // The last command a finished turn left running ended: the warm rule applies from now.
-      if (this.#retention.idleMs(this.warmMs) <= 0) this.#drop();
+      if (this.#retention.idleMs(this.#warmMs) <= 0) this.#drop();
       else if (!this.#retention.viewed) this.#armIdle();
     }
     const turn = this.#current;

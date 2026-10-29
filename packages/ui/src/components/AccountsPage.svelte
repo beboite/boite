@@ -58,6 +58,7 @@
     opencode: 'https://opencode.ai/docs/',
     'opencode-v2': 'https://opencode.ai/v2/docs/',
     grok: 'https://grok.com/build',
+    hermes: 'https://hermes-agent.nousresearch.com/docs/getting-started/installation',
     muse: 'https://developer.meta.com/ai/products/muse-code/',
     pi: 'https://github.com/earendil-works/pi'
   };
