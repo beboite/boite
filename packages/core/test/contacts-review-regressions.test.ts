@@ -292,42 +292,56 @@ test('the hold names only the contacts mailing outside a shared project, and tru
   expect(()=>b.h.core.sharedAccess.assertTurn(b.t.id)).toThrow('shared file policy');
 },30000);
 
-test('a native thread trusted while contact mail waits takes that letter, and a later letter holds it again',async()=>{
+test.each(['protected','unprotected'] as const)('contact mail outside a shared project waits for the owner on a native %s route, never holding the thread, and reaches it once delivered',async route=>{
   const {a,b}=await pair();
-  // As a protected native route would, with the echo driver standing in for its CLI.
-  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),support=access.execution.support.bind(access.execution);
+  // A native provider, with the echo driver standing in for its CLI, on a route that can or cannot protect shared files.
+  const access=b.h.core.sharedAccess,providers=b.h.core.providers,require=providers.require.bind(providers),get=providers.get.bind(providers),support=access.execution.support.bind(access.execution);
   providers.require=((id:string)=>id===b.t.providerId?{...require(id),protocol:'claude-sdk'}:require(id)) as typeof providers.require;
-  access.execution.support=(()=>({supported:true,boundary:'isolated-process'})) as typeof access.execution.support;
+  providers.get=((id:string)=>id===b.t.providerId?{...get(id)!,protocol:'claude-sdk'}:get(id)) as typeof providers.get;
+  access.execution.support=(()=>route==='protected'?{supported:true,boundary:'isolated-process'}:{supported:false,reason:'no protected route'}) as typeof access.execution.support;
   const restore=setDriver('claude-sdk',getDriver('echo'));
   try{
     const status=(id:string)=>b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===id)?.status;
-    const waiting=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Ordinary contact note',requestId:'native-waiting'});
-    // The held native turn is refused, so the letter waits and coordination pauses.
-    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
-    expect(status(waiting.id)).toBe('received');
-    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
-    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
-    // The owner trusted the mail the notice named: it reaches the thread without holding it again.
-    await waitFor(()=>status(waiting.id)==='delivered');
+    const mail=async()=>(await b.c.call('contacts.get',{})).mail??[];
+    const name=b.h.core.contacts.find(a.id)!.name;
+    const first=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Which tool schedules your posts?',requestId:'held-first'});
+    await waitFor(()=>status(first.id)==='received');
+    // The owner reads it before any agent does; the thread itself keeps working.
+    expect(await mail()).toMatchObject([{id:first.id,coreId:a.id,contact:name,threadId:b.t.id,thread:b.t.title,text:'Which tool schedules your posts?'}]);
+    await new Promise(resolve=>setTimeout(resolve,2500));
+    expect(status(first.id)).toBe('received');
+    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
+    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
+    // Only the owner lets it through, never the agent it is written to.
+    const agent=await connect(b.h.url,b.h.core.agents.tokenFor(b.t.id));clients.push(agent);
+    expect(await thrown(agent.call('contacts.decideMail',{id:first.id,accept:true}))).toThrow();
+    expect(await b.c.call('contacts.decideMail',{id:first.id,accept:true})).toEqual({ok:true});
+    await waitFor(()=>status(first.id)==='delivered');
     await waitFor(()=>b.h.core.journal.lastTurn(b.t.id)?.finishedAt!=null);
+    expect(await mail()).toEqual([]);
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
-    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
-    // The approval covers that letter as the owner trusted it, never another letter reusing its id.
-    const approved=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===waiting.id)!;
-    expect(()=>protectLetters(b.h.core,b.t.id,[{...approved,text:'Different text'}])).toThrow('shared file policy');
-    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
-    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
+    // The approval covers that letter as it was, never another letter reusing its id.
+    const delivered=b.h.core.coordination.get(b.t.id).messages.find(l=>l.id===first.id)!;
+    expect(()=>protectLetters(b.h.core,b.t.id,[{...delivered,text:'Different text'}])).toThrow('waits for the owner');
+    // A refused letter goes back to its sender as refused.
+    const refused=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another note',requestId:'held-refused'});
+    await waitFor(()=>status(refused.id)==='received');
+    expect((await mail()).map(letter=>letter.id)).toEqual([refused.id]);
+    await b.c.call('contacts.decideMail',{id:refused.id,accept:false});
+    expect(status(refused.id)).toBe('rejected');
+    expect(await thrown(b.c.call('contacts.decideMail',{id:refused.id,accept:true}))).toThrow('waiting for the owner');
+    await waitFor(()=>a.h.core.coordination.get(a.t.id).messages.find(l=>l.id===refused.id)?.status==='rejected',10000);
+    // Trusting the contact lets what waits through, and what comes later goes straight to its thread.
+    const waiting=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Third note',requestId:'held-trust'});
+    await waitFor(()=>status(waiting.id)==='received');
+    await b.c.call('contacts.update',{coreId:a.id,trusted:true});
+    await waitFor(()=>status(waiting.id)==='delivered');
+    await waitFor(()=>b.h.core.threads.require(b.t.id).status==='idle');
+    const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Fourth note',requestId:'trusted-later'});
+    await waitFor(()=>status(later.id)==='delivered');
+    expect(await mail()).toEqual([]);
     expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).toBeNull();
-    // A letter that arrives later holds the free thread again.
-    const later=await a.c.call('collaboration.send',{threadId:a.t.id,to:{coreId:b.id,threadId:b.t.id},text:'Another contact note',requestId:'native-later'});
-    await waitFor(()=>b.h.core.coordination.config(b.t.id).paused);
-    expect(status(later.id)).toBe('received');
-    expect((await b.c.call('threads.get',{threadId:b.t.id})).contactHold).not.toBeNull();
-    // Trust ends that refused wake's pause even when its letter expired meanwhile.
-    b.h.core.journal.db.query("UPDATE coordination_letters SET data=json_set(data,'$.expiresAt',?) WHERE id=?").run(Date.now()-1,later.id);
-    await b.c.call('threads.trustContactHistory',{threadId:b.t.id});
-    expect(b.h.core.coordination.config(b.t.id).paused).toBe(false);
-  }finally{providers.require=require;access.execution.support=support;restore();}
+  }finally{providers.require=require;providers.get=get;access.execution.support=support;restore();}
 },30000);
 
 test('SEC-01 consumed associations intersect their live authority instead of replacing earlier history',async()=>{
@@ -367,6 +381,8 @@ test('SEC-01 contact mail a bound native thread admitted idle is not refused aga
     const desk=core.coordination as unknown as {admit(threadId:string,letters:AgentLetter[],consume:(batch:AgentLetter[])=>void):void;update(letter:AgentLetter,status:string,error:string):void};
     const entry=core.coordination.get(id).messages.find(l=>l.id===letter.id)!;
     expect(entry.sharedProjectId).toBeUndefined();
+    // Mail outside a shared project waits for the owner, who delivers it.
+    await b.c.call('contacts.decideMail',{id:letter.id,accept:true});
     // Idle, the thread admits it and queues its wake.
     desk.admit(id,[entry],()=>desk.update(entry,'uncertain','Queued for provider delivery'));
     const thread=core.threads.require(id),require=core.threads.require.bind(core.threads);

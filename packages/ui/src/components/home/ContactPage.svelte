@@ -14,12 +14,13 @@
   import ProjectChoice from '../ProjectChoice.svelte';
   import ProjectTile from '../ProjectTile.svelte';
   import FingerprintWords from './FingerprintWords.svelte';
+  import MailCard from './MailCard.svelte';
   import RequestCard from './RequestCard.svelte';
   import SharedAssociations from '../shared/SharedAssociations.svelte';
 
   /**
    * One contact, picked in the thread list: its name (a click renames it) and
-   * how its link stands, what it asks, the projects each side shares with the
+   * how its link stands, its messages waiting for you, what it asks, the projects each side shares with the
    * other (yours with their board's cards per column), then trust, the eight
    * check words and Remove.
    */
@@ -28,6 +29,7 @@
   const uid = $props.id();
 
   const pending = $derived(splitRequests(view.state?.requests.filter(request => request.coreId === contact.coreId) ?? []).pending);
+  const mail = $derived(view.state?.mail?.filter(letter => letter.coreId === contact.coreId) ?? []);
   const machines = $derived(workspace.machinesOr(view.store).filter(machine => machine.store.owner));
   const watched = watchContacts(() => machines);
   // A contact's core identity, never its local nickname, links its copies on our machines.
@@ -171,6 +173,13 @@
     </p>
   </div>
 </div>
+
+{#if mail.length}
+  <section class="card" data-testid="contact-mail">
+    <h2 class="ui-label-box"><span class="ui-label">{labels.mail.title}</span><InfoTip topic={labels.mail.title} text={labels.mail.tip} /></h2>
+    {#each mail as letter (letter.id)}<MailCard {view} {letter} {now} />{/each}
+  </section>
+{/if}
 
 {#if pending.length}
   <section class="card" data-testid="contact-requests">
