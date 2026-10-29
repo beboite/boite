@@ -77,9 +77,10 @@ execution and its attempt, so a lost answer or a restart here finds the same
 subagent there instead of starting another.
 
 The plan check refuses a machine that is not in the group with the words of
-`delegate spawn --machine`. A machine whose owner keeps `groupThreads` off, a
-model that machine lacks, or a project it does not have fails the step at
-launch with that refusal, which names the setting to propose. A brief that
+`delegate spawn --machine`. A machine whose owner keeps `groupThreads` off fails
+the step at launch with that refusal, which names the setting to propose. A model
+that machine lacks, or a project it does not have, fails the step at launch with
+that machine's list. A brief that
 passes 12,000 characters once the step's instructions wrap it fails the step.
 
 The step settles from that machine's reports, with no polling: once its
@@ -107,8 +108,8 @@ keeps the machine, the request id, that machine's thread id (never a local
 The optional `compute` field selects an explicitly offered shared-project host:
 `{ sharedProjectId, host: { ownerCoreId, coreId, projectId }, profileId, baseCommit }`.
 The base is a full commit ID. The host owns model, effort, permissions, context
-and checkout; combining this target with `model`, `profile`, `effort`, `context`
-or `worktree` is refused.
+and checkout; combining this target with `model`, `profile`, `effort`, `context`,
+`worktree` or `machine` is refused.
 
 `host.coreId` may differ from `host.ownerCoreId` when an explicitly associated
 project executes on a group member. Preserve the complete tuple from the

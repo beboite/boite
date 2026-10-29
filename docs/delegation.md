@@ -264,6 +264,9 @@ open questions and worktree. `delegate wait` settles on those reports.
 at once, and is refused while it is away; `delegate result` reads the full
 answer from it. `delegate stop <id>`, a team stop and archiving or deleting the
 parent stop it there, and archiving or deleting the parent archives it there.
+`delegate resume <id>` accepts only children on the parent's machine. A team
+resume lifts the pause but does not continue remote children; use
+`delegate send <id> "<instruction>"` to continue one there.
 Its result, its questions and its own `delegate send` to the parent come back
 as letters from that machine, which wake the parent once each. Cross-machine
 letters have no hourly cap. A worktree child

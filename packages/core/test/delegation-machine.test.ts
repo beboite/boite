@@ -360,18 +360,20 @@ test('a subagent working for another machine cannot start subagents or threads',
   const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'nested-1');
   const childId = child.thread.id;
   const before = pc.core.journal.listThreads().length;
+  const deskBefore = desk.core.journal.listThreads().length;
   expect((await cli(['delegate', 'spawn', 'Read more', '--request-id', 'nested-2'], pc, childId)).err).toContain('delegation supports one level');
   expect((await cli(['delegate', 'spawn', 'Read more', '--machine', desk.core.coordination.card().coreId.slice(0, 8), '--request-id', 'nested-3'], pc, childId)).err).toContain('delegation supports one level');
   expect((await cli(['thread', 'new', 'notes', 'Read more', '--request-id', 'nested-4'], pc, childId)).err).toContain('a delegated agent or workflow step cannot start threads');
   expect((await cli(['thread', 'new', 'test', 'Read more', '--machine', desk.core.coordination.card().coreId.slice(0, 8), '--request-id', 'nested-5'], pc, childId)).err).toContain('a delegated agent or workflow step cannot start threads');
   expect(pc.core.journal.listThreads()).toHaveLength(before);
+  expect(desk.core.journal.listThreads()).toHaveLength(deskBefore);
 });
 
 test('a member whose Boite does not know these operations is reported too old, and nothing starts', async () => {
   answering();
   const { desk, threadId, machine, cli, childrenOnPc, pc } = await setup();
   // As an older core answers an operation it does not know.
-  pc.core.delegation.remote.peer = async () => { throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, delegation.catalog, setting.* or bot.*'); };
+  pc.core.delegation.remote.peer = async () => { throw invalidParams('operation: expected directory, deliver, receipt, search, read, group.sync, group.push, relay.*, thread.start, setting.* or bot.*'); };
   const spawned = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'old-1']);
   expect(spawned.err).toContain('is too old to run subagents for another machine; the owner updates it in Settings, Machines and updates');
   expect(childrenOnPc()).toHaveLength(0);

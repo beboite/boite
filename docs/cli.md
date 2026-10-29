@@ -883,9 +883,10 @@ one named, and resumes the workflow runs a pause held
 profiles or lifts the pause set in Subagents > Settings.
 `delegate spawn --machine <name>` runs the child on another machine of the
 group, in its project named like the parent's or the one `--project` names,
-under that machine's `groupThreads` switch; `--model` is matched against that
-machine's list, and without it the child runs on the parent's model there or
-is refused. `delegate list` names the machine after the model, and `send`,
+under that machine's `groupThreads` switch; `--model`, `--effort` and `--speed`
+are matched against that machine's list, and without them the child runs on the
+parent's model there or is refused. `delegate list` names the machine after the
+model, and `send`,
 `stop`, `wait` and `result` reach the child there
 ([delegation](delegation.md#on-another-machine-of-the-group)).
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
