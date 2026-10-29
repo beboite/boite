@@ -25,7 +25,7 @@ import { thrown } from './settle.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG', 'CODEX_FAKE_SKILLS'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR', 'CODEX_FAKE_SLOW_MODELS', 'CODEX_FAKE_ARCHIVED', 'CODEX_FAKE_MCP', 'CODEX_FAKE_CONFIG_READ_ERROR', 'CODEX_FAKE_GRACE', 'CODEX_FAKE_CONFIG_READ_HANG', 'CODEX_FAKE_SKILLS', 'CODEX_FAKE_SLOW_SKILLS'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1928,6 +1928,19 @@ test('Codex skills are the thread\'s slash commands, and /name sends the skill t
   expect((await second).status).toBe('done');
   expect(fakeLog()).toContain('skill standup /skills/standup/SKILL.md text=$standup since monday\n');
   expect((await client.call('threads.get', { threadId })).commands.map((command) => command.name)).toEqual(['standup']);
+});
+
+test('a stop while /name waits for the skills list never sends the prompt', async () => {
+  process.env['CODEX_FAKE_SLOW_SKILLS'] = '1500';
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+  await client.call('turns.start', { threadId, prompt: '/standup' });
+  await waitFor(() => fakeLog().includes('skills/list'));
+  await client.call('turns.stop', { threadId });
+  expect((await finished).status).toBe('stopped');
+  await Bun.sleep(1700);
+  expect(fakeLog()).not.toContain('turn/start');
 });
 
 describe('codex hooks', () => {

@@ -258,7 +258,8 @@ export class CodexSession {
     }
 
     turn.noteSession(threadId);
-    // Stopped while the process or the thread was opening: the prompt never goes out.
+    const input = await this.skills.turn(turn.ctx.prompt);
+    // Stopped while the process, the thread or its skills were opening: the prompt never goes out.
     if (turn.isStopped) {
       turn.endStopped();
       this.endTurn(turn, false);
@@ -276,7 +277,6 @@ export class CodexSession {
       if (ctx.turn.execution?.operation === 'compact') {
         await rpc.request('thread/compact/start', { threadId });
       } else {
-        const input = await this.skills.turn(ctx.prompt);
         const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
           threadId,
           input: [...input, ...imageInputsOf(ctx.attachments)],
