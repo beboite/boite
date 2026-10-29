@@ -52,15 +52,21 @@ export function teamUsage(core: Core, rootId: string): Usage {
     OR (t.thread_id = ? AND json_extract(t.execution, '$.operation') = 'delegation')` }, rootId, rootId));
 }
 
-/** A page of a child's answer to one turn: read here for a parent here, or for its parent on another machine. */
-export function resultPageOf(core: Core, agentId: ThreadId, turnId: unknown, offsetParam?: unknown, limitParam?: unknown): DelegationResultPage {
+/** Validate a page before reading it here or asking another machine for it. */
+export function resultPageParams(turnId: unknown, offsetParam?: unknown, limitParam?: unknown): { turnId: string; offset: number; limit: number } {
   if (typeof turnId !== 'string' || !turnId) throw invalidParams('turnId: expected a nonempty string');
-  const turn = core.journal.getTurn(turnId);
-  if (!turn || turn.threadId !== agentId || turn.status === 'queued' || turn.status === 'running') throw refused('turnId: expected a terminal turn of the named direct child');
   const offset = offsetParam === undefined ? 0 : offsetParam;
   const limit = limitParam === undefined ? PAGE_CHARS : limitParam;
   if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw invalidParams('offset: expected a nonnegative integer');
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > PAGE_CHARS) throw invalidParams('limit: expected an integer from 1 to 16000');
+  return { turnId, offset, limit };
+}
+
+/** A page of a child's answer to one turn: read here for a parent here, or for its parent on another machine. */
+export function resultPageOf(core: Core, agentId: ThreadId, turnIdParam: unknown, offsetParam?: unknown, limitParam?: unknown): DelegationResultPage {
+  const { turnId, offset, limit } = resultPageParams(turnIdParam, offsetParam, limitParam);
+  const turn = core.journal.getTurn(turnId);
+  if (!turn || turn.threadId !== agentId || turn.status === 'queued' || turn.status === 'running') throw refused('turnId: expected a terminal turn of the named direct child');
   // Slice in SQLite before crossing into JS: tool payloads and the unbounded
   // complete answer never become RPC response or process-memory strings.
   const parts = `SELECT m.rowid AS message_order, CAST(p.key AS INTEGER) AS part_order, json_extract(p.value, '$.text') AS text

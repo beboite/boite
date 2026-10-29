@@ -151,6 +151,7 @@ export class MachineWorkflowSteps {
     const fresh = machine.childId !== record.childId || inst.providerId !== seen.providerId || inst.model !== seen.model || inst.effort !== seen.effort || JSON.stringify(inst.worktree) !== JSON.stringify(state.worktree ?? inst.worktree);
     Object.assign(inst, seen, { machine: { ...machine, childId: record.childId, coreId: record.coreId } });
     if (fresh) this.#hooks.save(run!);
+    if (turn === null && state.thread.status === 'error') return this.#fail(runId, key, machine.requestId, `the subagent on ${machine.name} could not start its first turn`);
     // A correction decided before it was taken there: it goes again under its request id, and its turn settles the step.
     if (machine.correction) {
       this.#correct(run!, key, machine.requestId, record.childId, machine.correction);

@@ -37,7 +37,7 @@ import { modelsFor } from '../threads/selection.ts';
 import { catalog, checkModelAllowed, chooseModel, discover, loggedInAccount } from './routes.ts';
 import { Outbox } from './outbox.ts';
 import { restartContinues } from './restart.ts';
-import { resultPageOf } from './results.ts';
+import { resultPageOf, resultPageParams } from './results.ts';
 import { checkStart, readableState, type ChildState, type ParentLink, type RemoteChild, type Report, type Start, type Started, type Stop, type WireRoute } from './remote-wire.ts';
 
 export type { ChildState, ParentLink, RemoteChild } from './remote-wire.ts';
@@ -399,9 +399,10 @@ export class RemoteDelegation {
   async read(params: RpcParams<'delegation.result'>): Promise<DelegationResultPage> {
     const record = this.child(params.threadId, params.agentId);
     if (!record) throw refused('agentId: expected a direct delegated child of threadId');
+    const pageParams = resultPageParams(text(params.turnId, 'turnId', 128), params.offset, params.limit);
     const peer = this.#peerOf(record);
     let answer: unknown;
-    try { answer = await this.#core.coordination.request(peer, 'delegation.read', { parentId: params.threadId, childId: record.childId, turnId: params.turnId, ...(params.offset === undefined ? {} : { offset: params.offset }), ...(params.limit === undefined ? {} : { limit: params.limit }) }); }
+    try { answer = await this.#core.coordination.request(peer, 'delegation.read', { parentId: params.threadId, childId: record.childId, ...pageParams }); }
     catch (error) {
       if (error instanceof PeerRefusal) throw peerRefusal(this.#core, peer, error, 'read subagent results for another machine');
       throw unavailable(`${peer.name} did not answer: ${messageOf(error)}; boite delegate list keeps its last result`, { field: 'machine' });
@@ -731,9 +732,9 @@ export class RemoteDelegation {
       }, { id, branch: planned?.branch ?? null });
       if (planned) this.#core.delegation.worktrees.record(id, planned);
       this.#core.journal.setSetting(`${PARENT}${id}`, link);
-      this.#parents.set(id, link);
       this.#core.journal.putThread({ ...this.#core.threads.require(id), titleSource: 'user' });
     })();
+    this.#parents.set(id, link);
     const child = this.#core.threads.require(id);
     const at = machineArg(this.#core, peer);
     const checkout = planned
@@ -748,7 +749,7 @@ export class RemoteDelegation {
       this.#core.logs.warn(`Subagent ${id} of ${start.parent.threadId} on ${peer.name} was created but its first turn could not start: ${messageOf(error)}`, { source: 'delegation', event: 'delegation.spawn-failed', threadId: id, data: { parent: start.parent.threadId, machine: peer.coreId } });
       this.#core.journal.putThread({ ...this.#core.threads.require(id), status: 'error' });
       this.state(id);
-      throw refused(`subagent ${id} was created on ${here} but could not start: ${messageOf(error)}`);
+      return { childId: id, at: Date.now(), state: this.#snapshot(id) };
     }
     this.#core.logs.info(`Subagent ${id} started here for ${start.parent.threadId} on ${peer.name} with ${route.providerId} ${route.model ?? 'default model'}${route.effort ? ` at ${route.effort}` : ''}`, {
       source: 'delegation', event: 'delegation.spawned', threadId: id, data: { parent: start.parent.threadId, machine: peer.coreId, providerId: route.providerId, model: route.model, effort: route.effort, worktree: planned !== null, at },
@@ -853,7 +854,7 @@ export class RemoteDelegation {
     const raw = (payload ?? {}) as Record<string, unknown>;
     const { childId } = this.#linked(peer, raw.parentId, raw.childId, 'delegation.read');
     const turnId = text(raw.turnId, 'delegation.read.turnId', 128);
-    return resultPageOf(this.#core, childId, turnId, raw.offset as number | undefined, raw.limit as number | undefined);
+    return resultPageOf(this.#core, childId, turnId, raw.offset, raw.limit);
   }
 
   /** `delegation.stop`: stops, and retirements of children whose parent is archived or deleted there. An unknown child is skipped. */

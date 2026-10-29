@@ -116,6 +116,18 @@ test('a plan naming a machine not in the group is refused before it starts; one 
   expect(onPc()).toHaveLength(0);
 });
 
+test('a remote child whose first turn cannot start fails the step instead of waiting for a turn', async () => {
+  scripted(() => 'ok');
+  const { pc, owner, threadId, machine, onPc, run } = await setup();
+  const start = spyOn(pc.core.threads, 'startTurn').mockImplementation(() => { throw new Error('first turn refused'); });
+  restores.push(() => start.mockRestore());
+  const started = await owner.call('workflows.start', { threadId, requestId: 'failed-first-turn', plan: { name: 'Refused', steps: [{ id: 'read', machine, project: 'notes', task: 'Read the notes.' }] } });
+  await waitFor(() => run(started.id).status === 'failed', 1_000);
+  expect(onPc()).toHaveLength(1);
+  expect(onPc()[0]!.status).toBe('error');
+  expect(run(started.id).nodes[0]!.instances[0]).toMatchObject({ status: 'failed', machine: { childId: onPc()[0]!.id } });
+});
+
 for (const restart of [false, true]) test(`stopping the run${restart ? ' after a caller restart' : ''} stops its step on the other machine`, async () => {
   const { held } = scripted(prompt => (prompt.includes('step slow') ? null : 'ok'));
   const deskDir = restartable();

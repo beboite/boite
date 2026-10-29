@@ -1,14 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { DelegatedAgent, ModelInfo } from '@boite/contracts';
+import { RpcErrorCode, type DelegatedAgent, type ModelInfo, type RpcParams } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { invalidParams } from '../src/errors.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
-import { thrown } from './settle.ts';
+import { rejection, thrown } from './settle.ts';
 
 /* `boite delegate spawn --machine`: a parent here, its subagent on another machine of the group. */
 
@@ -209,7 +209,7 @@ test('a result the member could not send waits there, and arrives once the calle
 
 test('delegation.get and delegate list show the child on the other machine with that machine and its last result', async () => {
   answering();
-  const { desk, owner, threadId, pcId, pcName, cli, spawn } = await setup();
+  const { desk, pc, owner, threadId, pcId, pcName, cli, spawn } = await setup();
   const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'list-1');
   await waitFor(() => desk.core.delegation.remote.child(threadId, child.thread.id)?.state?.result === 'Done in notes');
   const { agents } = await owner.call('delegation.get', { threadId });
@@ -223,6 +223,22 @@ test('delegation.get and delegate list show the child on the other machine with 
   // Its full result is read from that machine.
   const page = await cli(['delegate', 'result', child.thread.id, agents[0]!.resultRef!.turnId]);
   expect(page.out).toContain('Done in notes');
+
+  const params = { threadId, agentId: child.thread.id, turnId: agents[0]!.resultRef!.turnId };
+  const reads: unknown[] = [];
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = ((peer, operation, payload) => {
+    if (operation === 'delegation.read') reads.push(payload);
+    return request(peer, operation, payload);
+  }) as typeof desk.core.coordination.request;
+  for (const bad of [{ turnId: null }, { offset: '1' }, { limit: 0 }]) {
+    const { reason } = await rejection(owner.call('delegation.result', { ...params, ...bad } as RpcParams<'delegation.result'>));
+    expect(reason).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams } });
+  }
+  expect(reads).toEqual([]);
+  // A sealed request must reject malformed pages too, even when it bypasses the caller's validation.
+  const peer = pc.core.group.peers().find(member => member.coreId === desk.core.coordination.card().coreId)!;
+  expect(await thrown(pc.core.delegation.remote.peer(peer, 'delegation.read', { parentId: threadId, childId: child.thread.id, turnId: params.turnId, offset: '1' }))).toThrow('offset: expected a nonnegative integer');
 });
 
 test('delegate send reaches the child there and starts a turn, delegate stop stops it, and archiving the parent archives it there', async () => {
@@ -286,6 +302,55 @@ test('the same request id answers the same child there, even when the first answ
   expect(await thrown(request(peer, 'delegation.start', { ...start, task: 'Read other notes', fingerprint: 'another' }))).toThrow('delegation.start.requestId was already used for different content');
   expect(childrenOnPc()).toHaveLength(1);
   expect(pc.core.delegation.remote.parentOf(there!.id)).toMatchObject({ coreId: deskId, parentId: threadId, requestId: 'same-1' });
+});
+
+test('a failed first turn keeps the remote child tracked and the same start answers it once', async () => {
+  const { prompts } = answering();
+  const { desk, pc, owner, threadId, deskId, machine, childrenOnPc } = await setup();
+  const startTurn = pc.core.threads.startTurn.bind(pc.core.threads);
+  let starts = 0;
+  pc.core.threads.startTurn = () => { starts++; throw new Error('first turn refused'); };
+  const params = { threadId, machine, project: 'notes', task: 'Read the notes', requestId: 'failed-first' };
+  const first = await owner.call('delegation.spawn', params).catch((error: unknown) => error);
+  pc.core.threads.startTurn = startTurn;
+  expect(first).toMatchObject({ thread: { status: 'error' } });
+  const child = first as DelegatedAgent;
+  expect(childrenOnPc().map(thread => thread.id)).toEqual([child.thread.id]);
+  expect(pc.core.delegation.remote.parentOf(child.thread.id)).toMatchObject({ coreId: deskId, parentId: threadId, requestId: params.requestId });
+  expect(desk.core.delegation.remote.record(threadId, params.requestId)?.childId).toBe(child.thread.id);
+  expect((await owner.call('delegation.spawn', params)).thread.id).toBe(child.thread.id);
+  expect(starts).toBe(1);
+  expect((await owner.call('delegation.get', { threadId })).agents).toMatchObject([{ thread: { id: child.thread.id, status: 'error' } }]);
+  expect(await owner.call('delegation.wait', { threadId, agentId: child.thread.id, timeoutMs: 0 })).toMatchObject({ state: 'settled', timedOut: false });
+  expect(await thrown(owner.call('delegation.spawn', { ...params, task: 'Different task' }))).toThrow('requestId already used for different content');
+  await owner.call('delegation.send', { threadId, toThreadId: child.thread.id, text: 'Try again', requestId: 'after-failed-first' });
+  await waitFor(() => prompts.has(child.thread.id));
+  expect(childrenOnPc()).toHaveLength(1);
+});
+
+test('a rolled back remote start leaves no parent link and the request can start a new child', async () => {
+  answering();
+  const { desk, pc, threadId, machine, cli, spawn, childrenOnPc } = await setup();
+  const putThread = pc.core.journal.putThread.bind(pc.core.journal);
+  let failedId = '';
+  pc.core.journal.putThread = thread => {
+    if (pc.core.journal.getSetting(`remote-parent:${thread.id}`)) {
+      failedId = thread.id;
+      throw new Error('parent transaction refused');
+    }
+    return putThread(thread);
+  };
+  const attempt = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--project', 'notes', '--request-id', 'rollback-first']);
+  pc.core.journal.putThread = putThread;
+  expect(attempt.err).toContain('peer request failed');
+  expect(failedId).not.toBe('');
+  expect(pc.core.journal.getThread(failedId)).toBeNull();
+  expect(pc.core.journal.getSetting(`remote-parent:${failedId}`)).toBeUndefined();
+  expect(pc.core.delegation.remote.parentOf(failedId)).toBeUndefined();
+  expect(desk.core.delegation.remote.holds(threadId, 'rollback-first')).toBe(true);
+  const child = await spawn('Read the notes', '--project', 'notes', '--request-id', 'rollback-first');
+  expect(child.thread.id).not.toBe(failedId);
+  expect(childrenOnPc().map(thread => thread.id)).toEqual([child.thread.id]);
 });
 
 test('a subagent working for another machine cannot start subagents or threads', async () => {
