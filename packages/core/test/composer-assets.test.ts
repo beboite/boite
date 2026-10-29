@@ -77,3 +77,53 @@ test('private assets release removed references and disconnected ownership witho
   expect(await thrown(b.call('composer.asset.get', other))).toThrow('referenced');
   b.close();
 });
+
+
+test('an incognito draft queue and its delivered assets leave no composer rows on disk', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const account = (await owner.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+  const choice = { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const };
+  const file = { kind: 'file' as const, name: 'private-queue.txt', mimeType: 'text/plain', data: 'c2VjcmV0' };
+  const { assetId } = await owner.call('composer.asset.put', { attachment: file, incognito: true });
+  const { data: _data, ...meta } = file;
+  await owner.call('composer.put', { section: 'drafts', id: 'private-queued-draft', expectedRevision: 0, value: {
+    draft: { projectId: null, worktree: false, incognito: true }, choice,
+    input: { text: '', attachments: [], paused: false, queued: [
+      { id: 'private-queued-first', text: 'private first', attachments: [{ ...meta, assetId }] },
+      { id: 'private-queued-second', text: 'private second', attachments: [] },
+    ] },
+  } });
+  await waitFor(() => h.core.journal.listThreads().some(thread => thread.incognito && h.core.journal.listTurns(thread.id).some(turn => turn.status === 'done')));
+  const thread = h.core.journal.listThreads().find(thread => thread.incognito)!;
+  await waitFor(() => h.core.composer.storage.get('inputs', thread.id).value?.input.queued.length === 0);
+  const messages = h.core.journal.listMessages(thread.id).filter(message => message.role === 'user');
+  expect(messages).toHaveLength(2);
+  expect(messages[0]?.parts).toContainEqual({ type: 'file', mimeType: file.mimeType, name: file.name, data: file.data });
+  for (const table of ['composer_records', 'composer_assets', 'composer_deliveries']) {
+    expect(h.core.journal.db.query(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+  }
+});
+
+
+test('reconnecting an incognito queue with a new arrival never rebatches already delivered input', async () => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const project = await owner.call('projects.drafts', {});
+  const account = (await owner.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+  const thread = await owner.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, incognito: true });
+  const first = { id: 'private-reconnect-first', text: 'Already delivered', attachments: [] };
+  await owner.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0,
+    value: { input: { text: '', attachments: [], paused: false, queued: [first] } } });
+  await waitFor(() => h.core.journal.listTurns(thread.id).some(turn => turn.status === 'done'));
+  owner.close();
+  await waitFor(() => h.core.composer.storage.list().length === 0);
+  const reconnected = await h.connect();
+  await reconnected.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0,
+    value: { input: { text: '', attachments: [], paused: false, queued: [first, { id: 'private-reconnect-next', text: 'New arrival', attachments: [] }] } } });
+  await waitFor(() => h.core.composer.storage.get('inputs', thread.id).value?.input.queued.length === 0);
+  const texts = h.core.journal.listMessages(thread.id).filter(message => message.role === 'user')
+    .flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : []));
+  expect(texts).toEqual(['Already delivered', 'New arrival']);
+  expect(h.core.journal.db.query('SELECT count(*) AS n FROM composer_deliveries').get()).toEqual({ n: 0 });
+});

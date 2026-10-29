@@ -1,3 +1,4 @@
+import { permissionAutoDecision } from '@boite/contracts';
 import {
   answerAttachmentError,
   type Attachment,
@@ -98,8 +99,7 @@ export class ThreadCards {
 
   /** A live mode change also settles tool approvals already waiting on the user. */
   applyPermissionMode(threadId: ThreadId, mode: ThreadSummary['permissionMode']): void {
-    const decision = mode === 'bypassPermissions' || mode === 'yolo' ? 'allow'
-      : mode === 'plan' || mode === 'dontAsk' ? 'deny' : null;
+    const decision = permissionAutoDecision(mode);
     if (decision === null) return;
     for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision }, `permission mode ${mode}`);
   }

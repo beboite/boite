@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { KNOWN_DIVERGENCES, SCENARIOS, type ContractEnv } from '../../../tests/contract/scenarios.ts';
 import { startTestCore, type TestCore } from './harness.ts';
@@ -43,6 +44,8 @@ function env(host=harness, owner=client, slowBoard?: {queued: number}): Contract
       }
       return env(peer,await peer.connect(),slowBoard);
     },
+    disconnect: () => owner.close(),
+    peer: async role => env(host, role ? await connect(host.url, host.core.agents.tokenFor(role.agentThreadId)) : await host.connect()),
     call: (method, params) => owner.call(method, params).then(result=>{
       if(slowBoard&&method==='sharedBoard.apply'&&(result as {outcome?:string}).outcome==='queued')slowBoard.queued++;
       return result;

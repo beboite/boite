@@ -1,3 +1,4 @@
+import { permissionAutoDecision } from '@boite/contracts';
 import { noteUserMessage } from './checklist';
 import { startAutoGoal, startsAutoGoal } from './activity';
 import { createFakeThread, publishFakeThread } from './create-thread';
@@ -485,8 +486,7 @@ export function threadMethods(ctx: FakeContext) {
         for (const turn of thread.turns) {
           if (turn.status === 'running' && turn.execution) turn.execution.permissionMode = params.permissionMode;
         }
-        const decision = params.permissionMode === 'bypassPermissions' || params.permissionMode === 'yolo' ? 'allow'
-          : params.permissionMode === 'plan' || params.permissionMode === 'dontAsk' ? 'deny' : null;
+        const decision = permissionAutoDecision(params.permissionMode);
         if (decision) for (const [id, pending] of ctx.pendingPermissions) {
           if (pending.request.threadId !== thread.id) continue;
           ctx.pendingPermissions.delete(id);

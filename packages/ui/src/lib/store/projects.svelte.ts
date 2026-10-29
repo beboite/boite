@@ -563,9 +563,11 @@ export class Projects {
     const project = target === null ? null : this.projects.find((p) => p.id === target);
     // The drafts folder is no repository: the worktree switch does not follow the draft there.
     const drafts = target === null || project?.kind === 'drafts';
+    // An accepted start owns its privacy and queue until it is cancelled or launched.
+    if (draft.incognito && !drafts && !this.ctx.sync.admitPrivacyChange(draftKey(draft))) return;
     // Its saved copy, if any, still names the old project: the open draft replaces it.
     this.ctx.drafts.forget(draftKey(draft));
-    const { incognito, ...kept } = draft;
+    const { incognito, ...kept } = this.#withPrivacy(draft, !!draft.incognito && drafts);
     // A draft keeps its id; one opened before ids existed gets one and a creation time, so its old project key stays that project's.
     this.draft = { ...kept, ...(draft.id ? {} : { id: secureId(), createdAt: created() }), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
@@ -576,9 +578,22 @@ export class Projects {
   /** The draft's incognito switch, offered in the drafts only. */
   setDraftIncognito(incognito: boolean): void {
     const draft = this.draft;
-    if (!draft || (incognito && !this.draftInDrafts)) return;
+    if (!draft || !!draft.incognito === incognito || (incognito && !this.draftInDrafts)) return;
+    if (!this.ctx.sync.admitPrivacyChange(draftKey(draft))) return;
+    this.draft = this.#withPrivacy(draft, incognito);
+    this.ctx.drafts.persist();
+  }
+
+  /** Privacy belongs to one composer identity on the core, so changing it retires that record. */
+  #withPrivacy(draft: Draft, incognito: boolean): Draft {
+    if (!!draft.incognito === incognito) return draft;
+    const previous = draftKey(draft);
+    this.ctx.drafts.forget(previous);
+    this.ctx.sync.touched('drafts', previous, true);
     const { incognito: _was, ...rest } = draft;
-    this.draft = incognito ? { ...rest, incognito: true } : rest;
+    const next = { ...rest, id: secureId(), ...(incognito ? { incognito: true as const } : {}) };
+    this.ctx.sync.touched('drafts', next.id, true);
+    return next;
   }
 
   /** The draft's worktree switch: on, the first send asks the core for a branch and a worktree. */

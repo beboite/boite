@@ -1,6 +1,22 @@
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import type { ProcessRecord } from '@boite/contracts';
+import type { ProcessIdentity } from './process-identity.ts';
+
+/** A traced process and the captured controls its registry keeps until exit. */
+export interface ProcessEntry {
+  record: ProcessRecord;
+  identity: ProcessIdentity;
+  root: boolean;
+  startup?: boolean;
+  /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
+  kill(): void | Promise<void>;
+  /** Not yet seen exiting by its spawner, which holds its handle until then; false for one the core did not spawn. */
+  running(): boolean;
+  usage(): { cpuMs: number; peakMemoryBytes: number } | null;
+  /** The parent running when this process started, held after it exits: the sweep reads lineage through it. */
+  parent?: ProcessEntry | null;
+}
 
 export interface SpawnOptions {
   /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */

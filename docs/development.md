@@ -630,6 +630,12 @@ behavioral scenarios on a temporary real core and the in-memory client.
 keys, not message wording. `KNOWN_DIVERGENCES` contains explicit exceptions;
 an exception that starts passing fails the runner until removed.
 
+`composer.ts` exercises queue batching, replay, private records/assets and
+agent access against both clients. `contract-coverage.test.ts` inventories
+literal fake handlers and requires a shared scenario for new methods.
+`tests/contract/fake-coverage-baseline.json` lists existing gaps: remove a
+method when its scenario lands; do not add new methods to this baseline.
+
 Shared refusals live in `lib/fake-client/checks.ts`, and settings validation
 uses contract `checkSettingsPatch`. Side-specific lifecycle and access cases
 live in `fake-client.parity.test.ts`. A fake path below a directory named

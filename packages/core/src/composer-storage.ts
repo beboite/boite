@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Attachment, ComposerAttachment, ComposerRecord, ComposerValue } from '@boite/contracts';
-import { answerAttachmentError, decodedBytes, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES } from '@boite/contracts';
+import { answerAttachmentError, decodedBytes, stableComposerValue, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, notFound, refused } from './errors.ts';
 import type { Connection } from './router.ts';
@@ -12,10 +12,7 @@ export interface Delivery {
   status: 'creating' | 'submitting' | 'delivered' | 'uncertain'; thread_id: string | null; request_id: string; fingerprint: string;
 }
 
-export const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value, (_key, item) => {
-  if (item && typeof item === 'object' && !Array.isArray(item)) return Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]]));
-  return item;
-})).digest('hex');
+export const digest = (value: unknown): string => createHash('sha256').update(stableComposerValue(value)).digest('hex');
 export const recordKey = (section: string, id: string): string => JSON.stringify([section, id]);
 
 /** Composer data has its own rows: typing never rewrites a message or an attachment. */
@@ -84,8 +81,9 @@ export class ComposerStorage {
   save(section: ComposerRecord['section'], id: string, value: ComposerValue | null, owner?: Connection): ComposerRecord {
     const previous = this.get(section, id);
     const references = value ? this.references(value).map(reference => reference.assetId) : [];
-    const record = { section, id, value, revision: previous.revision + 1, updatedAt: Date.now() };
-    if (this.privateMode(section, id, value)) {
+    const privateMode = this.privateMode(section, id, value);
+    const record: ComposerRecord = { section, id, value, revision: previous.revision + 1, updatedAt: Date.now(), ...(privateMode ? { privateMode: true } : {}) };
+    if (privateMode) {
       if (previous.revision && !this.#privateRecords.has(recordKey(section, id))) throw refused('composer: a persisted composer cannot become incognito; use a new draft');
       const connection = this.#privateOwners.get(recordKey(section, id)) ?? owner;
       if (!connection) throw refused('composer: an incognito record requires its originating connection');
@@ -132,7 +130,12 @@ export class ComposerStorage {
         if (value) for (const reference of this.references(value)) assets.add(reference.assetId);
         this.#privateRecords.delete(key); this.#privateOwners.delete(key); this.queued.delete(key); records.add(key);
       }
-      for (const [id, delivery] of this.#privateDeliveries) if (records.has(recordKey(delivery.section, delivery.record_id))) this.#privateDeliveries.delete(id);
+      // Consumed ids stay in memory until their thread is forgotten or the core exits.
+      // A reconnect can bring an unacknowledged copy plus new input: discarding these
+      // receipts would batch the old input again under a different turn request id.
+      for (const [id, delivery] of this.#privateDeliveries) {
+        if (delivery.status !== 'delivered' && records.has(recordKey(delivery.section, delivery.record_id))) this.#privateDeliveries.delete(id);
+      }
       for (const [id, ownerId] of this.#privateAssetOwners) if (ownerId === connection.id) assets.add(id);
       for (const [id, pending] of this.#pendingAssets) if (pending.delete(connection.id)) {
         if (!pending.size) this.#pendingAssets.delete(id);

@@ -14,13 +14,14 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.close();
 });
 
-async function env(): Promise<ContractEnv> {
-  const client = new FakeClient({ delayMs: 0 });
+async function env(client = new FakeClient({ delayMs: 0 })): Promise<ContractEnv> {
   clients.push(client);
   await client.connect();
   let folders = 0;
   return {
-    newContact:env,
+    newContact: () => env(),
+    disconnect: () => client.close(),
+    peer: role => env(client.composerPeer({ delayMs: 0, ...(role ? { principal: 'agent', agentThreadId: role.agentThreadId } : {}) })),
     call: (method, params) => client.call(method, params),
     on: (event, handler) => client.on(event, handler),
     // The fake has no disk: any folder exists, except under one named `missing`.
