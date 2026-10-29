@@ -32,13 +32,21 @@ export interface SleepState {
   /** When a holder was last seen: the wait for sleep runs from the later of this and `usedAt`. */
   heldAt: number;
   timer?: ReturnType<typeof setTimeout>;
+  /**
+   * Brought to the front as it wakes. A page of the core's own browser that is
+   * not its front tab is drawn only while focus emulation keeps it shown, and
+   * the freeze hides it: woken, it stays hidden and a capture waits for a frame
+   * that never comes. The desktop app's webviews are not raised: that could
+   * show the user's window.
+   */
+  front: boolean;
   /** Freezing and waking take turns, so a wake asked during a freeze lands after it. */
   turn: Promise<void>;
   dropped: boolean;
 }
 
-export function sleepState(): SleepState {
-  return { asleep: false, uses: 0, usedAt: Date.now(), heldAt: 0, turn: Promise.resolve(), dropped: false };
+export function sleepState(front = false): SleepState {
+  return { asleep: false, uses: 0, usedAt: Date.now(), heldAt: 0, front, turn: Promise.resolve(), dropped: false };
 }
 
 const STEP_MS = 5000;
@@ -83,7 +91,8 @@ export class TabSleep<T extends Sleeper> {
 
   /**
    * The page as it was before it slept. Frozen, a page is also hidden, and
-   * focus emulation shows it again, so it goes back on after the page is active.
+   * focus emulation shows it again, so it goes back on after the page is active;
+   * a page that must be raised to draw again is raised last (`front`).
    * A wake that fails leaves the tab asleep, so the next use tries it again.
    */
   wake(tab: T): Promise<void> {
@@ -91,6 +100,7 @@ export class TabSleep<T extends Sleeper> {
       if (!tab.sleep.asleep) return;
       await this.#step(tab, 'Page.setWebLifecycleState', { state: 'active' });
       await this.#step(tab, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+      if (tab.sleep.front) await this.#step(tab, 'Page.bringToFront', {});
       tab.sleep.asleep = false;
     });
   }
