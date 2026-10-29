@@ -47,6 +47,10 @@ export const strings = {
     /** What Resume sends the interrupted subagent. */
     resumeAgentText: 'Your background work ({what}) ended without waking you: {reason}. Check how it ended, then finish your task.',
     activeSection: 'Active',
-    finishedSection: 'Finished'
+    finishedSection: 'Finished',
+    /** A subagent started on another machine of the group: the chip's tooltip. */
+    runsOn: 'Runs on {machine}',
+    /** Why that subagent's row does not open: this window has no connection to its machine. */
+    machineAway: '{machine} is not connected here. Connect it in Settings, Machines and updates to open this subagent.'
   }
 } as const;

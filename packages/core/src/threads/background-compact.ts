@@ -75,64 +75,67 @@ interface Copy {
  * scheduler's account slots and its usage is recorded on no turn.
  */
 export class BackgroundCompaction {
-  private readonly copies = new Map<ThreadId, Copy>();
-  private readonly failures = new Map<ThreadId, number>();
+  readonly #copies = new Map<ThreadId, Copy>();
+  readonly #failures = new Map<ThreadId, number>();
   /** The turn carrying a thread's tail, which clears it once done. */
-  private readonly carrying = new Map<ThreadId, TurnId>();
-  private closed = false;
+  readonly #carrying = new Map<ThreadId, TurnId>();
+  #closed = false;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;
     core.bus.onCommitted((name, payload) => {
       if (name === 'settings.updated') {
-        for (const [threadId, copy] of this.copies) {
+        for (const [threadId, copy] of this.#copies) {
           const thread = core.journal.getThread(threadId);
-          if (thread === null || this.policy(thread) !== copy.policy) this.drop(threadId, 'the compaction policy changed');
+          if (thread === null || this.policy(thread) !== copy.policy) this.#drop(threadId, 'the compaction policy changed');
         }
         return;
       }
       if (name !== 'thread.removed') return;
       const threadId = (payload as { threadId: ThreadId }).threadId;
-      this.drop(threadId);
-      this.failures.delete(threadId);
-      this.carrying.delete(threadId);
+      this.#drop(threadId);
+      this.#failures.delete(threadId);
+      this.#carrying.delete(threadId);
     });
   }
 
   private policy(thread: ThreadSummary): string {
-    return JSON.stringify(effectiveCompaction(this.core.settings.get(), thread));
+    return JSON.stringify(effectiveCompaction(this.#core.settings.get(), thread));
   }
 
   /** The token limit a copy works toward, or null when the setting or the limit is off. */
   private limit(thread: ThreadSummary): number | null {
-    const settings = effectiveCompaction(this.core.settings.get(), thread);
+    const settings = effectiveCompaction(this.#core.settings.get(), thread);
     return settings.backgroundCompaction === true ? settings.autoCompact?.tokens ?? null : null;
   }
 
   /** Called by `AutoCompaction.turnFinished`, before it plans anything. */
   turnFinished(thread: ThreadSummary, turn: Turn): void {
-    if (this.carrying.get(thread.id) === turn.id) {
-      this.carrying.delete(thread.id);
-      if (turn.status === 'done') this.core.journal.deleteSetting(`${COMPACTION_TAIL_PREFIX}${thread.id}`);
+    if (this.#carrying.get(thread.id) === turn.id) {
+      this.#carrying.delete(thread.id);
+      if (turn.status === 'done') this.#core.journal.deleteSetting(`${COMPACTION_TAIL_PREFIX}${thread.id}`);
     }
     const limit = this.limit(thread);
-    const copy = this.copies.get(thread.id);
+    const copy = this.#copies.get(thread.id);
     if (copy !== undefined) {
       // A compaction rewrote the context the copy was made from.
-      const stale = limit === null ? 'the setting is off' : turn.execution?.operation === 'compact' ? 'the thread compacted' : this.stale(thread, copy, limit);
+      const stale = limit === null ? 'the setting is off' : turn.execution?.operation === 'compact' ? 'the thread compacted' : this.#stale(thread, copy, limit);
       if (stale === null) return;
-      this.drop(thread.id, stale);
+      this.#drop(thread.id, stale);
     }
-    if (limit !== null && turn.status === 'done') this.start(thread, turn, limit);
+    if (limit !== null && turn.status === 'done') this.#start(thread, turn, limit);
   }
 
   /** The carried prompt of `turnId` holds the thread's tail; it is cleared once that turn is done. */
   carried(threadId: ThreadId, turnId: TurnId): void {
-    this.carrying.set(threadId, turnId);
+    this.#carrying.set(threadId, turnId);
   }
 
   /** Whether a finished copy waits for the thread's next pause. */
   ready(threadId: ThreadId): boolean {
-    return this.copies.get(threadId)?.ready != null;
+    return this.#copies.get(threadId)?.ready != null;
   }
 
   /**
@@ -141,32 +144,32 @@ export class BackgroundCompaction {
    * running, and its end looks again. Null: compact the usual way.
    */
   due(thread: ThreadSummary): 'swapped' | 'waiting' | null {
-    const copy = this.copies.get(thread.id);
+    const copy = this.#copies.get(thread.id);
     if (copy === undefined) return null;
     const limit = this.limit(thread);
-    const stale = limit === null ? 'the setting is off' : this.stale(thread, copy, limit);
-    if (stale !== null) { this.drop(thread.id, stale); return null; }
+    const stale = limit === null ? 'the setting is off' : this.#stale(thread, copy, limit);
+    if (stale !== null) { this.#drop(thread.id, stale); return null; }
     if (copy.ready === null) return 'waiting';
     // Taking the new session closes the process that runs them.
-    if ((this.threads.agentState.background.get(thread.id)?.length ?? 0) > 0) { this.drop(thread.id, 'background work is running'); return null; }
+    if ((this.threads.agentState.background.get(thread.id)?.length ?? 0) > 0) { this.#drop(thread.id, 'background work is running'); return null; }
     try {
-      this.swap(thread, copy, copy.ready);
+      this.#swap(thread, copy, copy.ready);
     } catch (error) {
-      this.drop(thread.id, `the swap failed: ${messageOf(error)}`);
+      this.#drop(thread.id, `the swap failed: ${messageOf(error)}`);
       return null;
     }
-    this.copies.delete(thread.id);
-    this.failures.delete(thread.id);
+    this.#copies.delete(thread.id);
+    this.#failures.delete(thread.id);
     return 'swapped';
   }
 
   close(): void {
-    this.closed = true;
-    for (const threadId of [...this.copies.keys()]) this.drop(threadId);
+    this.#closed = true;
+    for (const threadId of [...this.#copies.keys()]) this.#drop(threadId);
   }
 
   /** Why the copy cannot replace the thread's session now, or null. */
-  private stale(thread: ThreadSummary, copy: Copy, limit: number): string | null {
+  #stale(thread: ThreadSummary, copy: Copy, limit: number): string | null {
     const { source } = copy;
     if (this.policy(thread) !== copy.policy) return 'the compaction policy changed';
     if (thread.archived) return 'the thread is archived';
@@ -179,22 +182,22 @@ export class BackgroundCompaction {
     return null;
   }
 
-  private start(thread: ThreadSummary, turn: Turn, limit: number): void {
-    if (this.closed || this.core.stopping) return;
+  #start(thread: ThreadSummary, turn: Turn, limit: number): void {
+    if (this.#closed || this.#core.stopping) return;
     const tokens = thread.context?.tokens ?? null;
     if (tokens === null || tokens >= limit || tokens < Math.max(BACKGROUND_COMPACT.minTokens, BACKGROUND_COMPACT.startRatio * limit)) return;
     // Only a session the turn itself ran on.
     if (thread.archived || thread.incognito || thread.sessionId === null || (thread.sessionResumeAt ?? null) !== null) return;
-    if ((this.failures.get(thread.id) ?? 0) >= BACKGROUND_COMPACT.maxFailures || this.threads.compactRefusal(thread) !== null) return;
+    if ((this.#failures.get(thread.id) ?? 0) >= BACKGROUND_COMPACT.maxFailures || this.threads.compactRefusal(thread) !== null) return;
     const execution = turn.execution;
     if (!execution || execution.operation === 'compact' || execution.operation === 'keepalive' || execution.operation === 'background') return;
     if (execution.sessionGeneration !== (thread.sessionGeneration ?? 0) || execution.providerId !== thread.providerId || execution.accountId !== thread.accountId) return;
-    const provider = this.core.providers.get(thread.providerId);
+    const provider = this.#core.providers.get(thread.providerId);
     if (provider === undefined) return;
-    const checkpoint = this.checkpointOf(provider, thread, turn);
+    const checkpoint = this.#checkpointOf(provider, thread, turn);
     if (checkpoint === null) return;
     let account: Account;
-    try { account = this.core.accounts.require(thread.accountId); } catch { return; }
+    try { account = this.#core.accounts.require(thread.accountId); } catch { return; }
     const copy: Copy = {
       source: {
         sessionId: thread.sessionId, generation: thread.sessionGeneration ?? 0, providerId: thread.providerId, accountId: thread.accountId,
@@ -206,13 +209,13 @@ export class BackgroundCompaction {
       dropped: false,
       ready: null,
     };
-    this.copies.set(thread.id, copy);
-    this.core.log('info', `thread ${thread.id}: background compaction started at ${tokens} of ${limit} tokens`, { source: provider.id, threadId: thread.id });
-    void this.run(thread, copy, provider, account, checkpoint);
+    this.#copies.set(thread.id, copy);
+    this.#core.log('info', `thread ${thread.id}: background compaction started at ${tokens} of ${limit} tokens`, { source: provider.id, threadId: thread.id });
+    void this.#run(thread, copy, provider, account, checkpoint);
   }
 
   /** Where the copy forks the session: the end of `turn`, in the driver's own terms. Null when it cannot. */
-  private checkpointOf(provider: ProviderDescriptor, thread: ThreadSummary, turn: Turn): { sessionId: string; entry: string } | null {
+  #checkpointOf(provider: ProviderDescriptor, thread: ThreadSummary, turn: Turn): { sessionId: string; entry: string } | null {
     if (thread.sessionId === null) return null;
     // Echo has no transcript to cut: its fork is named after the turn.
     if (provider.protocol === 'echo') return { sessionId: thread.sessionId, entry: turn.id };
@@ -221,7 +224,7 @@ export class BackgroundCompaction {
     return checkpoint !== null && checkpoint.sessionId === thread.sessionId && checkpoint.entry.length > 0 ? checkpoint : null;
   }
 
-  private async run(thread: ThreadSummary, copy: Copy, provider: ProviderDescriptor, account: Account, checkpoint: { sessionId: string; entry: string }): Promise<void> {
+  async #run(thread: ThreadSummary, copy: Copy, provider: ProviderDescriptor, account: Account, checkpoint: { sessionId: string; entry: string }): Promise<void> {
     // The copy's own driver session: never the thread's warm process.
     const key = `${thread.id}~compact`;
     const driver = getDriver(provider.protocol);
@@ -233,7 +236,7 @@ export class BackgroundCompaction {
     try {
       // Codex forks first and compacts the fork; Claude and echo fork as the turn resumes at the checkpoint.
       if (provider.protocol !== 'claude-sdk' && provider.protocol !== 'echo') {
-        const fork = await driver.forkSession!(this.sessionContext(thread, key, provider, account, null, null), checkpoint);
+        const fork = await driver.forkSession!(this.#sessionContext(thread, key, provider, account, null, null), checkpoint);
         if (copy.dropped) { await fork.discard(); return; }
         await fork.release();
         sessionId = fork.sessionId;
@@ -247,29 +250,29 @@ export class BackgroundCompaction {
         patchTool: () => undefined,
         complete: () => undefined,
       };
-      const ctx = this.turnContext(thread, key, provider, account, sessionId, resumeAt, sink, reading => { seen.use = reading; });
+      const ctx = this.#turnContext(thread, key, provider, account, sessionId, resumeAt, sink, reading => { seen.use = reading; });
       copy.handle = driver.startTurn(ctx);
       const timer = setTimeout(() => copy.handle?.stop(), BACKGROUND_COMPACT.timeoutMs);
       timer.unref?.();
       try { result = await copy.handle.done; } finally { clearTimeout(timer); }
     } catch (error) {
-      this.core.log('info', `thread ${thread.id}: background compaction failed: ${messageOf(error)}`, { source: provider.id, threadId: thread.id });
+      this.#core.log('info', `thread ${thread.id}: background compaction failed: ${messageOf(error)}`, { source: provider.id, threadId: thread.id });
     } finally {
       releaseThread(key);
     }
-    if (this.closed || this.core.journal.isClosed()) return;
+    if (this.#closed || this.#core.journal.isClosed()) return;
     const made = result !== null && result.sessionId !== null && result.sessionId !== copy.source.sessionId ? result.sessionId : null;
-    if (copy.dropped || this.copies.get(thread.id) !== copy) {
+    if (copy.dropped || this.#copies.get(thread.id) !== copy) {
       if (made !== null) this.discard(copy, made);
       return;
     }
     const done = seen.compaction;
     if (result?.status !== 'done' || made === null || done === null) {
-      this.copies.delete(thread.id);
-      this.failures.set(thread.id, (this.failures.get(thread.id) ?? 0) + 1);
+      this.#copies.delete(thread.id);
+      this.#failures.set(thread.id, (this.#failures.get(thread.id) ?? 0) + 1);
       if (made !== null) this.discard(copy, made);
       const reason = result === null ? 'it could not start' : result.status !== 'done' ? `it ended ${result.status}${result.error ? `: ${result.error}` : ''}` : made === null ? 'it named no new session' : 'the agent did not compact';
-      this.core.log('info', `thread ${thread.id}: background compaction dropped: ${reason}`, { source: provider.id, threadId: thread.id });
+      this.#core.log('info', `thread ${thread.id}: background compaction dropped: ${reason}`, { source: provider.id, threadId: thread.id });
       this.threads.autoCompact.recheck(thread.id);
       return;
     }
@@ -278,15 +281,15 @@ export class BackgroundCompaction {
     const postTokens = done.postTokens ?? (reading !== null && reading.tokens < copy.source.tokens ? reading.tokens : null);
     copy.ready = { sessionId: made, postTokens, window: reading?.window ?? null };
     copy.handle = null;
-    const current = this.core.journal.getThread(thread.id);
+    const current = this.#core.journal.getThread(thread.id);
     const limit = current === null ? null : this.limit(current);
-    const stale = current === null ? 'the thread is gone' : limit === null ? 'the setting is off' : this.stale(current, copy, limit);
-    if (stale !== null) { this.drop(thread.id, stale); return; }
+    const stale = current === null ? 'the thread is gone' : limit === null ? 'the setting is off' : this.#stale(current, copy, limit);
+    if (stale !== null) { this.#drop(thread.id, stale); return; }
     this.threads.autoCompact.recheck(thread.id);
   }
 
   /** The thread as the copy's driver sees it: its own id, so the thread's warm session is left alone. */
-  private sessionContext(thread: ThreadSummary, key: string, provider: ProviderDescriptor, account: Account, sessionId: string | null, resumeAt: string | null): SessionContext {
+  #sessionContext(thread: ThreadSummary, key: string, provider: ProviderDescriptor, account: Account, sessionId: string | null, resumeAt: string | null): SessionContext {
     const base = this.threads.contexts.makeSessionContext(thread, provider, account);
     return {
       ...base,
@@ -308,7 +311,7 @@ export class BackgroundCompaction {
     };
   }
 
-  private turnContext(
+  #turnContext(
     thread: ThreadSummary,
     key: string,
     provider: ProviderDescriptor,
@@ -331,7 +334,7 @@ export class BackgroundCompaction {
     const denied = (): PermissionTicket => Object.assign(Promise.resolve('deny' as const), { requestId: newId('req_'), withdraw: () => undefined });
     const unanswered = (): QuestionTicket => Object.assign(Promise.resolve(null), { questionId: newId('req_') });
     return {
-      ...this.sessionContext(thread, key, provider, account, sessionId, resumeAt),
+      ...this.#sessionContext(thread, key, provider, account, sessionId, resumeAt),
       turn,
       prompt: provider.protocol === 'echo' ? '[compact]' : '/compact',
       attachments: [],
@@ -349,47 +352,47 @@ export class BackgroundCompaction {
    * divider marks where the summary took over, and the tail marker sends the
    * turns since the copy with the next prompt.
    */
-  private swap(thread: ThreadSummary, copy: Copy, ready: NonNullable<Copy['ready']>): void {
+  #swap(thread: ThreadSummary, copy: Copy, ready: NonNullable<Copy['ready']>): void {
     const now = Date.now();
     const generation = (thread.sessionGeneration ?? 0) + 1;
     const context: ContextUse | null = ready.postTokens === null ? null : { tokens: ready.postTokens, window: ready.window ?? thread.context?.window ?? null, at: now };
     const next: ThreadSummary = { ...thread, sessionId: ready.sessionId, sessionResumeAt: null, sessionGeneration: generation, context, promptCache: null, updatedAt: now };
     const divider: Message = {
-      id: newId('msg_'), threadId: thread.id, turnId: this.core.journal.lastTurn(thread.id)?.id ?? newId('trn_'), role: 'system',
+      id: newId('msg_'), threadId: thread.id, turnId: this.#core.journal.lastTurn(thread.id)?.id ?? newId('trn_'), role: 'system',
       parts: [{ type: 'compaction', trigger: 'auto', preTokens: thread.context?.tokens ?? null, postTokens: ready.postTokens, background: true }],
       state: 'complete', createdAt: now,
     };
     const tail: CompactionTail = { generation, after: copy.source.turnId };
     this.threads.releaseAgent(thread.id);
-    this.core.journal.append({
+    this.#core.journal.append({
       type: 'thread.compacted.background', threadId: thread.id, version: 1,
       payload: { sessionId: ready.sessionId, previousSessionId: thread.sessionId, sessionGeneration: generation, after: copy.source.turnId, messageId: divider.id },
     }, () => {
-      this.core.journal.putThread(next);
-      this.core.journal.putMessage(divider);
-      this.core.journal.setSetting(`${COMPACTION_TAIL_PREFIX}${thread.id}`, tail);
+      this.#core.journal.putThread(next);
+      this.#core.journal.putMessage(divider);
+      this.#core.journal.setSetting(`${COMPACTION_TAIL_PREFIX}${thread.id}`, tail);
     });
-    this.core.bus.emit('message.started', divider);
-    this.core.bus.emit('message.completed', { threadId: thread.id, messageId: divider.id, state: 'complete' });
-    this.core.bus.emit('thread.updated', withLoad(this.core, next));
-    this.core.log('info', `thread ${thread.id}: swapped to a session compacted in the background`, { source: thread.providerId, threadId: thread.id });
+    this.#core.bus.emit('message.started', divider);
+    this.#core.bus.emit('message.completed', { threadId: thread.id, messageId: divider.id, state: 'complete' });
+    this.#core.bus.emit('thread.updated', withLoad(this.#core, next));
+    this.#core.log('info', `thread ${thread.id}: swapped to a session compacted in the background`, { source: thread.providerId, threadId: thread.id });
   }
 
   /** Forgets the thread's copy, stopping it if it still runs. */
-  private drop(threadId: ThreadId, reason?: string): void {
-    const copy = this.copies.get(threadId);
+  #drop(threadId: ThreadId, reason?: string): void {
+    const copy = this.#copies.get(threadId);
     if (copy === undefined) return;
-    this.copies.delete(threadId);
+    this.#copies.delete(threadId);
     copy.dropped = true;
     copy.handle?.stop();
     if (copy.ready !== null) this.discard(copy, copy.ready.sessionId);
-    if (reason !== undefined) this.core.log('info', `thread ${threadId}: background compaction dropped: ${reason}`, { source: copy.source.providerId, threadId });
+    if (reason !== undefined) this.#core.log('info', `thread ${threadId}: background compaction dropped: ${reason}`, { source: copy.source.providerId, threadId });
   }
 
   /** A Claude copy nobody took leaves no transcript in an account Boite isolated. Codex keeps its fork. */
   private discard(copy: Copy, sessionId: string): void {
-    if (copy.protocol !== 'claude-sdk' || this.core.journal.isClosed()) return;
-    void removeTranscripts(this.core, [{ accountId: copy.source.accountId, sessionId }]).catch(() => undefined);
+    if (copy.protocol !== 'claude-sdk' || this.#core.journal.isClosed()) return;
+    void removeTranscripts(this.#core, [{ accountId: copy.source.accountId, sessionId }]).catch(() => undefined);
   }
 }
 

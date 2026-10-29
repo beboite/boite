@@ -71,16 +71,19 @@ export interface WorktreeCleanupResult {
 
 export class WorktreeCleanup {
   readonly sweep: WorktreeSweep;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private pending: Promise<WorktreeCleanupResult[]> | null = null;
-  private closed = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #pending: Promise<WorktreeCleanupResult[]> | null = null;
+  #closed = false;
   /** `<worktree key>\0<head>` to the time it may be looked at again. */
-  private readonly kept = new Map<string, number>();
+  readonly #kept = new Map<string, number>();
   private readonly graceMs: number;
   private readonly startDelayMs: number;
   private readonly intervalMs: number;
 
-  constructor(private readonly core: Core, options: WorktreeCleanupOptions = {}) {
+  readonly #core: Core;
+
+  constructor(core: Core, options: WorktreeCleanupOptions = {}) {
+    this.#core = core;
     this.sweep = new WorktreeSweep(core);
     this.graceMs = options.graceMs ?? SETTLED_GRACE_MS;
     this.startDelayMs = options.startDelayMs ?? START_DELAY_MS;
@@ -89,70 +92,70 @@ export class WorktreeCleanup {
 
   start(): void {
     const schedule = (delay: number): void => {
-      if (this.closed) return;
-      this.timer = setTimeout(() => {
+      if (this.#closed) return;
+      this.#timer = setTimeout(() => {
         void this.run().finally(() => schedule(this.intervalMs));
       }, delay);
-      this.timer.unref();
+      this.#timer.unref();
     };
     schedule(this.startDelayMs);
   }
 
   async close(): Promise<void> {
-    this.closed = true;
-    if (this.timer) clearTimeout(this.timer);
-    await this.pending?.catch(() => undefined);
+    this.#closed = true;
+    if (this.#timer) clearTimeout(this.#timer);
+    await this.#pending?.catch(() => undefined);
   }
 
   /** One pass, shared with a pass already under way. */
   run(): Promise<WorktreeCleanupResult[]> {
-    if (this.closed || this.core.journal.isClosed()) return Promise.resolve([]);
-    this.pending ??= this.pass().catch((error: unknown) => {
-      this.core.log('warn', `worktree cleanup pass failed: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupFailed' });
+    if (this.#closed || this.#core.journal.isClosed()) return Promise.resolve([]);
+    this.#pending ??= this.#pass().catch((error: unknown) => {
+      this.#core.log('warn', `worktree cleanup pass failed: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupFailed' });
       return [];
-    }).finally(() => { this.pending = null; });
-    return this.pending;
+    }).finally(() => { this.#pending = null; });
+    return this.#pending;
   }
 
-  private stopped(deadline: number): boolean {
-    return this.closed || this.core.stopping || this.core.journal.isClosed() || Date.now() >= deadline;
+  #stopped(deadline: number): boolean {
+    return this.#closed || this.#core.stopping || this.#core.journal.isClosed() || Date.now() >= deadline;
   }
 
-  private async pass(): Promise<WorktreeCleanupResult[]> {
+  async #pass(): Promise<WorktreeCleanupResult[]> {
     const deadline = Date.now() + PASS_BUDGET_MS;
     const budget = { removals: PASS_REMOVALS, proofs: PASS_PROOFS };
     const removed: WorktreeCleanupResult[] = [];
     const now = Date.now();
-    for (const [key, until] of this.kept) if (until <= now) this.kept.delete(key);
+    for (const [key, until] of this.#kept) if (until <= now) this.#kept.delete(key);
     let holders: Holder[] | null = null;
     let heads: LinkedHead[] | null = null;
-    for (const project of this.core.journal.listProjects()) {
-      if (this.stopped(deadline) || budget.removals === 0) break;
-      if (this.core.journal.getSetting(autoRemoveWorktreesKey(project.id)) === false) continue;
+    for (const project of this.#core.journal.listProjects()) {
+      if (this.#stopped(deadline) || budget.removals === 0) break;
+      if (this.#core.journal.getSetting(autoRemoveWorktreesKey(project.id)) === false) continue;
       // The drafts folder and plain folders have no worktrees; a missing folder has nothing to clean.
       if (!existsSync(join(project.path, '.git'))) continue;
       try {
-        holders ??= await this.holders();
-        heads ??= openLinkedHeads(this.core.journal);
-        removed.push(...await this.project(project, holders, this.claims(project, heads), deadline, budget));
+        holders ??= await this.#holders();
+        heads ??= openLinkedHeads(this.#core.journal);
+        removed.push(...await this.#project(project, holders, this.#claims(project, heads), deadline, budget));
       } catch (error) {
         // A folder gone or a git that fails here says nothing about the other projects.
-        this.core.log('info', `worktree cleanup skipped ${project.name}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupSkipped' });
+        this.#core.log('info', `worktree cleanup skipped ${project.name}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.cleanupSkipped' });
       }
     }
     return removed;
   }
 
   /** The folders this project's worktrees are created in, the current shared one included. */
-  private async roots(project: Project): Promise<string[]> {
-    const storage = this.core.settings.get().worktreeStorage;
+  async #roots(project: Project): Promise<string[]> {
+    const storage = this.#core.settings.get().worktreeStorage;
     const roots = [worktreeRoot(project.path)];
     if (storage?.mode === 'shared' && storage.directory) roots.push(worktreeRoot(project.path, storage, project.id));
     return Promise.all(roots.map(realKey));
   }
 
   /** Every thread, archived and deleted ones included, by the real key of its folder. */
-  private async holders(): Promise<Holder[]> {
+  async #holders(): Promise<Holder[]> {
     return Promise.all(this.rows().map(async (row) => ({ ...row, key: await realKey(row.cwd) })));
   }
 
@@ -161,7 +164,7 @@ export class WorktreeCleanup {
     const query = `SELECT t.id, t.cwd, t.branch, t.status, t.archived, t.archived_at, t.updated_at, d.deleted_at
       FROM threads t LEFT JOIN thread_deletions d ON d.thread_id = t.id`;
     type Row = { id: ThreadId; cwd: string; branch: string | null; status: ThreadSummary['status']; archived: number; archived_at: number | null; updated_at: number; deleted_at: number | null };
-    const rows = this.core.journal.db.query(query).all() as Row[];
+    const rows = this.#core.journal.db.query(query).all() as Row[];
     return rows.map((row) => ({
       id: row.id,
       cwd: row.cwd,
@@ -179,7 +182,7 @@ export class WorktreeCleanup {
    * of this project as its head: the same name in a repository the project
    * fetches from. The remotes are read once, and only for a name some head has.
    */
-  private claims(project: Project, heads: readonly LinkedHead[]): Claims {
+  #claims(project: Project, heads: readonly LinkedHead[]): Claims {
     let remotes: Promise<ReadonlySet<string> | null> | null = null;
     return async (branch, current = heads) => {
       if (!current.some((head) => head.branch === branch)) return false;
@@ -188,24 +191,24 @@ export class WorktreeCleanup {
     };
   }
 
-  private async project(project: Project, holders: Holder[], claimed: Claims, deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
+  async #project(project: Project, holders: Holder[], claimed: Claims, deadline: number, budget: { removals: number; proofs: number }): Promise<WorktreeCleanupResult[]> {
     const listed = await this.sweep.listed(project);
-    const roots = await this.roots(project);
+    const roots = await this.#roots(project);
     const own = await realKey(project.path);
-    const reserved = await Promise.all(this.core.drafts.reservedPaths().map(realKey));
+    const reserved = await Promise.all(this.#core.drafts.reservedPaths().map(realKey));
     const done: WorktreeCleanupResult[] = [];
     for (const worktree of listed) {
-      if (this.stopped(deadline) || budget.removals === 0) break;
+      if (this.#stopped(deadline) || budget.removals === 0) break;
       if (worktree.main) continue;
       const key = await realKey(worktree.path);
       if (key === own || !roots.some((root) => key !== root && inside(root, key))) continue;
       const memo = `${key}\0${worktree.head ?? ''}`;
-      if (this.kept.has(memo)) continue;
+      if (this.#kept.has(memo)) continue;
       const standing = holders.filter((holder) => inside(key, holder.key));
-      if (!(await this.settled(worktree, key, standing, reserved, claimed))) continue;
+      if (!(await this.#settled(worktree, key, standing, reserved, claimed))) continue;
       const result = await this.settle(project, worktree, standing, claimed, budget);
       if (result === null) {
-        this.kept.set(memo, Date.now() + KEPT_FOR_MS);
+        this.#kept.set(memo, Date.now() + KEPT_FOR_MS);
         continue;
       }
       budget.removals--;
@@ -215,13 +218,13 @@ export class WorktreeCleanup {
   }
 
   /** Nothing live stands in it, and it has been that way long enough. */
-  private async settled(worktree: Listed, key: string, standing: Holder[], reserved: string[], claimed: Claims): Promise<boolean> {
+  async #settled(worktree: Listed, key: string, standing: Holder[], reserved: string[], claimed: Claims): Promise<boolean> {
     const now = Date.now();
     if (reserved.some((path) => inside(key, path) || inside(path, key))) return false;
     if (worktree.branch !== null && await claimed(worktree.branch)) return false;
     if (standing.length > 0) {
       // Automatic Done may still have a prompt, including a runtime with no tracked process.
-      return standing.every((holder) => !occupiesCheckout(this.core, holder) && holder.settledAt !== null && now - holder.settledAt >= this.graceMs);
+      return standing.every((holder) => !occupiesCheckout(this.#core, holder) && holder.settledAt !== null && now - holder.settledAt >= this.graceMs);
     }
     // No thread: only a branch the core names, and not one a draft is about to adopt.
     if (worktree.branch !== null && !worktree.branch.startsWith(BRANCH_PREFIX)) return false;
@@ -240,7 +243,7 @@ export class WorktreeCleanup {
       budget.proofs--;
       const owner = standing.find((holder) => !holder.deleted) ?? standing[0];
       try {
-        const proof = await this.core.pullRequests.proveMerged({
+        const proof = await this.#core.pullRequests.proveMerged({
           id: owner?.id ?? (`worktrees:${project.id}` as ThreadId),
           cwd: worktree.path,
           branch: owner?.branch ?? worktree.branch,
@@ -256,12 +259,12 @@ export class WorktreeCleanup {
     }
     // A restore or a thread that arrived during the awaits above is one
     // `removeSettled` refuses: it checks every thread again as git deletes.
-    if (worktree.branch !== null && await claimed(worktree.branch, openLinkedHeads(this.core.journal))) return null;
+    if (worktree.branch !== null && await claimed(worktree.branch, openLinkedHeads(this.#core.journal))) return null;
     let removal: { branch: string | null; branchDeleted: boolean };
     try {
       removal = await this.sweep.removeSettled(project, worktree.path, merged);
     } catch (error) {
-      this.core.log('info', `kept the worktree ${worktree.path}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.kept' });
+      this.#core.log('info', `kept the worktree ${worktree.path}: ${messageOf(error)}`, { source: 'worktree-cleanup', event: 'worktrees.kept' });
       return null;
     }
     const record: ThreadWorktreeRemoval = {
@@ -273,12 +276,12 @@ export class WorktreeCleanup {
       removedAt: Date.now(),
     };
     for (const holder of standing) {
-      this.core.journal.setSetting(worktreeRemovalKey(holder.id), { ...record, path: holder.cwd });
-      const thread: ThreadSummary | null = holder.deleted ? null : this.core.journal.getThread(holder.id);
-      if (thread) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+      this.#core.journal.setSetting(worktreeRemovalKey(holder.id), { ...record, path: holder.cwd });
+      const thread: ThreadSummary | null = holder.deleted ? null : this.#core.journal.getThread(holder.id);
+      if (thread) this.#core.bus.emit('thread.updated', withLoad(this.#core, thread));
     }
     const why = merged ? `pull request #${merged.number} merged` : 'nothing left that another branch lacks';
-    this.core.log('info', `removed the settled worktree ${worktree.path} (${why})${removal.branch ? `, branch ${removal.branch} ${removal.branchDeleted ? 'deleted' : 'kept'}` : ''}`, {
+    this.#core.log('info', `removed the settled worktree ${worktree.path} (${why})${removal.branch ? `, branch ${removal.branch} ${removal.branchDeleted ? 'deleted' : 'kept'}` : ''}`, {
       source: 'worktree-cleanup', event: 'worktrees.removed', data: { projectId: project.id, reason, branchDeleted: removal.branchDeleted },
     });
     return { projectId: project.id, path: worktree.path, reason, branch: removal.branch, branchDeleted: removal.branchDeleted };

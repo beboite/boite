@@ -1,3 +1,4 @@
+import type { PolicyRefusalData } from './policy';
 import type { AccountId, ProviderId, ThreadId, Timestamp } from './ids';
 
 // ---------------------------------------------------------------------------
@@ -44,8 +45,11 @@ export interface ExecutableCandidate {
 export interface ProviderInstall {
   /** A version string shown to the user and written beside the files. */
   version: string;
-  /** Omitted for zip archives; binary downloads contain exactly one file. */
-  format?: 'zip' | 'binary';
+  /**
+   * Omitted for zip archives; binary downloads contain exactly one file; `tgz`
+   * is a gzipped tar, the shape of an npm package tarball.
+   */
+  format?: 'zip' | 'binary' | 'tgz';
   /** The archive or executable download. */
   url: string;
   sha256: string;
@@ -296,7 +300,7 @@ export interface ProviderHookSource {
  * Quirks a driver applies to one agent's dialect of a protocol. A value the
  * core does not know is refused at load time rather than ignored.
  */
-export type ProviderQuirk = 'antigravity' | 'grok';
+export type ProviderQuirk = 'antigravity' | 'grok' | 'hermes';
 
 /** One step of a model's reasoning effort scale, as the descriptor spells it. */
 export interface EffortLevel {
@@ -434,6 +438,12 @@ export interface ProviderSummary {
    * on older cores, which read as on; read it through `providerEnabled`.
    */
   enabled?: boolean;
+  /**
+   * Set when the admin policy keeps this provider off (`providers.allow` or
+   * `providers.deny`): `enabled` is false and no switch turns it on. The
+   * provider stays listed so the user sees why.
+   */
+  policy?: PolicyRefusalData;
   /** The descriptor's `experimental`. Missing reads as false. */
   experimental?: boolean;
 }

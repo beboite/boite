@@ -262,6 +262,11 @@ test('the tailnet address and name come first, then the LAN, and loopback only w
   expect(tailnetAddress({ eth0: [ts] }, {})).toBeNull();
   expect(tailnetAddress({ utun4: [ts] }, {})).toBeNull();
   expect(tailnetAddress({ utun4: [ts, { address: 'fd7a:115c:a1e0::f', family: 'IPv6', internal: false } as never] }, {})).toBe('100.101.102.103');
+  // Android names the VpnService interface tun0, tun1…: another VPN's tun has no Tailscale IPv6.
+  const android = { address: '100.103.196.100', family: 'IPv4', internal: false } as never;
+  const linkLocal = { address: 'fe80::1', family: 'IPv6', internal: false } as never;
+  expect(tailnetAddress({ wlan0: [eth], tun1: [android, linkLocal] }, {})).toBeNull();
+  expect(tailnetAddress({ wlan0: [eth], tun1: [linkLocal, { address: 'fd7a:115c:a1e0::682f:c465', family: 'IPv6', internal: false } as never, android] }, {})).toBe('100.103.196.100');
   expect(tailnetAddress({ Tailscale: [ts] }, {})).toBe('100.101.102.103');
   expect(tailnetAddress({ tailscale0: [ts] }, { BOITE_TAILNET: '0' })).toBeNull();
   expect(isTailnetAddress('100.128.0.1')).toBe(false);

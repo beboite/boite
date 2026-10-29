@@ -19,9 +19,10 @@ import { closeThreadTerminals } from './terminals';
 import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
 import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
+import { fakeCore } from './coordination';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { boundedMessageWindow, pageBytes, pageBytesProblem, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
+import { boundedMessageWindow, listCursorProblem, pageBytes, pageBytesProblem, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -211,6 +212,25 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
   closeThreadTerminals(ctx, thread.id);
 }
 
+/**
+ * As the core's remote `retire`: a conversation archived or deleted stops and archives its subagents and
+ * workflow steps on other machines, while the page reaches them. A restore here leaves them archived there.
+ */
+async function retireThere(ctx: FakeContext, rootId: string): Promise<void> {
+  const children = [
+    ...(ctx.delegationAgents.get(rootId) ?? []).flatMap(row => (row.machine ? [{ coreId: row.machine.coreId, threadId: row.threadId }] : [])),
+    ...ctx.workflows.childrenThere(rootId),
+  ];
+  for (const { coreId, threadId } of children) {
+    const there = fakeCore(coreId);
+    const child = there?.threads.get(threadId);
+    if (!there || !child || child.archived) continue;
+    await putAway(there, child);
+    Object.assign(child, { archived: true, archivedAt: Date.now(), doneAt: null });
+    there.touch(child);
+  }
+}
+
 /** Like the resident core, expire stopped families from their deletion date. */
 export function purgeDeletedThreads(ctx: FakeContext): void {
   const days = ctx.settings.threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
@@ -286,6 +306,19 @@ export function threadMethods(ctx: FakeContext) {
         .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
         .filter((t) => (params.includeArchived ? true : !t.archived))
         .map((t) => structuredClone(toSummary(t)));
+    },
+    // The core's answer (`threads/list-changes.ts`): whole, or the rows changed since plus every row with a load.
+    'threads.listChanges': async (params) => {
+      const problem = params.since === undefined ? null : listCursorProblem(params.since);
+      if (problem) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `threads.listChanges.${problem.field}: expected ${problem.expected}`, data: problem });
+      const cursor = ctx.threadChanges.cursor();
+      const changed = params.since === undefined ? null : ctx.threadChanges.since(params.since);
+      const listed = [...ctx.threads.values()].filter(t => !t.archived);
+      if (changed === null) return { kind: 'full' as const, cursor, threads: listed.map(t => structuredClone(toSummary(t))) };
+      const asked = new Set(changed);
+      const threads = listed.filter(t => asked.has(t.id) || t.load != null).map(t => structuredClone(toSummary(t)));
+      const answered = new Set(threads.map(t => t.id));
+      return { kind: 'changes' as const, cursor, threads, removed: changed.filter(id => !answered.has(id)) };
     },
     'threads.create': async (params) => {
       // The core's creation receipts: asked again under its request id, a creation answers with the conversation it made.
@@ -488,6 +521,7 @@ export function threadMethods(ctx: FakeContext) {
         if (!thread.parentThreadId) ctx.workflows.stopRoot(thread.id, 'The thread was archived.');
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));
+        if (!thread.parentThreadId) await retireThere(ctx, thread.id);
         // A restore during the stops keeps processes; new child work keeps its own.
         if (ctx.threads.get(thread.id) === thread && thread.archived && !removing.has(thread.id)) {
           for (const member of family) {
@@ -522,6 +556,7 @@ export function threadMethods(ctx: FakeContext) {
       try {
         cancelFamilySideQuestions(ctx, threadId);
         ctx.workflows.stopRoot(threadId, 'Conversation deleted');
+        await retireThere(ctx, threadId);
         for (const thread of family) {
           await putAway(ctx, thread);
           ctx.touch(thread);

@@ -39,7 +39,7 @@ export class StoreContext {
   readonly threadReads = new SnapshotReads<ThreadSummary>(row => row.id);
   readonly projectReads = new SnapshotReads<Project>(row => row.id);
   readonly accountReads = new SnapshotReads<Account>(row => row.id);
-  readonly metadataRevision = { providers: 0, settings: 0, scheduler: 0, keybindings: 0 };
+  readonly metadataRevision = { providers: 0, settings: 0, scheduler: 0, keybindings: 0, policy: 0 };
 
   get client(): Client | null { return this.#client; }
   set client(client: Client | null) {

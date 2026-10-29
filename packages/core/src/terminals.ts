@@ -104,21 +104,21 @@ export function commandLine(kind: Shell['kind'], argv: string[]): string {
  * string and slicing it again copied the whole history per chunk.
  */
 export class OutputHistory {
-  private chunks: string[] = [];
+  #chunks: string[] = [];
   private length = 0;
 
   constructor(private readonly max = HISTORY_CHARS) {}
 
   push(data: string): void {
-    this.chunks.push(data);
+    this.#chunks.push(data);
     this.length += data.length;
     // Drop whole chunks while what is left still covers the window.
-    while (this.chunks.length > 1 && this.length - this.chunks[0]!.length >= this.max) {
-      this.length -= this.chunks.shift()!.length;
+    while (this.#chunks.length > 1 && this.length - this.#chunks[0]!.length >= this.max) {
+      this.length -= this.#chunks.shift()!.length;
     }
-    if (this.chunks.length > HISTORY_CHUNKS) {
+    if (this.#chunks.length > HISTORY_CHUNKS) {
       const joined = this.text();
-      this.chunks = [joined];
+      this.#chunks = [joined];
       this.length = joined.length;
     }
   }
@@ -129,7 +129,7 @@ export class OutputHistory {
    * the top of the screen a client redraws.
    */
   text(): string {
-    const all = this.chunks.join('');
+    const all = this.#chunks.join('');
     if (all.length <= this.max) return all;
     const cut = all.slice(-this.max);
     const line = cut.indexOf('\n');
@@ -167,31 +167,34 @@ export interface StartOptions {
 }
 
 export class TerminalStore {
-  private readonly sessions = new Map<string, Session>();
+  readonly #sessions = new Map<string, Session>();
   /**
    * The connections that attached each shell: `terminal.output` goes to them
    * only. A window without that pane would drop the bytes anyway.
    */
-  private readonly watchers = new Map<string, Set<string>>();
+  readonly #watchers = new Map<string, Set<string>>();
 
-  constructor(private readonly core: Core) {}
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;}
 
   /** The connection attached shell `id`: from now on its output reaches it. */
   watch(id: string, connectionId: string): void {
-    const watching = this.watchers.get(id);
-    if (watching === undefined) this.watchers.set(id, new Set([connectionId]));
+    const watching = this.#watchers.get(id);
+    if (watching === undefined) this.#watchers.set(id, new Set([connectionId]));
     else watching.add(connectionId);
   }
 
   watches(id: string, connectionId: string): boolean {
-    return this.watchers.get(id)?.has(connectionId) === true;
+    return this.#watchers.get(id)?.has(connectionId) === true;
   }
 
   /** The connection let go of shell `id`. */
   unwatch(id: string, connectionId: string): void {
-    const watching = this.watchers.get(id);
+    const watching = this.#watchers.get(id);
     watching?.delete(connectionId);
-    if (watching?.size === 0) this.watchers.delete(id);
+    if (watching?.size === 0) this.#watchers.delete(id);
   }
 
   /**
@@ -199,12 +202,12 @@ export class TerminalStore {
    * nobody watches it any more, unless a shell of the same id started since.
    */
   exitSent(id: string): void {
-    if (!this.sessions.has(id)) this.watchers.delete(id);
+    if (!this.#sessions.has(id)) this.#watchers.delete(id);
   }
 
   /** The socket closed: it watches nothing any more. */
   disconnect(connectionId: string): void {
-    for (const id of [...this.watchers.keys()]) this.unwatch(id, connectionId);
+    for (const id of [...this.#watchers.keys()]) this.unwatch(id, connectionId);
   }
 
   /** One of the thread's shells, started in its working directory the first time. */
@@ -212,7 +215,7 @@ export class TerminalStore {
     if (terminalId !== undefined && (typeof terminalId !== 'string' || !THREAD_TERMINAL_KEY.test(terminalId))) {
       throw invalidParams(`terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(terminalId)}`, { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` });
     }
-    const thread = this.core.threads.require(threadId);
+    const thread = this.#core.threads.require(threadId);
     if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
     // The ids bound the count: the first shell and `term-2` to `term-16`.
     const id = threadTerminalId(threadId, terminalId);
@@ -222,7 +225,7 @@ export class TerminalStore {
   /** The thread's running shells, in the order they started. A closing one is gone already. */
   listThread(threadId: ThreadId): ThreadTerminal[] {
     const first = threadTerminalId(threadId);
-    return this.threadSessions(threadId).filter((session) => !session.closing).map((session) => ({
+    return this.#threadSessions(threadId).filter((session) => !session.closing).map((session) => ({
       id: session.id,
       ...(session.id === first ? {} : { terminalId: session.id.slice(first.length + 1) }),
       cwd: session.cwd,
@@ -231,7 +234,7 @@ export class TerminalStore {
 
   /** Closes every shell of the thread. */
   async closeThread(threadId: ThreadId): Promise<void> {
-    await Promise.all(this.threadSessions(threadId).map((session) => this.close(session.id)));
+    await Promise.all(this.#threadSessions(threadId).map((session) => this.close(session.id)));
   }
 
   /**
@@ -239,23 +242,23 @@ export class TerminalStore {
    * leftover whose session went already included: the records go next.
    */
   async stopThread(threadId: ThreadId): Promise<void> {
-    const ids = new Set([...this.threadSessions(threadId).map((session) => session.id), ...this.core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id))]);
-    await Promise.all([...ids].map((id) => this.core.procs.stopAndWait(id as ThreadId)));
+    const ids = new Set([...this.#threadSessions(threadId).map((session) => session.id), ...this.#core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id))]);
+    await Promise.all([...ids].map((id) => this.#core.procs.stopAndWait(id as ThreadId)));
   }
 
   /** How many processes the thread's shells run. */
   threadProcesses(threadId: ThreadId): number {
-    return this.core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id)).reduce((sum, id) => sum + this.core.procs.liveCount(id), 0);
+    return this.#core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id)).reduce((sum, id) => sum + this.#core.procs.liveCount(id), 0);
   }
 
-  private threadSessions(threadId: ThreadId): Session[] {
-    return [...this.sessions.values()].filter((session) => isThreadTerminal(threadId, session.id));
+  #threadSessions(threadId: ThreadId): Session[] {
+    return [...this.#sessions.values()].filter((session) => isThreadTerminal(threadId, session.id));
   }
 
   /** The running shell under this id, resized to the client that attaches, or a new one. */
   open(id: string, options: StartOptions): TerminalState {
     checkSize(options.cols, options.rows);
-    const running = this.sessions.get(id);
+    const running = this.#sessions.get(id);
     if (running !== undefined) {
       if (running.closing) throw refused(`the shell ${id} is still closing, open it again in a moment`, { id });
       running.terminal.resize(options.cols, options.rows);
@@ -265,7 +268,7 @@ export class TerminalStore {
       throw refused(`the working directory ${options.cwd} does not exist any more`, { id, cwd: options.cwd });
     }
     const picked = pickShell();
-    const { shell, integrated } = options.integrate === true ? integrate(picked, this.core.dataDir) : { shell: picked, integrated: false };
+    const { shell, integrated } = options.integrate === true ? integrate(picked, this.#core.dataDir) : { shell: picked, integrated: false };
     const described = describeShell(shell, integrated);
     const announce = integrated ? new HistoryAnnounce() : null;
     const decoder = new TextDecoder();
@@ -295,11 +298,11 @@ export class TerminalStore {
     let gate: ReturnType<typeof setTimeout> | null = null;
     const emit = (data: string) => {
       // A value split across two chunks passes; one whole in a chunk is masked (docs/secrets.md).
-      if (options.threadId !== undefined) data = this.core.secrets.mask(options.threadId, data);
+      if (options.threadId !== undefined) data = this.#core.secrets.mask(options.threadId, data);
       history.push(data);
       sequence++;
       if (session) session.sequence = sequence;
-      this.core.bus.emit('terminal.output', { id, data, sequence });
+      this.#core.bus.emit('terminal.output', { id, data, sequence });
     };
     const release = () => {
       if (held.length === 0) {
@@ -313,7 +316,7 @@ export class TerminalStore {
     };
     let spawned;
     try {
-      spawned = this.core.procs.spawnTerminal(id, launch.exe, launch.args, {
+      spawned = this.#core.procs.spawnTerminal(id, launch.exe, launch.args, {
         cwd: options.cwd,
         env,
         cols: options.cols,
@@ -339,25 +342,25 @@ export class TerminalStore {
     const openedAt = Date.now();
     const shellName = shell.exe.split(/[\\/]/).pop() ?? 'shell';
     const owner = options.threadId === undefined ? {} : { threadId: options.threadId };
-    this.core.logs.info(`Terminal ${id} opened with ${shellName}`, { source: 'terminals', event: 'terminal.opened', ...owner, data: { id, shell: shellName } });
+    this.#core.logs.info(`Terminal ${id} opened with ${shellName}`, { source: 'terminals', event: 'terminal.opened', ...owner, data: { id, shell: shellName } });
     const exited = spawned.exited.then(
       (code) => code,
       () => null,
     ).then((code) => {
       // A shell exits with its last command's status: a failed `false; exit` is a routine close.
-      this.core.logs.info(`Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
+      this.#core.logs.info(`Terminal ${id} (${shellName}) exited with code ${code ?? 'unknown'} after ${Math.round((Date.now() - openedAt) / 1000)} s`, {
         source: 'terminals', event: 'terminal.exited', ...owner, durationMs: Date.now() - openedAt, data: { id, shell: shellName, exitCode: code },
       });
       clearTimeout(fallback);
       if (quiet !== null) clearTimeout(quiet);
       if (gate !== null) clearTimeout(gate);
       gate = null;
-      if (this.sessions.get(id) === session) this.sessions.delete(id);
-      if (!this.core.journal.isClosed()) {
+      if (this.#sessions.get(id) === session) this.#sessions.delete(id);
+      if (!this.#core.journal.isClosed()) {
         // The last lines a shell printed go out before its exit, never after.
         if (held.length > 0) emit(held);
         held = '';
-        this.core.bus.emit('terminal.exited', { id, exitCode: code });
+        this.#core.bus.emit('terminal.exited', { id, exitCode: code });
       }
       options.onExit?.();
       return code;
@@ -366,12 +369,12 @@ export class TerminalStore {
       id, cwd: options.cwd, terminal: spawned.terminal, sequence, history, exited, closing: false, shell: described,
       historyFile: () => announce?.path ?? defaultHistoryFile(described, process.platform, options.env),
     };
-    this.sessions.set(id, session);
+    this.#sessions.set(id, session);
     return { id, cwd: options.cwd, output: history.text(), sequence, shell: described, ...windowsPty() };
   }
 
   has(id: string): boolean {
-    return this.sessions.has(id);
+    return this.#sessions.has(id);
   }
 
   write(id: string, data: string): { ok: true } {
@@ -391,10 +394,10 @@ export class TerminalStore {
    * keeps its id until the exit so a new shell never shares it.
    */
   async close(id: string): Promise<{ ok: true }> {
-    const session = this.sessions.get(id);
+    const session = this.#sessions.get(id);
     if (session === undefined) return { ok: true };
     session.closing = true;
-    this.core.procs.killTree(id);
+    this.#core.procs.killTree(id);
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       session.exited,
@@ -416,11 +419,11 @@ export class TerminalStore {
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((id) => this.close(id)));
+    await Promise.all([...this.#sessions.keys()].map((id) => this.close(id)));
   }
 
   private require(id: string): Session {
-    const session = this.sessions.get(id);
+    const session = this.#sessions.get(id);
     if (session === undefined || session.closing) throw notFound(`no terminal is running as ${id}`, { id });
     return session;
   }

@@ -47,11 +47,11 @@ export class SharedReview {
   readonly journal: SharedReviewJournal;
   /** In-memory deadline, shortened by deterministic tests. No idle timer is created. */
   timeoutMs = 90_000;
-  private closed = false;
-  private scheduled = false;
-  private pumping: Promise<void> | null = null;
-  private active: {work: ReviewWork; controller: AbortController} | null = null;
-  private readonly off: () => void;
+  #closed = false;
+  #scheduled = false;
+  #pumping: Promise<void> | null = null;
+  #active: {work: ReviewWork; controller: AbortController} | null = null;
+  readonly #off: () => void;
 
   constructor(readonly core: Core) {
     this.journal = new SharedReviewJournal(core.journal.db);
@@ -60,15 +60,15 @@ export class SharedReview {
       for (const row of this.journal.interrupted()) this.finish([row], {verdict: 'unavailable', reason: 'Review interrupted by core restart; inference was not replayed.'});
     });
     for (const shared of core.sharedProjects.journal.all()) core.sharedBoard.reconcileAccess(shared.id);
-    this.off = core.sharedAccess.onEvent(event => this.enqueue(event));
+    this.#off = core.sharedAccess.onEvent(event => this.enqueue(event));
     core.sharedProjects.registerPolicyListener(id => {
-      if (this.active?.work.association_id === id && !this.current(this.active.work)) this.active.controller.abort();
+      if (this.#active?.work.association_id === id && !this.current(this.#active.work)) this.#active.controller.abort();
     });
   }
-  get busy(): boolean { return this.scheduled || this.pumping !== null; }
+  get busy(): boolean { return this.#scheduled || this.#pumping !== null; }
   config(id: string): SharedReviewConfig { this.core.sharedProjects.require(id); return this.journal.config(id).value; }
   configure(id: string, input: SharedReviewConfig): void {
-    if (this.closed || this.core.stopping) throw refused('reviewer: core is stopping');
+    if (this.#closed || this.core.stopping) throw refused('reviewer: core is stopping');
     if (!input || typeof input.enabled !== 'boolean') throw invalidParams('reviewer.enabled: expected a boolean');
     const keys = input.enabled ? ['enabled', 'providerId', 'accountId', 'model', 'effort', 'revokeOnViolation'] : ['enabled'];
     if (Object.keys(input).some(k => !keys.includes(k))) throw invalidParams('reviewer: expected only enabled and explicit inference route settings');
@@ -83,7 +83,7 @@ export class SharedReview {
     }
     if (fingerprint(this.journal.config(id).value) === fingerprint(config)) return;
     this.journal.configure(id, config);
-    if (this.active?.work.association_id === id) this.active.controller.abort();
+    if (this.#active?.work.association_id === id) this.#active.controller.abort();
   }
   status(id: string): SharedProjectView['protection']['reviewer'] {
     return this.config(id).enabled ? this.journal.status(id) : 'off';
@@ -96,7 +96,7 @@ export class SharedReview {
       grant: contact?.grants.find(g => g.projectId === local.projectId && (!('machine' in g) || !g.machine || g.machine === local.coreId))});
   }
   private current(work: ReviewWork): boolean {
-    if (this.closed || this.core.stopping) return false;
+    if (this.#closed || this.core.stopping) return false;
     const config = this.journal.config(work.association_id);
     try {
       if (!config.value.enabled || config.revision !== work.revision) return false;
@@ -108,7 +108,7 @@ export class SharedReview {
     catch { return false; }
   }
   private enqueue(event: SharedAccessEvent): void {
-    if (this.closed || this.core.stopping) return;
+    if (this.#closed || this.core.stopping) return;
     const shared = this.core.sharedProjects.require(event.sharedProjectId), {remote} = this.core.sharedProjects.endpoints(shared);
     // Local owner administration is not evidence against a contact. No retroactive audit of pre-opt-in history.
     if (!sameProject(event.actor.project, remote) || !REASONS.has(event.reason)) return;
@@ -118,29 +118,29 @@ export class SharedReview {
     try { authority = this.authority(shared.id); } catch { return; }
     this.journal.enqueue(shared.id, event.id, config.revision, authority);
     this.core.sharedProjects.subscriptions.changed(shared.id, ['access']);
-    if (this.scheduled || this.pumping) return;
-    this.scheduled = true;
+    if (this.#scheduled || this.#pumping) return;
+    this.#scheduled = true;
     queueMicrotask(() => {
-      this.scheduled = false;
-      if (this.closed || this.pumping) return;
-      const work = this.pump(); this.pumping = work;
-      void work.catch(() => undefined).finally(() => {this.pumping = null;});
+      this.#scheduled = false;
+      if (this.#closed || this.#pumping) return;
+      const work = this.#pump(); this.#pumping = work;
+      void work.catch(() => undefined).finally(() => {this.#pumping = null;});
     });
   }
-  private async pump(): Promise<void> {
+  async #pump(): Promise<void> {
     for (;;) {
-      if (this.closed) return;
+      if (this.#closed) return;
       const rows = this.journal.take(); if (!rows.length) return;
       const first = rows[0]!, config = this.journal.config(first.association_id).value;
       if (!this.current(first) || !config.enabled) {this.finish(rows, {verdict: 'unavailable', reason: 'Review authority changed before examination.'}); continue;}
-      const controller = new AbortController(); this.active = {work: first, controller};
+      const controller = new AbortController(); this.#active = {work: first, controller};
       const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref?.();
       let answer: Pick<SharedReviewVerdict, 'verdict' | 'reason'>;
       try {
         const events = rows.map(row => this.core.sharedAccess.journal.event(row.event_id)!);
         answer = parseAnswer(await toolFreeInference(this.core, config, sharedReviewPrompt(events), controller.signal));
       } catch { answer = {verdict: 'unavailable', reason: 'Reviewer unavailable, cancelled, timed out or returned an invalid verdict.'}; }
-      finally { clearTimeout(timer); this.active = null; }
+      finally { clearTimeout(timer); this.#active = null; }
       this.core.bus.afterCommit(() => this.core.sharedProjects.journal.transaction(() => {
         if (!this.current(first)) answer = {verdict: 'unavailable', reason: 'Review authority changed before completion.'};
         const confirmed = rows.some(row => this.core.sharedAccess.confirmed(row.event_id, first.association_id));
@@ -155,6 +155,6 @@ export class SharedReview {
   private finish(rows: ReviewWork[], answer: Pick<SharedReviewVerdict, 'verdict' | 'reason'>, action: SharedReviewVerdict['action'] = 'none'): void {
     this.journal.finish(rows, {id: `srv_${randomUUID()}`, sharedProjectId: rows[0]!.association_id, eventIds: rows.map(row => row.event_id), ...answer, action, at: Date.now()});
   }
-  beginClose(): void { this.closed = true; this.off(); this.active?.controller.abort(); }
-  async close(): Promise<void> { this.beginClose(); await this.pumping; }
+  beginClose(): void { this.#closed = true; this.#off(); this.#active?.controller.abort(); }
+  async close(): Promise<void> { this.beginClose(); await this.#pumping; }
 }

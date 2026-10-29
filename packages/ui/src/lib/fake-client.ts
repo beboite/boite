@@ -8,7 +8,7 @@ import { sharedState, sharedContact, reconcileShared, refusedShared } from './fa
 import { startupMethods, resetStartup } from './fake-client/startup';
 import { composerMethods } from './fake-client/composer';
 import { holdContactMail } from './fake-client/contact-hold';
-import { seedWorking } from './fake-client/working-seed';
+import { seedIdle, seedWorking } from './fake-client/working-seed';
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RPC_CHUNK_BYTES,
@@ -20,6 +20,7 @@ import {
   type ExperimentId,
   type HookRun,
   type MemoryEvent,
+  type PolicyState,
   type ProcessRecord,
   type Principal,
   type RpcEventName,
@@ -82,6 +83,7 @@ import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
 import { startLoad } from './fake-client/load';
+import { applyPolicy, policyGate } from './fake-client/policy';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -119,7 +121,7 @@ export class FakeClient implements ObservableClient {
     this.#ctx = ctx;
     this.#methods = this.#answer(ctx);
     this.#missing = new Set(options.missing ?? []);
-    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list') };
+    ctx.core.features = { ...ctx.core.features, composerPersistence: !this.#missing.has('composer.list'), listChanges: !this.#missing.has('threads.listChanges') };
     this.#agentSettings = agentSettingMethods(ctx);
     registerCore(ctx);
     seed(ctx);
@@ -129,6 +131,7 @@ export class FakeClient implements ObservableClient {
     if (options.boardDemo) seedBoardDemo(ctx);
     seedRetry(ctx);
     this.#stopWorking = seedWorking(ctx, options.working ?? 0);
+    seedIdle(ctx, options.idle ?? 0);
     if (options.watchDemo) {
       const at = Date.now();
       const watch = (number: number) => ({ url: `https://github.com/mtsu-dev/boite/pull/${number}`, repository: 'mtsu-dev/boite', number, since: at - 600_000 });
@@ -156,6 +159,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // Again once the seeds and a first launch have set the providers the policy marks.
+    applyPolicy(ctx);
     if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
@@ -316,6 +321,14 @@ export class FakeClient implements ObservableClient {
     return this.#ctx.core;
   }
 
+  /**
+   * Another device's call on this core, which runs while this socket is down:
+   * its events of the gap reach nobody here, as after `drop`.
+   */
+  elsewhere<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    return this.#dispatch(method, params) as Promise<RpcResult<M>>;
+  }
+
   /** The ids the core holds this socket on, the set `emitToThread` gates on. */
   get coreSubscribers(): ThreadId[] {
     return [...this.#ctx.bus.subscribed];
@@ -346,6 +359,8 @@ export class FakeClient implements ObservableClient {
     const checked = checkRpcParams(method, params);
     if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
     params = checked.params as RpcParams<M>;
+    // The admin policy's gate runs before the method, as the core's router does.
+    policyGate(this.#ctx, method, params);
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -381,6 +396,11 @@ export class FakeClient implements ObservableClient {
     this.#ctx.emit('thread.load', { threadId, load: structuredClone(thread.load) });
   }
 
+  /** The thread's last process exits: its row has no load, and no event says so to the list. */
+  endLoad(threadId: ThreadId): void {
+    this.#ctx.thread(threadId).load = null;
+  }
+
   /** Explicit deterministic Git fixture, separate from any RPC input. */
   setSharedNativeExecution(available: boolean): void { setSharedNativeExecution(this.#ctx, available); }
   setSharedRepository(projectId: string, repository: string, head: string): void { setSharedRepository(this.#ctx, projectId, repository, head); }
@@ -397,6 +417,15 @@ export class FakeClient implements ObservableClient {
   reportDesktopExperiments(experiments: ExperimentId[]): void {
     this.#ctx.desktopExperiments = [...experiments];
     this.#ctx.emit('client.desktopExperiments', { experiments: [...experiments] });
+  }
+
+  /** The policy file edited on the fake machine, as the core's watcher rereads it and announces the change. */
+  changePolicy(policy: PolicyState): void {
+    this.#ctx.policy = structuredClone(policy);
+    applyPolicy(this.#ctx);
+    this.#ctx.emit('policy.changed', structuredClone(policy));
+    this.#ctx.emit('settings.updated', { ...this.#ctx.settings });
+    this.#ctx.emit('providers.updated', { loaded: structuredClone(this.#ctx.providers), rejected: [] });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

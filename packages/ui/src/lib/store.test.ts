@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import { machineKey } from '../test/machine-key';
-import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, TRACE_LIMIT, type ProcessRecord, type Thread, type ThreadStatus } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, PROTOCOL_VERSION, RpcErrorCode, TRACE_LIMIT, type ProcessRecord, type Thread, type ThreadStatus, type ThreadSummary } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -390,6 +390,19 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
+/** The sidebar's read: `threads.listChanges` on a core that keeps a change log, `threads.list` before it. */
+const isThreadList = (method: string) => method === 'threads.list' || method === 'threads.listChanges';
+/** A thread list answer, whole or changes, with its rows rewritten by `edit`. */
+function editList(value: unknown, edit: (rows: ThreadSummary[]) => ThreadSummary[]): never {
+  if (Array.isArray(value)) return edit(value) as never;
+  const answer = value as { threads: ThreadSummary[] };
+  return { ...answer, threads: edit(answer.threads) } as never;
+}
+/** `rows` with the row `id` changed by `patch`, taken from `base` when the answer left it out as unchanged. */
+function withRow(rows: ThreadSummary[], base: ThreadSummary, patch: Partial<ThreadSummary>): ThreadSummary[] {
+  return rows.some(row => row.id === base.id) ? rows.map(row => row.id === base.id ? { ...row, ...patch } : row) : [...rows, { ...base, ...patch }];
+}
+
 
 test.for(['reload', 'open'] as const)('a delayed %s request snapshot preserves resolved and newly asked cards', async (action, { store, client }) => {
   await store.open('t-scheduler');
@@ -430,7 +443,7 @@ test('a delayed thread list cannot undo a newer pin event', async ({ store, clie
   let held = false;
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const value = await call(method, params);
-    if (method === 'threads.list') { held = true; await gate.promise; return [...value as typeof store.threads, { ...pinned, id: 'offline-list-row' }] as never; }
+    if (isThreadList(method)) { held = true; await gate.promise; return editList(value, rows => [...rows, { ...pinned, id: 'offline-list-row' }]); }
     return value;
   });
   const loading = store.reload();
@@ -453,13 +466,14 @@ test('a load sample during a thread list keeps the list row and adds only its lo
   const call = client.call.bind(client);
   const gate = deferred();
   const held = store.threads.find(row => row.id === 't-trace')!;
+  const base = { ...held };
   Object.assign(held, { status: 'running', title: 'old title' });
   let asked = false;
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const value = await call(method, params);
-    if (method !== 'threads.list') return value;
+    if (!isThreadList(method)) return value;
     asked = true; await gate.promise;
-    return (value as typeof store.threads).map(row => row.id === 't-trace' ? { ...row, status: 'idle', title: 'new title' } : row) as never;
+    return editList(value, rows => withRow(rows, base, { status: 'idle', title: 'new title', load: null }));
   });
   const loading = store.reload();
   try {
@@ -1867,19 +1881,20 @@ describe('Store', () => {
     for (const row of store.threads) expect(row).toBe(rows.get(row.id));
     const methods = called.mock.calls.map(([method]) => method);
     expect(methods.indexOf('threads.get')).toBeGreaterThanOrEqual(0);
-    expect(methods.indexOf('threads.get')).toBeLessThan(methods.indexOf('threads.list'));
+    expect(methods.indexOf('threads.get')).toBeLessThan(methods.indexOf('threads.listChanges'));
   });
 
   test('a list answer that lands after the open thread was read does not mark it unread again', async ({ store, client }) => {
     await store.open('t-scheduler');
+    const scheduler = { ...store.threads.find((row) => row.id === 't-scheduler')! };
     const real = client.call.bind(client);
     let listed: (() => void) | null = null;
     vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => {
       const answer = real(method as never, params);
-      if (method !== 'threads.list') return answer;
+      if (!isThreadList(method)) return answer;
       // Read by the core before the open thread's markRead, answered after it.
-      return answer.then((threads) => new Promise((resolve) => {
-        listed = () => resolve((threads as { id: string }[]).map((row) => (row.id === 't-scheduler' ? { ...row, unread: true } : row)) as never);
+      return answer.then((value) => new Promise((resolve) => {
+        listed = () => resolve(editList(value, rows => withRow(rows, scheduler, { unread: true })));
       }));
     }) as typeof client.call);
     client.drop();

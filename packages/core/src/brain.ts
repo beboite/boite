@@ -165,69 +165,74 @@ function unchanged(inventory: Inventory): boolean {
 }
 
 export class BrainStore {
-  private busy = false;
-  private closed = false;
-  private started = false;
-  private cancelTimer?: () => void;
-  private automatic?: Promise<void>;
-  private readonly processes = new Map<string, Promise<void>>();
+  #busy = false;
+  #closed = false;
+  #started = false;
+  #cancelTimer?: () => void;
+  #automatic?: Promise<void>;
+  readonly #processes = new Map<string, Promise<void>>();
   private readonly links: BrainLinks;
   /** The last scan behind `instructions()`, trusted while its stamps hold. */
-  private inventory: { path: string; value: Inventory } | null = null;
+  #inventory: { path: string; value: Inventory } | null = null;
   /** How many times `instructions()` scanned the folder; read by tests. */
   scans = 0;
-  constructor(private readonly core: Core, private readonly schedule: Schedule = defaultSchedule, profiles?: BrainProfiles) {
+  readonly #core: Core;
+  readonly #schedule: Schedule;
+
+  constructor(core: Core, schedule: Schedule = defaultSchedule, profiles?: BrainProfiles) {
+    this.#core = core;
+    this.#schedule = schedule;
     this.links = new BrainLinks({
       get: () => (core.journal.getSetting('brain.links') as OwnedBrainLink[] | undefined) ?? [],
       set: links => core.journal.setSetting('brain.links', links),
     }, profiles);
   }
 
-  private globalRoot(): string | null {
+  #globalRoot(): string | null {
     const config = this.config();
     return config.enabled && config.globalInstructions ? config.path : null;
   }
 
   start(): void {
-    if (this.started || this.closed) return;
-    this.started = true;
-    this.links.apply(this.globalRoot());
-    this.schedulePull(true);
+    if (this.#started || this.#closed) return;
+    this.#started = true;
+    this.links.apply(this.#globalRoot());
+    this.#schedulePull(true);
   }
 
-  private schedulePull(startup = false): void {
-    this.cancelTimer?.();
-    this.cancelTimer = undefined;
-    if (!this.started || this.closed) return;
+  #schedulePull(startup = false): void {
+    this.#cancelTimer?.();
+    this.#cancelTimer = undefined;
+    if (!this.#started || this.#closed) return;
     const { path, autoPull } = this.config();
     if (!path || !autoPull) return;
     const immediate = startup && autoPull.onStartup;
     if (!immediate && !autoPull.intervalMinutes) return;
-    this.cancelTimer = this.schedule(() => {
-      this.cancelTimer = undefined;
-      if (this.closed) return Promise.resolve();
-      this.automatic = this.pullAutomatically();
-      return this.automatic;
+    this.#cancelTimer = this.#schedule(() => {
+      this.#cancelTimer = undefined;
+      if (this.#closed) return Promise.resolve();
+      this.#automatic = this.#pullAutomatically();
+      return this.#automatic;
     }, immediate ? 0 : autoPull.intervalMinutes * 60_000);
   }
 
-  private async pullAutomatically(): Promise<void> {
+  async #pullAutomatically(): Promise<void> {
     try {
-      if (!this.busy) await this.synchronize(false);
+      if (!this.#busy) await this.synchronize(false);
     } catch (cause) {
-      if (!this.closed) this.core.journal.setSetting('brain.pullError', messageOf(cause));
+      if (!this.#closed) this.#core.journal.setSetting('brain.pullError', messageOf(cause));
     } finally {
-      this.schedulePull();
+      this.#schedulePull();
     }
   }
 
   config(): BrainConfig {
-    return (this.core.journal.getSetting('brain') as BrainConfig | undefined) ?? { path: null, enabled: false };
+    return (this.#core.journal.getSetting('brain') as BrainConfig | undefined) ?? { path: null, enabled: false };
   }
 
   async configure(config: BrainConfig): Promise<BrainStatus> {
-    if (this.closed) throw refused('Brain is shutting down');
-    if (this.busy) throw refused('Brain synchronization is running; wait before changing its folder');
+    if (this.#closed) throw refused('Brain is shutting down');
+    if (this.#busy) throw refused('Brain synchronization is running; wait before changing its folder');
     if (typeof config.enabled !== 'boolean') throw invalidParams('brain.enabled must be a boolean');
     if (config.path !== null && (typeof config.path !== 'string' || !isAbsolute(config.path))) throw invalidParams('brain.path must be an absolute folder path or null');
     if (config.enabled && config.path === null) throw invalidParams('brain.path is required when enabled');
@@ -247,31 +252,31 @@ export class BrainStore {
       } catch { throw invalidParams(`brain.path ${config.path}: expected an existing, readable folder`); }
     }
     if (path !== this.config().path) {
-      this.core.journal.setSetting('brain.lastSync', null);
-      this.core.journal.setSetting('brain.pullError', null);
+      this.#core.journal.setSetting('brain.lastSync', null);
+      this.#core.journal.setSetting('brain.pullError', null);
     }
-    this.inventory = null;
-    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}), ...(boiteGuide !== undefined ? { boiteGuide } : {}) });
-    this.links.apply(this.globalRoot());
-    this.schedulePull();
-    this.core.bus.emit('brain.configured', this.config());
+    this.#inventory = null;
+    this.#core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}), ...(boiteGuide !== undefined ? { boiteGuide } : {}) });
+    this.links.apply(this.#globalRoot());
+    this.#schedulePull();
+    this.#core.bus.emit('brain.configured', this.config());
     return this.status();
   }
 
   async status(): Promise<BrainStatus> {
     const config = this.config();
-    const status: BrainStatus = { config, entries: [], problems: [], git: null, lastSync: (this.core.journal.getSetting('brain.lastSync') as number | null) ?? null };
-    status.links = this.links.status(this.globalRoot());
+    const status: BrainStatus = { config, entries: [], problems: [], git: null, lastSync: (this.#core.journal.getSetting('brain.lastSync') as number | null) ?? null };
+    status.links = this.links.status(this.#globalRoot());
     if (!config.path) return status;
     try {
       Object.assign(status, scanBrain(config.path));
       // A folder within another repository is not itself a synchronizable brain.
       if (exists(join(config.path, '.git'))) {
-        const { head: _head, ...git } = await this.gitStatus(config.path);
+        const { head: _head, ...git } = await this.#gitStatus(config.path);
         status.git = git;
       }
     } catch (cause) { status.problems.push(messageOf(cause)); }
-    const pullError = this.core.journal.getSetting('brain.pullError');
+    const pullError = this.#core.journal.getSetting('brain.pullError');
     if (typeof pullError === 'string') status.problems.push(pullError);
     return status;
   }
@@ -334,12 +339,12 @@ export class BrainStore {
    * the same, and scanned again on any difference, a missing folder included.
    */
   private current(path: string): Inventory {
-    const cached = this.inventory;
+    const cached = this.#inventory;
     if (cached?.path === path && unchanged(cached.value)) return cached.value;
-    this.inventory = null;
+    this.#inventory = null;
     this.scans++;
     const value = inventory(path);
-    this.inventory = { path, value };
+    this.#inventory = { path, value };
     return value;
   }
 
@@ -348,16 +353,16 @@ export class BrainStore {
   }
 
   private async synchronize(push: boolean): Promise<BrainStatus> {
-    if (this.closed) throw refused('Brain is shutting down');
-    if (this.busy) throw refused('Brain synchronization is already running');
-    this.busy = true;
+    if (this.#closed) throw refused('Brain is shutting down');
+    if (this.#busy) throw refused('Brain synchronization is already running');
+    this.#busy = true;
     const at = performance.now();
     // Unknown until the post-fetch status: a failure before it must not read as up to date.
     let counts: { ahead: number; behind: number } | null = null;
     try {
       const path = this.config().path;
       if (!path || !exists(join(path, '.git'))) throw refused('brain.path must point to the root of a Git checkout to synchronize');
-      let state = await this.gitStatus(path);
+      let state = await this.#gitStatus(path);
       const started = state;
       if (state.dirty) throw refused('Brain has local file changes. Commit or resolve them before synchronizing; Boite leaves them untouched.');
       if (!state.branch || !state.upstream || !state.head) throw refused('Brain needs a local branch with a commit and a configured Git upstream');
@@ -365,7 +370,7 @@ export class BrainStore {
       const merge = (await this.git(path, ['config', '--get', `branch.${state.branch}.merge`])).trim();
       if (!remote || remote.startsWith('-') || !merge.startsWith('refs/heads/')) throw refused('Brain upstream must name a remote branch');
       await this.git(path, ['fetch', '--no-tags', '--', remote]);
-      state = await this.gitStatus(path);
+      state = await this.#gitStatus(path);
       if (state.branch !== started.branch || state.upstream !== started.upstream || state.head !== started.head) {
         throw refused('Brain branch, upstream or HEAD changed during synchronization. Retry from the intended branch.');
       }
@@ -374,21 +379,21 @@ export class BrainStore {
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
       if (push && state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
-      this.inventory = null;
-      this.core.journal.setSetting('brain.lastSync', Date.now());
-      this.core.journal.setSetting('brain.pullError', null);
-      this.links.apply(this.globalRoot());
-      this.core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${state.behind} commits pulled${push ? `, ${state.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
+      this.#inventory = null;
+      this.#core.journal.setSetting('brain.lastSync', Date.now());
+      this.#core.journal.setSetting('brain.pullError', null);
+      this.links.apply(this.#globalRoot());
+      this.#core.logs.info(`Brain ${push ? 'synchronized' : 'pulled'}: ${state.behind} commits pulled${push ? `, ${state.ahead} pushed` : ''}`, { source: 'brain', event: 'brain.synced', durationMs: performance.now() - at, data: { ...counts, push } });
       return await this.status();
     } catch (cause) {
       // Stopped by the core shutting down: no failure to report.
-      if (this.closed) throw cause;
-      this.core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
+      if (this.#closed) throw cause;
+      this.#core.logs.warn(`Brain ${push ? 'synchronization' : 'automatic pull'} failed: ${messageOf(cause)}`, { source: 'brain', event: 'brain.sync-failed', durationMs: performance.now() - at, data: { ...counts, push } });
       throw cause;
-    } finally { this.busy = false; }
+    } finally { this.#busy = false; }
   }
 
-  private async gitStatus(path: string): Promise<GitSnapshot> {
+  async #gitStatus(path: string): Promise<GitSnapshot> {
     const lines = (await this.git(path, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal'])).split('\n');
     const value = (key: string) => lines.find(line => line.startsWith(`# branch.${key} `))?.slice(key.length + 10).trim() ?? null;
     const head = value('head'), upstream = value('upstream'), counts = value('ab')?.match(/^\+(\d+) -(\d+)$/);
@@ -397,38 +402,38 @@ export class BrainStore {
   }
 
   private async git(path: string, args: string[]): Promise<string> {
-    if (this.closed) throw refused('Brain is shutting down');
+    if (this.#closed) throw refused('Brain is shutting down');
     const id = `brain:${crypto.randomUUID()}`;
-    const child = this.core.procs.spawn(id, 'git', ['-c', 'core.hooksPath=', '-c', 'credential.interactive=false', ...args], { cwd: path, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
+    const child = this.#core.procs.spawn(id, 'git', ['-c', 'core.hooksPath=', '-c', 'credential.interactive=false', ...args], { cwd: path, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
     let settled!: () => void;
-    this.processes.set(id, new Promise<void>(resolve => { settled = resolve; }));
-    const timer = setTimeout(() => this.core.procs.killTree(id), 30_000);
+    this.#processes.set(id, new Promise<void>(resolve => { settled = resolve; }));
+    const timer = setTimeout(() => this.#core.procs.killTree(id), 30_000);
     const drain = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
       const chunks: Uint8Array[] = []; let size = 0;
       for await (const chunk of stream) {
         size += chunk.length;
-        if (size > 1024 * 1024) { this.core.procs.killTree(id); throw refused('Brain Git output exceeds 1 MiB'); }
+        if (size > 1024 * 1024) { this.#core.procs.killTree(id); throw refused('Brain Git output exceeds 1 MiB'); }
         chunks.push(chunk);
       }
       return Buffer.concat(chunks).toString('utf8');
     };
     try {
       const [out, , code] = await Promise.all([drain(child.proc.stdout), drain(child.proc.stderr), child.exited]);
-      if (this.closed) throw refused('Brain is shutting down');
+      if (this.#closed) throw refused('Brain is shutting down');
       // Git stderr can contain credential-bearing remote URLs. Keep it out of RPC and logs.
       if (code !== 0) throw refused(`Brain git ${args[0]} failed with exit ${code}. Check the repository's upstream and Git authentication on this machine.`);
       return out;
-    } finally { clearTimeout(timer); this.core.procs.killTree(id); this.processes.delete(id); settled(); }
+    } finally { clearTimeout(timer); this.#core.procs.killTree(id); this.#processes.delete(id); settled(); }
   }
 
   async close(): Promise<void> {
-    this.closed = true;
-    this.inventory = null;
-    this.cancelTimer?.();
-    this.cancelTimer = undefined;
-    for (const id of this.processes.keys()) this.core.procs.killTree(id);
-    await Promise.all(this.processes.values());
-    await this.automatic;
+    this.#closed = true;
+    this.#inventory = null;
+    this.#cancelTimer?.();
+    this.#cancelTimer = undefined;
+    for (const id of this.#processes.keys()) this.#core.procs.killTree(id);
+    await Promise.all(this.#processes.values());
+    await this.#automatic;
   }
 }
 

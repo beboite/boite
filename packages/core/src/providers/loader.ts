@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
+  type PolicyRefusalData,
   type ProviderDescriptor,
   type ProviderId,
   type ProviderInstall,
@@ -24,6 +25,7 @@ import antigravityShipped from './shipped/antigravity.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
+import hermesShipped from './shipped/hermes.json';
 import museShipped from './shipped/muse.json';
 import opencodeShipped from './shipped/opencode.json';
 import opencodeV2Shipped from './shipped/opencode-v2.json';
@@ -47,6 +49,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
+  { file: 'shipped/hermes.json', raw: hermesShipped },
   { file: 'shipped/muse.json', raw: museShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
   { file: 'shipped/opencode-v2.json', raw: opencodeV2Shipped },
@@ -85,6 +88,7 @@ export function summarize(
   dataDir: string,
   enabled = true,
   install: ProviderInstall | undefined = profileFor(entry.descriptor)?.install,
+  policy?: PolicyRefusalData,
 ): ProviderSummary {
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
@@ -117,6 +121,7 @@ export function summarize(
     install: installs.stateOf(entry.descriptor.id, install),
     titles: writesTitles(entry.descriptor.protocol),
     enabled,
+    ...(policy !== undefined ? { policy } : {}),
     ...(entry.descriptor.experimental === true ? { experimental: true } : {}),
   };
 }
@@ -176,22 +181,25 @@ export class ProviderRegistry {
    * The providers the user turned on or off themselves. One they never touched
    * is absent and follows its descriptor: on, or off for an experimental one.
    */
-  private switches = new Map<ProviderId, boolean>();
+  #switches = new Map<ProviderId, boolean>();
   /** Managed installs: the state of each, the leases held on them, and the download itself. */
   readonly installs: InstallManager;
   /** The newest release each `latest` block's publisher named, and when it was read. Memory only: a restart reads it again. */
   private latest = new Map<ProviderId, { pinned: ProviderInstall; resolved: ProviderInstall; at: number }>();
   /** A read in flight, joined only by a call for the same install block: a reload may have changed the publisher. */
-  private latestReads = new Map<ProviderId, { pinned: ProviderInstall; reading: Promise<ProviderInstall> }>();
+  #latestReads = new Map<ProviderId, { pinned: ProviderInstall; reading: Promise<ProviderInstall> }>();
   /** Test seam: the publisher read. */
   resolveLatest: (install: ProviderInstall) => Promise<ProviderInstall> = (install) => resolveLatestInstall(install);
 
   /** Leaves the version readings this core joined, set once it can run a program. */
-  private leaveVersions: () => void = () => undefined;
+  #leaveVersions: () => void = () => undefined;
   /** How long a program gets to print its version before it is stopped. A test shortens it. */
   versionTimeoutMs = VERSION_TIMEOUT_MS;
 
-  constructor(private readonly dataDir: string) {
+  readonly #dataDir: string;
+
+  constructor(dataDir: string) {
+    this.#dataDir = dataDir;
     this.installs = new InstallManager(dataDir);
     // Before the first resolution: a candidate that names a major resolves at once from what the last run read.
     loadVersions(join(dataDir, VERSIONS_FILE));
@@ -236,13 +244,13 @@ export class ProviderRegistry {
     if (pinned?.latest === undefined) return this.installBlock(id);
     const known = this.latest.get(id);
     if (known !== undefined && known.pinned === pinned && Date.now() - known.at < maxAgeMs) return this.installBlock(id);
-    let inFlight = this.latestReads.get(id);
+    let inFlight = this.#latestReads.get(id);
     if (inFlight?.pinned !== pinned) {
       const reading: Promise<ProviderInstall> = this.resolveLatest(pinned).finally(() => {
-        if (this.latestReads.get(id)?.reading === reading) this.latestReads.delete(id);
+        if (this.#latestReads.get(id)?.reading === reading) this.#latestReads.delete(id);
       });
       inFlight = { pinned, reading };
-      this.latestReads.set(id, inFlight);
+      this.#latestReads.set(id, inFlight);
     }
     try {
       const resolved = await inFlight.reading;
@@ -280,7 +288,7 @@ export class ProviderRegistry {
     for (const shipped of SHIPPED_SOURCES) {
       if (shipped.when !== undefined && !shipped.when()) continue;
       try {
-        const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set(), this.dataDir);
+        const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set(), this.#dataDir);
         if (!hostAgentsEnabled() && descriptor.id !== 'echo') {
           for (const profile of Object.values(descriptor.profiles)) if (profile !== undefined) HOST_CANDIDATES.add(profile.executable);
         }
@@ -292,10 +300,10 @@ export class ProviderRegistry {
     }
 
     const shippedIds = new Set(entries.keys());
-    for (const file of this.userFiles()) {
+    for (const file of this.#userFiles()) {
       try {
         const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
-        const descriptor = validateDescriptor(raw, file, shippedIds, this.dataDir);
+        const descriptor = validateDescriptor(raw, file, shippedIds, this.#dataDir);
         if (entries.has(descriptor.id)) {
           rejected.push({
             file,
@@ -326,20 +334,20 @@ export class ProviderRegistry {
   list(): ProviderLoadResult {
     return {
       loaded: [...this.entries.values()].map((entry) =>
-        summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(entry.descriptor.id))),
+        summarize(entry, this.installs, this.#dataDir, this.#enabledEntry(entry), this.installBlock(entry.descriptor.id), this.#policyOf(entry.descriptor.id))),
       rejected: [...this.rejected],
     };
   }
 
   /** The core can run programs now: candidates waiting on a version get theirs, and `changed` hears each one. */
   attachVersions(run: (program: string, args: string[]) => Promise<string>, changed: () => void): void {
-    this.leaveVersions();
-    this.leaveVersions = attachVersions({ file: join(this.dataDir, VERSIONS_FILE), run, changed });
+    this.#leaveVersions();
+    this.#leaveVersions = attachVersions({ file: join(this.#dataDir, VERSIONS_FILE), run, changed });
   }
 
   close(): void {
-    this.leaveVersions();
-    this.leaveVersions = () => undefined;
+    this.#leaveVersions();
+    this.#leaveVersions = () => undefined;
   }
 
   /**
@@ -360,25 +368,33 @@ export class ProviderRegistry {
 
   /** What the journal kept of the user's choices. Anything that is not a boolean is dropped. */
   loadSwitches(stored: unknown): void {
-    this.switches.clear();
+    this.#switches.clear();
     if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return;
-    for (const [id, value] of Object.entries(stored)) if (typeof value === 'boolean') this.switches.set(id, value);
+    for (const [id, value] of Object.entries(stored)) if (typeof value === 'boolean') this.#switches.set(id, value);
   }
 
   /** Records the user's choice and returns every choice, as the journal stores them. */
   setSwitch(id: ProviderId, enabled: boolean): Record<string, boolean> {
-    this.switches.set(id, enabled);
-    return Object.fromEntries(this.switches);
+    this.#switches.set(id, enabled);
+    return Object.fromEntries(this.#switches);
   }
 
   /** Turned on: the user's choice when they made one, else on unless the descriptor is experimental. False for an unknown id. */
   enabled(id: ProviderId): boolean {
     const entry = this.entries.get(id);
-    return entry !== undefined && this.enabledEntry(entry);
+    return entry !== undefined && this.#enabledEntry(entry);
   }
 
-  private enabledEntry(entry: LoadedProvider): boolean {
-    return this.switches.get(entry.descriptor.id) ?? entry.descriptor.experimental !== true;
+  #enabledEntry(entry: LoadedProvider): boolean {
+    if (this.#policyOf(entry.descriptor.id) !== undefined) return false;
+    return this.#switches.get(entry.descriptor.id) ?? entry.descriptor.experimental !== true;
+  }
+
+  /** The admin policy's verdict on a provider; the core sets it once its policy is read. */
+  policyBlock: (id: ProviderId) => PolicyRefusalData | null = () => null;
+
+  #policyOf(id: ProviderId): PolicyRefusalData | undefined {
+    return this.policyBlock(id) ?? undefined;
   }
 
   get(id: ProviderId): ProviderDescriptor | undefined {
@@ -393,7 +409,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id));
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.#dataDir, this.#enabledEntry(entry), this.installBlock(id), this.#policyOf(id));
   }
 
   /** The file a user descriptor was read from; undefined for a shipped or unknown provider. */
@@ -421,7 +437,7 @@ export class ProviderRegistry {
    * machine one error message at a time.
    */
   dryRun(file: string): RpcResult<'providers.dryRun'> {
-    const root = resolve(this.dataDir, 'providers');
+    const root = resolve(this.#dataDir, 'providers');
     const resolved = resolve(file);
     const inside = relative(root, resolved);
     if (inside.startsWith('..') || resolve(inside) === inside || !resolved.endsWith('.json')) {
@@ -440,12 +456,12 @@ export class ProviderRegistry {
       const shippedIds = new Set(
         [...this.entries.values()].filter((entry) => entry.source === 'shipped').map((entry) => entry.descriptor.id),
       );
-      const descriptor = validateDescriptor(raw, file, shippedIds, this.dataDir);
+      const descriptor = validateDescriptor(raw, file, shippedIds, this.#dataDir);
       const entry: LoadedProvider = { descriptor, source: 'user', file };
       const profile = profileFor(descriptor);
       return {
         ok: true,
-        summary: summarize(entry, this.installs, this.dataDir),
+        summary: summarize(entry, this.installs, this.#dataDir),
         plan: {
           roots: descriptor.roots,
           env: profile === undefined ? [] : Object.keys(profile.isolation),
@@ -466,8 +482,8 @@ export class ProviderRegistry {
     }
   }
 
-  private userFiles(): string[] {
-    const dir = join(this.dataDir, 'providers');
+  #userFiles(): string[] {
+    const dir = join(this.#dataDir, 'providers');
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
       .filter((name) => name.endsWith('.json'))

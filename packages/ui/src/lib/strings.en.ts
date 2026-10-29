@@ -96,6 +96,7 @@ import { strings as onboarding } from './strings/en/onboarding';
 import { strings as contacts } from './strings/en/contacts';
 import { strings as shared } from './strings/en/shared';
 import { strings as windows } from './strings/en/windows';
+import { strings as policy } from './strings/en/policy';
 
 export const strings = {
   ...subscriptionProxy,
@@ -188,6 +189,7 @@ export const strings = {
   ...contacts,
   ...shared,
   ...windows,
+  ...policy,
 } as const;
 
 export type Strings = typeof strings;

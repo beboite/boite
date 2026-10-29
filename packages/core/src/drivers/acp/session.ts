@@ -22,8 +22,8 @@ import type { LiveTurnSettings, ProbeContext, ProbeFilter, SessionContext } from
 import { OpenCommands } from './commands.ts';
 import { ModelRefused, SessionControls } from './controls.ts';
 import { failureText, loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
-import { AGENT_OWN_MODEL } from './models.ts';
-import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
+import { AGENT_OWN_MODEL, agentModelsOf } from './models.ts';
+import { canDeleteSessions, CLIENT_NAME, discardSession, EXIT_GRACE_MS, isGrok, isHermes, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 import { commandsOf, imageBlocksOf, usdCostOf, type AcpTurn } from './turn.ts';
 import { answerPermission, drawUpdate, sessionNotificationOf } from './updates.ts';
@@ -72,74 +72,82 @@ export interface AcpMemory {
  * setup closes the process.
  */
 export class AcpSession {
-  private child: SpawnedChild | null = null;
-  private killTree: (() => void) | null = null;
-  private connection: ClientConnection | OpenCodeConnection | null = null;
-  private agent: ClientContext | null = null;
-  private starting: Promise<void> | null = null;
+  #child: SpawnedChild | null = null;
+  #killTree: (() => void) | null = null;
+  #connection: ClientConnection | OpenCodeConnection | null = null;
+  #agent: ClientContext | null = null;
+  #starting: Promise<void> | null = null;
   /**
    * The thread's latest session context, kept across turns. `available_commands_update`
    * typically arrives right after `session/new` or `session/load`, before any
    * turn is in flight, so the update handler reports through this rather than
    * through `current`, or the list would be dropped between turns.
    */
-  private ctx: SessionContext | null = null;
+  #ctx: SessionContext | null = null;
 
-  private sessionId: string | null = null;
-  private canLoad = false;
+  #sessionId: string | null = null;
+  #canLoad = false;
   /** The agent deletes sessions on request: a discovery session does not outlive its reading. */
-  private canDelete = false;
+  #canDelete = false;
   /** This process resumed the thread's session with `session/load`, rather than creating one. */
-  private loaded = false;
+  #loaded = false;
+  /** This process already opened the session that reads the agent's own model: a refusal is not asked again. */
+  #ownModelAsked = false;
   /**
    * The thread's session this process could not load and replaced with a new
    * one: the turn that asked for it is sent the conversation so far.
    */
-  private replaces: string | null = null;
+  #replaces: string | null = null;
   /**
    * The last USD running total this process reported, in a turn, between two
    * turns or while a `session/load` replayed the history. What the next turn
    * adds is measured from it.
    */
-  private reportedCost: number | null = null;
-  private imagesSupported = false;
+  #reportedCost: number | null = null;
+  #imagesSupported = false;
   /** The model, the effort and the mode, as last sent and as the agent last reported them. */
-  private readonly controls = new SessionControls(() => ({ agent: this.agent, sessionId: this.sessionId }));
-  private lastStderr = '';
-  private exited: Promise<number | null> | null = null;
-  private idle: Timer | null = null;
-  private readonly retention = new SessionRetention();
+  readonly #controls = new SessionControls(() => ({ agent: this.#agent, sessionId: this.#sessionId }));
+  #lastStderr = '';
+  #exited: Promise<number | null> | null = null;
+  #idle: Timer | null = null;
+  readonly #retention = new SessionRetention();
   /** The turn whose `session/prompt` is in flight; updates outside one are dropped. */
-  private current: AcpTurn | null = null;
+  #current: AcpTurn | null = null;
   /** The turn the queue is running, from its start to its end, prompt or not. */
-  private active: AcpTurn | null = null;
+  #active: AcpTurn | null = null;
   /** Armed by a stop on a prompt in flight: an agent that ignores the cancel is closed. */
-  private stopTimer: Timer | null = null;
-  private queue: Promise<void> = Promise.resolve();
+  #stopTimer: Timer | null = null;
+  #queue: Promise<void> = Promise.resolve();
   /** Antigravity's shell commands, the ones that outlived their turn included. */
-  private readonly commands = new OpenCommands();
+  readonly #commands = new OpenCommands();
   /** Grok answered `_x.ai/interject` with an error once: this process has no mid-turn input. */
-  private interjectRefused = false;
-  private running = 0;
-  private closing = false;
-  private ended = false;
-  private catalogValid = true;
-  private protection: ReturnType<typeof protectedAcp> = null;
+  #interjectRefused = false;
+  #running = 0;
+  #closing = false;
+  #ended = false;
+  #catalogValid = true;
+  #protection: ReturnType<typeof protectedAcp> = null;
+
+  #warmMs: number;
+  readonly #deps: AcpDeps;
+  readonly #memory: AcpMemory;
+  readonly #onEnded: (session: AcpSession) => void;
+  readonly #onOptions: (options: SessionConfigOption[], ownModel?: string | null) => void;
 
   constructor(
     readonly key: string,
-    private warmMs: number,
-    private readonly deps: AcpDeps,
-    private readonly memory: AcpMemory,
-    private readonly onEnded: (session: AcpSession) => void,
+    warmMs: number,
+    deps: AcpDeps,
+    memory: AcpMemory,
+    onEnded: (session: AcpSession) => void,
     /** The config options a session answered with, for the next session of the account to start from. */
-    private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
-  ) {}
+    onOptions: (options: SessionConfigOption[], ownModel?: string | null) => void = () => undefined,
+  ) { this.#warmMs = warmMs; this.#deps = deps; this.#memory = memory; this.#onEnded = onEnded; this.#onOptions = onOptions;}
 
   async catalog(ctx: ProbeContext): Promise<ModelInfo[] | null> {
-    const setup = this.ctx;
+    const setup = this.#ctx;
     const scope = ctx.catalogThread;
-    if (!this.catalogValid || this.ended || this.closing || setup === null || scope === undefined
+    if (!this.#catalogValid || this.#ended || this.#closing || setup === null || scope === undefined
       || setup.thread.id !== scope.id || scope.providerId !== ctx.provider.id || scope.accountId !== ctx.accountId
       || setup.thread.cwd !== scope.cwd
       || JSON.stringify(setup.thread.contextMode ?? null) !== JSON.stringify(scope.contextMode ?? null)
@@ -148,25 +156,58 @@ export class AcpSession {
       || JSON.stringify(setup.provider) !== JSON.stringify(ctx.provider)) return null;
     // Composition may ask for models while the matching prompt-free opener is
     // still initializing. Share that work before deciding a probe is needed.
-    try { await this.starting; } catch { return null; }
-    if (!this.catalogValid || this.ended || this.closing || this.sessionId === null) return null;
-    return this.controls.catalog(setup);
+    try { await this.#starting; } catch { return null; }
+    if (!this.#catalogValid || this.#ended || this.#closing || this.#sessionId === null) return null;
+    return this.#controls.catalog(setup);
   }
 
   forgetCatalog(filter: ProbeFilter): void {
-    if (this.ctx === null) return;
-    if (filter.providerId !== undefined && filter.providerId !== this.ctx.provider.id) return;
-    if (filter.accountId !== undefined && filter.accountId !== this.ctx.account.id) return;
+    if (this.#ctx === null) return;
+    if (filter.providerId !== undefined && filter.providerId !== this.#ctx.provider.id) return;
+    if (filter.accountId !== undefined && filter.accountId !== this.#ctx.account.id) return;
     // A session still opening reads its options after the refresh asked: they
     // are the fresh catalog. The composer asks for one as the app opens, while
     // the draft's own process starts, and a catalog lost here costs the first
     // prompt one more agent process (2.6 s for OpenCode 2 2.0.30).
-    if (filter.refresh === true && this.sessionId === null && !this.ended) return;
-    this.catalogValid = false;
+    if (filter.refresh === true && this.#sessionId === null && !this.#ended) return;
+    this.#catalogValid = false;
   }
 
-  seedConfig(options: SessionConfigOption[]): void {
-    this.controls.seed(options);
+  /**
+   * The thread's model, options and mode, sent at the start of the process and
+   * of every turn. A thread going back to the agent's own model on an agent
+   * that lists models needs to know which one that is: a `session/load`
+   * reports the model the session was left on, or no models at all, and a
+   * reloaded descriptor drops the account's probe. Then one throwaway session
+   * says it, on a cold start or a warm turn alike, and the account keeps it.
+   */
+  async #applyControls(ctx: SessionContext): Promise<void> {
+    const agent = this.#agent;
+    if (agent !== null && !isGrok(ctx.provider) && ctx.thread.model === AGENT_OWN_MODEL
+      && (this.#controls.hasModels() || this.#loaded) && !this.#controls.hasModelOption() && !this.#controls.knowsOwnListedModel() && !this.#ownModelAsked) {
+      this.#ownModelAsked = true;
+      // Only a lookup: a refusal leaves the session where it is, and the next
+      // process asks again.
+      const discovered = await agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] }).catch((error: unknown) => {
+        ctx.log('warn', `acp: ${ctx.provider.id} refused the session that reads its own model: ${messageOf(error)}`);
+        return null;
+      });
+      if (discovered !== null) {
+        const listed = agentModelsOf(discovered);
+        this.#controls.seedOwnListedModel(listed?.currentModelId ?? null);
+        this.#controls.seedListedModels(listed);
+        this.#onOptions(discovered.configOptions ?? [], listed?.currentModelId ?? null);
+        await discardSession(agent, this.#canDelete, discovered.sessionId);
+      }
+    }
+    await this.#controls.applyModel(ctx);
+    await this.#controls.applyConfig(ctx);
+    await this.#controls.applyMode(ctx);
+  }
+
+  seedConfig(options: SessionConfigOption[], ownModel?: string | null): void {
+    this.#controls.seed(options);
+    this.#controls.seedOwnListedModel(ownModel);
   }
 
   /**
@@ -175,42 +216,42 @@ export class AcpSession {
    * the warm window: a new process would end that command.
    */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && (this.retention.reusable(warmMs, this.warmMs) || this.commands.outlived());
+    return !this.#ended && !this.#closing && this.key === key && (this.#retention.reusable(warmMs, this.#warmMs) || this.#commands.outlived());
   }
 
   setViewed(viewed: boolean): void {
-    this.retention.setViewed(viewed);
-    this.clearIdle();
-    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+    this.#retention.setViewed(viewed);
+    this.#clearIdle();
+    if (!viewed && !this.busy() && !this.#ended) this.#armIdle();
   }
 
   async prepare(ctx: SessionContext, forTurn = false): Promise<void> {
-    this.retention.prepare(forTurn);
-    this.clearIdle();
-    try { await this.start(ctx); }
-    catch (error) { this.drop(); throw error; }
+    this.#retention.prepare(forTurn);
+    this.#clearIdle();
+    try { await this.#start(ctx); }
+    catch (error) { this.#drop(); throw error; }
     finally {
       ctx.finishStartup?.();
-      if (!this.ended && !this.busy() && !this.retention.viewed) this.armIdle();
+      if (!this.#ended && !this.busy() && !this.#retention.viewed) this.#armIdle();
     }
   }
 
   busy(): boolean {
-    return this.running > 0;
+    return this.#running > 0;
   }
 
   attach(turn: AcpTurn, warmMs: number): void {
-    this.warmMs = warmMs;
-    this.retention.beginTurn();
-    this.running += 1;
-    this.clearIdle();
-    this.queue = this.queue.then(async () => {
+    this.#warmMs = warmMs;
+    this.#retention.beginTurn();
+    this.#running += 1;
+    this.#clearIdle();
+    this.#queue = this.#queue.then(async () => {
       try {
-        await this.runTurn(turn);
+        await this.#runTurn(turn);
       } catch (error) {
         if (turn.isStopped) turn.stopNow();
         else turn.fail(messageOf(error));
-        this.endTurn(turn, true);
+        this.#endTurn(turn, true);
       }
     });
   }
@@ -227,18 +268,18 @@ export class AcpSession {
     if (turn.settled) return;
     turn.markStopped();
     // Not begun: `runTurn` settles it the moment the queue reaches it.
-    if (this.active !== turn) return;
-    if (this.current !== turn) {
-      this.drop();
+    if (this.#active !== turn) return;
+    if (this.#current !== turn) {
+      this.#drop();
       return;
     }
-    this.cancel();
-    if (this.stopTimer !== null) return;
-    this.stopTimer = setTimeout(() => {
-      this.stopTimer = null;
-      if (!turn.settled) this.drop();
+    this.#cancel();
+    if (this.#stopTimer !== null) return;
+    this.#stopTimer = setTimeout(() => {
+      this.#stopTimer = null;
+      if (!turn.settled) this.#drop();
     }, STOP_GRACE_MS);
-    this.stopTimer.unref?.();
+    this.#stopTimer.unref?.();
   }
 
   /**
@@ -249,46 +290,46 @@ export class AcpSession {
    * error, an older Grok without the method, is not asked again.
    */
   async steer(turn: AcpTurn, text: string): Promise<boolean> {
-    const agent = this.agent;
-    const sessionId = this.sessionId;
-    if (this.interjectRefused || agent === null || sessionId === null || this.current !== turn || turn.isStopped) return false;
+    const agent = this.#agent;
+    const sessionId = this.#sessionId;
+    if (this.#interjectRefused || agent === null || sessionId === null || this.#current !== turn || turn.isStopped) return false;
     try {
       await agent.request('_x.ai/interject', { sessionId, text });
       return true;
     } catch (error) {
       if (!rpcRefusal(error)) throw error;
-      this.interjectRefused = true;
+      this.#interjectRefused = true;
       turn.ctx.log('warn', `acp: ${turn.ctx.provider.id} refused _x.ai/interject, answers wait for the turn's end: ${rpcReason(error)}`);
       return false;
     }
   }
 
   async steerOpenCode(turn: AcpTurn, text: string, attachments: import('@boite/contracts').ImageAttachment[] = [], onAccepted?: () => void): Promise<boolean> {
-    if (this.current !== turn || turn.isStopped || !(this.connection instanceof OpenCodeConnection)) return false;
-    return this.connection.steer([{ type: 'text', text }, ...imageBlocksOf(attachments)], onAccepted);
+    if (this.#current !== turn || turn.isStopped || !(this.#connection instanceof OpenCodeConnection)) return false;
+    return this.#connection.steer([{ type: 'text', text }, ...imageBlocksOf(attachments)], onAccepted);
   }
 
-  private cancel(): void {
-    const agent = this.agent;
-    const sessionId = this.sessionId;
+  #cancel(): void {
+    const agent = this.#agent;
+    const sessionId = this.#sessionId;
     if (agent === null || sessionId === null) return;
     void agent.notify('session/cancel', { sessionId }).catch(() => undefined);
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
   close(reason: string | null, ctx?: SessionContext): void {
-    if (this.ended) return;
-    this.closing = true;
+    if (this.#ended) return;
+    this.#closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `acp session: ${reason}`);
-    this.drop();
+    this.#drop();
   }
 
   // -- the process ----------------------------------------------------------
 
   async setPermissionMode(turn: AcpTurn, mode: PermissionMode): Promise<boolean> {
     if (turn.ctx.protectedExecution) return false;
-    if (this.current !== turn || turn.isStopped || this.closing || this.ended) return false;
-    const applied = await this.controls.applyMode({ ...turn.ctx, thread: { ...turn.ctx.thread, permissionMode: mode } });
+    if (this.#current !== turn || turn.isStopped || this.#closing || this.#ended) return false;
+    const applied = await this.#controls.applyMode({ ...turn.ctx, thread: { ...turn.ctx.thread, permissionMode: mode } });
     if (applied) turn.ctx.thread.permissionMode = mode;
     return applied;
   }
@@ -303,25 +344,25 @@ export class AcpSession {
    * for the next turn.
    */
   async applySettings(turn: AcpTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
-    if (this.current !== turn || turn.isStopped || this.closing || this.ended) return {};
+    if (this.#current !== turn || turn.isStopped || this.#closing || this.#ended) return {};
     const effort = change.effort;
     if (typeof effort !== 'string' || effort.length === 0) return {};
-    if (!(await this.controls.applyEffort(turn.ctx, effort))) return {};
+    if (!(await this.#controls.applyEffort(turn.ctx, effort))) return {};
     turn.ctx.thread.effort = effort;
     return { effort };
   }
 
-  private async runTurn(turn: AcpTurn): Promise<void> {
-    this.active = turn;
+  async #runTurn(turn: AcpTurn): Promise<void> {
+    this.#active = turn;
     if (turn.isStopped) {
       turn.stopNow();
-      this.endTurn(turn, false);
+      this.#endTurn(turn, false);
       return;
     }
-    this.ctx = turn.ctx;
+    this.#ctx = turn.ctx;
     try {
       turn.ctx.protectedExecution?.check();
-      await this.start(turn.ctx);
+      await this.#start(turn.ctx);
     } catch (error) {
       if (turn.isStopped) {
         turn.stopNow();
@@ -332,19 +373,19 @@ export class AcpSession {
       } else {
         // An agent that exits while it starts takes the connection with it,
         // and its exit code and last stderr line say more than that.
-        const code = await exitWithin(this.exited, EXIT_GRACE_MS);
-        turn.fail(code === undefined ? failureText(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+        const code = await exitWithin(this.#exited, EXIT_GRACE_MS);
+        turn.fail(code === undefined ? failureText(error) : this.#exitSentence(code), code === undefined ? logMessageOf(error) : this.#exitSentence(code, true));
       }
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
 
-    const agent = this.agent;
-    const sessionId = this.sessionId;
+    const agent = this.#agent;
+    const sessionId = this.#sessionId;
     if (agent === null || sessionId === null) {
       if (turn.isStopped) turn.stopNow();
       else turn.fail('the acp session went away before the prompt');
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
     let prompt = turn.ctx.prompt;
@@ -352,8 +393,8 @@ export class AcpSession {
     // The agent could not resume the thread's session and this process opened
     // a new one: the prompt carries the conversation so far, as it does after
     // a session the agent lost.
-    if (this.replaces !== null && this.replaces === turn.ctx.sessionId) {
-      this.replaces = null;
+    if (this.#replaces !== null && this.#replaces === turn.ctx.sessionId) {
+      this.#replaces = null;
       try {
         const carried = turn.ctx.continuation?.();
         if (carried !== undefined) {
@@ -362,14 +403,14 @@ export class AcpSession {
         }
       } catch (error) {
         turn.fail(messageOf(error));
-        this.endTurn(turn, true);
+        this.#endTurn(turn, true);
         return;
       }
     }
 
-    if (attachments.length > 0 && !this.imagesSupported) {
+    if (attachments.length > 0 && !this.#imagesSupported) {
       turn.fail(`${turn.ctx.provider.name} takes no images`);
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
 
@@ -380,55 +421,53 @@ export class AcpSession {
     // sends nothing when what it carries has not moved. A model the agent did
     // not take ends the turn here: the prompt would run on the previous one.
     try {
-      await this.controls.applyModel(turn.ctx);
-      await this.controls.applyConfig(turn.ctx);
-      await this.controls.applyMode(turn.ctx);
+      await this.#applyControls(turn.ctx);
     } catch (error) {
       if (!(error instanceof ModelRefused)) throw error;
       // A stop closes the agent under a switch it has not answered.
       if (turn.isStopped) turn.stopNow();
       else turn.fail(error.message);
-      this.endTurn(turn, turn.isStopped);
+      this.#endTurn(turn, turn.isStopped);
       return;
     }
-    const judged = this.costBaseline(turn);
-    this.current = turn;
+    const judged = this.#costBaseline(turn);
+    this.#current = turn;
     let response: PromptResponse;
     try {
       const pending = agent.request('session/prompt', {
         sessionId,
         prompt: [{ type: 'text', text: prompt }, ...imageBlocksOf(attachments)],
       });
-      if (turn.isStopped) this.cancel();
+      if (turn.isStopped) this.#cancel();
       // The agent is up and holds the prompt. Until its first update the wait
       // is the model's: OpenCode retries a refused provider for a minute and
       // more without a word on the wire, which must not read as a start.
       else turn.ctx.reportProgress?.('waiting');
       response = await pending;
     } catch (error) {
-      this.current = null;
+      this.#current = null;
       if (turn.isStopped) {
         // The stop closed the process under the prompt.
         turn.stopNow();
       } else {
         // A child that died takes the connection with it, and its exit says more
         // than "the connection closed": give it a moment to be reported.
-        const code = await exitWithin(this.exited, EXIT_GRACE_MS);
-        turn.fail(code === undefined ? failureText(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+        const code = await exitWithin(this.#exited, EXIT_GRACE_MS);
+        turn.fail(code === undefined ? failureText(error) : this.#exitSentence(code), code === undefined ? logMessageOf(error) : this.#exitSentence(code, true));
       }
-      this.endTurn(turn, true);
+      this.#endTurn(turn, true);
       return;
     }
-    this.current = null;
+    this.#current = null;
     turn.finish(response);
     // A resumed session whose first total came in below what the session
     // already cost: this agent counts each process from zero.
     const total = turn.costUsdEquivalent;
-    if (judged && total !== null && total < turn.costBefore && !this.memory.costPerProcess.has(turn.ctx.provider.id)) {
-      this.memory.costPerProcess.add(turn.ctx.provider.id);
+    if (judged && total !== null && total < turn.costBefore && !this.#memory.costPerProcess.has(turn.ctx.provider.id)) {
+      this.#memory.costPerProcess.add(turn.ctx.provider.id);
       turn.ctx.log('info', `acp: ${turn.ctx.provider.id} reports a resumed session's cost from zero; its cold turns are charged their whole total`);
     }
-    this.endTurn(turn, turn.isStopped);
+    this.#endTurn(turn, turn.isStopped);
   }
 
   /**
@@ -440,12 +479,12 @@ export class AcpSession {
    * stored messages; an agent seen to count from zero again starts at zero.
    * True when the turn's reading has to tell which of the two the agent does.
    */
-  private costBaseline(turn: AcpTurn): boolean {
-    if (this.reportedCost !== null) {
-      turn.costBefore = this.reportedCost;
+  #costBaseline(turn: AcpTurn): boolean {
+    if (this.#reportedCost !== null) {
+      turn.costBefore = this.#reportedCost;
       return false;
     }
-    if (!this.loaded || this.memory.costPerProcess.has(turn.ctx.provider.id)) {
+    if (!this.#loaded || this.#memory.costPerProcess.has(turn.ctx.provider.id)) {
       turn.costBefore = 0;
       return false;
     }
@@ -453,56 +492,54 @@ export class AcpSession {
     return turn.costBefore > 0;
   }
 
-  private endTurn(turn: AcpTurn, drop: boolean): void {
-    if (this.stopTimer !== null) {
-      clearTimeout(this.stopTimer);
-      this.stopTimer = null;
+  #endTurn(turn: AcpTurn, drop: boolean): void {
+    if (this.#stopTimer !== null) {
+      clearTimeout(this.#stopTimer);
+      this.#stopTimer = null;
     }
-    if (this.active === turn) this.active = null;
+    if (this.#active === turn) this.#active = null;
     // A command the prompt left running keeps the process: closing it would
     // end the command, which Stop on the idle thread does when asked.
-    const outlived = !drop && !this.closing && turn.antigravity && this.commands.promote(turn.ctx);
-    const dropping = drop || this.closing || (!outlived && this.retention.idleMs(this.warmMs) <= 0);
+    const outlived = !drop && !this.#closing && turn.antigravity && this.#commands.promote(turn.ctx);
+    const dropping = drop || this.#closing || (!outlived && this.#retention.idleMs(this.#warmMs) <= 0);
     turn.settle();
-    this.running = Math.max(0, this.running - 1);
+    this.#running = Math.max(0, this.#running - 1);
     if (dropping) {
-      this.drop();
+      this.#drop();
       return;
     }
-    if (this.running === 0 && !this.retention.viewed) this.armIdle();
+    if (this.#running === 0 && !this.#retention.viewed) this.#armIdle();
   }
 
-  private start(ctx: SessionContext): Promise<void> {
-    this.ctx = ctx;
-    if (this.starting === null) {
-      this.starting = noteReady(ctx, `${ctx.provider.id} ACP`, async () => {
-        await this.open(ctx);
-        this.protection?.assertReady();
-        this.protection?.assertMcpReady();
-        await this.controls.applyModel(ctx);
-        await this.controls.applyConfig(ctx);
-        await this.controls.applyMode(ctx);
-        if (this.ended) throw new Error('the acp session was closed while it started');
+  #start(ctx: SessionContext): Promise<void> {
+    this.#ctx = ctx;
+    if (this.#starting === null) {
+      this.#starting = noteReady(ctx, `${ctx.provider.id} ACP`, async () => {
+        await this.#open(ctx);
+        this.#protection?.assertReady();
+        this.#protection?.assertMcpReady();
+        await this.#applyControls(ctx);
+        if (this.#ended) throw new Error('the acp session was closed while it started');
       }, () => ({
-        text: this.loaded ? ', loaded the saved session' : this.replaces !== null ? ', a new one replacing a session it cannot load' : '',
-        data: { loaded: this.loaded, canLoad: this.canLoad, replaced: this.replaces !== null, images: this.imagesSupported },
-        ...(this.replaces !== null ? { resumed: false } : {}),
-      }), () => this.active?.isStopped === true || this.ended || this.closing);
+        text: this.#loaded ? ', loaded the saved session' : this.#replaces !== null ? ', a new one replacing a session it cannot load' : '',
+        data: { loaded: this.#loaded, canLoad: this.#canLoad, replaced: this.#replaces !== null, images: this.#imagesSupported },
+        ...(this.#replaces !== null ? { resumed: false } : {}),
+      }), () => this.#active?.isStopped === true || this.#ended || this.#closing);
     }
-    return this.starting;
+    return this.#starting;
   }
 
-  private async open(ctx: SessionContext): Promise<void> {
-    const sdk = await this.deps.loadSdk();
+  async #open(ctx: SessionContext): Promise<void> {
+    const sdk = await this.#deps.loadSdk();
     // A stop while the SDK loaded: nothing may be spawned for a session that is over.
-    if (this.ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
+    if (this.#ended) throw Object.assign(new Error('the acp session was closed before it started'), { abandoned: true });
     const profile = profileFor(ctx.provider);
     const launch = resolveLaunch(profile);
     if (launch === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    this.protection = protectedAcp(ctx, () => this.current, profile?.launch?.args ?? []);
+    this.#protection = protectedAcp(ctx, () => this.#current, profile?.launch?.args ?? []);
     const temp = launchTemp(ctx.provider, ctx.account.isolationDir);
     let child: SpawnedChild;
     const native = ctx.provider.id === 'opencode-v2';
@@ -513,8 +550,8 @@ export class AcpSession {
     const nativeArgs = [...launch.prefix, ...(profile?.launch?.args ?? ['acp']).filter(arg => arg !== 'acp'), 'serve', '--stdio', '--port', '0'];
     try {
       child = ctx.spawnChild(launch.executable, native ? nativeArgs : args, {
-        cwd: this.protection?.cwd ?? ctx.thread.cwd,
-        env: { ...agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }), ...this.protection?.env, ...(password === null ? {} : { OPENCODE_PASSWORD: password }) },
+        cwd: this.#protection?.cwd ?? ctx.thread.cwd,
+        env: { ...agentEnv(ctx.provider, temp === null ? ctx.accountEnv : { ...ctx.accountEnv, ...temp.env }), ...this.#protection?.env, ...(password === null ? {} : { OPENCODE_PASSWORD: password }) },
       });
     } catch (error) {
       void temp?.dispose();
@@ -526,9 +563,9 @@ export class AcpSession {
       child.once('close', dispose);
       child.once('error', dispose);
     }
-    this.child = child;
-    this.killTree = ctx.killTree ?? null;
-    this.watch(child, ctx);
+    this.#child = child;
+    this.#killTree = ctx.killTree ?? null;
+    this.#watch(child, ctx);
 
     const stream = native ? null : sdk.ndJsonStream(
       Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
@@ -537,18 +574,18 @@ export class AcpSession {
       }),
     );
     const connection = native
-      ? await OpenCodeConnection.open(child, password!, ctx.thread.cwd, params => this.onUpdate(params), () => this.current)
+      ? await OpenCodeConnection.open(child, password!, ctx.thread.cwd, params => this.#onUpdate(params), () => this.#current)
       : sdk
       .client({ name: CLIENT_NAME })
       // Checked by hand rather than by the SDK's schema, which also parses
       // every update once more on its own (see `sessionNotificationOf`).
       .onNotification('session/update', sessionNotificationOf, ({ params }) => {
-        if (params !== null) this.onUpdate(params);
+        if (params !== null) this.#onUpdate(params);
       })
-      .onRequest('session/request_permission', ({ params }) => this.protection ? Promise.resolve({outcome: {outcome: 'cancelled' as const}}) : answerPermission(this.current, params))
+      .onRequest('session/request_permission', ({ params }) => this.#protection ? Promise.resolve({outcome: {outcome: 'cancelled' as const}}) : answerPermission(this.#current, params))
       .connect(stream!);
-    this.connection = connection;
-    this.agent = connection.agent;
+    this.#connection = connection;
+    this.#agent = connection.agent;
 
     // No fs, no terminal: an agent that calls one anyway gets a
     // method-not-found from the SDK, which is the loud refusal we want.
@@ -557,18 +594,18 @@ export class AcpSession {
       clientCapabilities: {},
       clientInfo: { name: CLIENT_NAME, version: pkg.version },
     });
-    this.canLoad = !this.protection && init.agentCapabilities?.loadSession === true;
-    if (this.protection && (init.agentInfo?.name !== 'OpenCode' || init.agentInfo?.version !== '1.19.3')) throw new Error(`execution.acp.agentInfo: expected verified OpenCode 1.19.3, received ${init.agentInfo?.name} ${init.agentInfo?.version}`);
-    this.canDelete = canDeleteSessions(init);
-    this.imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
+    this.#canLoad = !this.#protection && init.agentCapabilities?.loadSession === true;
+    if (this.#protection && (init.agentInfo?.name !== 'OpenCode' || init.agentInfo?.version !== '1.19.3')) throw new Error(`execution.acp.agentInfo: expected verified OpenCode 1.19.3, received ${init.agentInfo?.name} ${init.agentInfo?.version}`);
+    this.#canDelete = canDeleteSessions(init);
+    this.#imagesSupported = init.agentCapabilities?.promptCapabilities?.image === true;
     // The agent binary fills these: only text and numbers reach the log.
     const scalar = (value: unknown): string | null => typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null;
     const agentName = scalar(init.agentInfo?.name), agentVersion = scalar(init.agentInfo?.version), protocol = scalar(init.protocolVersion);
     ctx.diagnostic?.('info', `${ctx.provider.id} answered initialize as ${agentName ?? 'an unnamed agent'} ${agentVersion ?? ''}, ACP protocol ${protocol ?? 'unknown'}`.replace(/ {2,}/g, ' '), {
-      event: 'driver.initialized', data: { agent: agentName, version: agentVersion, protocol, loadSession: this.canLoad },
+      event: 'driver.initialized', data: { agent: agentName, version: agentVersion, protocol, loadSession: this.#canLoad },
     });
 
-    if (ctx.sessionId !== null && this.canLoad) {
+    if (ctx.sessionId !== null && this.#canLoad) {
       // Every `session/update` of a load is history replay: `current` is null,
       // so the update handler drops them, all but a running cost.
       const refusedKey = `${ctx.provider.id}\0${ctx.sessionId}`;
@@ -582,21 +619,21 @@ export class AcpSession {
       } catch (error) {
         // Only an answer from a live agent says anything about the session; a
         // dead pipe is the process's failure.
-        if (!rpcRefusal(error) || this.ended || child.exitCode !== null) throw error;
+        if (!rpcRefusal(error) || this.#ended || child.exitCode !== null) throw error;
         const reason = rpcReason(error);
         ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
         const kind = loadRefusal(error, reason);
         ctx.diagnostic?.('warn', `session/load refused with code ${errorCodeOf((error as { code?: unknown }).code) ?? 'unknown'}, read as ${kind}`, { event: 'driver.session.load-refused', data: { code: errorCodeOf((error as { code?: unknown }).code), kind } });
-        if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
+        if (kind === 'gone' || (kind === 'unsure' && this.#memory.refusedLoads.has(refusedKey))) {
           // Pruned, migrated, another project: retrying the same id would fail
           // every turn of the thread from now on.
-          this.memory.refusedLoads.delete(refusedKey);
+          this.#memory.refusedLoads.delete(refusedKey);
           throw new LoadRefused(
             `${ctx.provider.name} no longer has this conversation (${reason}). Send the message again: Boite starts a new session that carries the conversation so far.`,
             true,
           );
         }
-        if (kind === 'unsure') this.memory.refusedLoads.add(refusedKey);
+        if (kind === 'unsure') this.#memory.refusedLoads.add(refusedKey);
         // Signed out, or a failure on the agent's side: the session may well
         // still be there, and the next turn loads it again.
         throw new LoadRefused(
@@ -604,20 +641,36 @@ export class AcpSession {
           false,
         );
       }
-      this.memory.refusedLoads.delete(refusedKey);
-      this.sessionId = ctx.sessionId;
-      this.loaded = true;
-      this.controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
+      if (isHermes(ctx.provider) && (loaded === null || loaded.modes === undefined || loaded.modes === null)) {
+        // Hermes answers an id it does not have with an empty result instead
+        // of an error, and a prompt on it then stops as a refusal. Each session
+        // it does have comes back with its modes, so their absence is the "no".
+        this.#memory.refusedLoads.delete(refusedKey);
+        ctx.log('warn', `acp: ${ctx.provider.id} answered session/load ${ctx.sessionId} with no session`);
+        ctx.diagnostic?.('warn', 'session/load answered with no session, read as gone', { event: 'driver.session.load-refused', data: { code: null, kind: 'gone' } });
+        throw new LoadRefused(
+          `${ctx.provider.name} no longer has this conversation (it answered the load with no session). Send the message again: Boite starts a new session that carries the conversation so far.`,
+          true,
+        );
+      }
+      this.#memory.refusedLoads.delete(refusedKey);
+      this.#sessionId = ctx.sessionId;
+      this.#loaded = true;
+      this.#controls.noteSession(loaded.modes, loaded.configOptions ?? null, loaded, false);
       // A load may omit its controls; both OpenCode majors answer them, so no
       // empty session is opened for nothing. With no probe cache either, a
       // throwaway session reads them once for the account, and the next cold
       // turn of any thread starts from what it found.
-      if (!isGrok(ctx.provider) && !this.controls.hasOptions()
-        && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
+      // A load that listed models answers the model question: only an effort
+      // still has to be looked for.
+      if (!isGrok(ctx.provider) && !this.#controls.hasOptions()
+        && (ctx.thread.effort !== null || (ctx.thread.model !== AGENT_OWN_MODEL && !this.#controls.hasModels()))) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
-        this.seedConfig(discovered.configOptions ?? []);
-        this.onOptions(discovered.configOptions ?? []);
-        await discardSession(connection.agent, this.canDelete, discovered.sessionId);
+        const discoveredModels = agentModelsOf(discovered);
+        this.seedConfig(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
+        this.#controls.seedListedModels(discoveredModels);
+        this.#onOptions(discovered.configOptions ?? [], discoveredModels?.currentModelId ?? null);
+        await discardSession(connection.agent, this.#canDelete, discovered.sessionId);
       }
       return;
     }
@@ -626,102 +679,102 @@ export class AcpSession {
       // (the turn took it, an idle window, an archive, a restart). The new
       // session this opens is sent the conversation so far.
       ctx.log('warn', `acp: ${ctx.provider.id} cannot load a session, so this turn starts a new one carrying the conversation`);
-      this.replaces = ctx.sessionId;
+      this.#replaces = ctx.sessionId;
     }
 
     const created = await connection.agent.request('session/new', {
-      cwd: this.protection?.cwd ?? ctx.thread.cwd,
+      cwd: this.#protection?.cwd ?? ctx.thread.cwd,
       mcpServers: [],
     });
-    this.sessionId = created.sessionId;
-    this.controls.noteSession(created.modes, created.configOptions ?? null, created);
-    this.controls.noteOwnModel(created.configOptions ?? null);
-    this.onOptions(created.configOptions ?? []);
+    this.#sessionId = created.sessionId;
+    this.#controls.noteSession(created.modes, created.configOptions ?? null, created, true);
+    this.#controls.noteOwnModel(created.configOptions ?? null);
+    this.#onOptions(created.configOptions ?? [], agentModelsOf(created)?.currentModelId ?? null);
   }
 
-  private watch(child: SpawnedChild, ctx: SessionContext): void {
+  #watch(child: SpawnedChild, ctx: SessionContext): void {
     child.stdin.on('error', () => undefined);
     stderrLines(child.stderr, (text) => {
-      this.lastStderr = text.slice(0, STDERR_MAX);
+      this.#lastStderr = text.slice(0, STDERR_MAX);
       // Antigravity writes every protocol frame to stderr as a glog info line,
       // three hundred a turn: only what the agent itself calls a warning is one.
       if (GLOG_INFO.test(text)) return;
-      ctx.log('warn', `acp agent: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
+      ctx.log('warn', `acp agent: ${this.#lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
     });
-    this.exited = new Promise<number | null>((resolve) => {
+    this.#exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
         resolve(code);
         // A process that dies on its own leaves nothing reusable behind: the
         // next turn of the thread starts a fresh one.
-        if (!this.closing) this.drop(this.exitSentence(code), this.exitSentence(code, true));
+        if (!this.#closing) this.#drop(this.#exitSentence(code), this.#exitSentence(code, true));
       });
       child.once('error', () => {
         resolve(null);
-        if (!this.closing) this.drop();
+        if (!this.#closing) this.#drop();
       });
     });
   }
 
-  private exitSentence(code: number | null, diagnostic = false): string {
+  #exitSentence(code: number | null, diagnostic = false): string {
     const head = `the acp agent exited with code ${code === null ? 'unknown' : code}`;
-    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.#lastStderr.length === 0 ? head : `${head}: ${this.#lastStderr}`;
   }
 
   /** The turn settles before its connection and child go through the registry. */
-  private drop(reason = 'the acp session closed', diagnostic?: string): void {
-    if (this.ended) return;
-    this.ended = true;
-    this.closing = true;
-    const current = this.current;
-    this.current = null;
+  #drop(reason = 'the acp session closed', diagnostic?: string): void {
+    if (this.#ended) return;
+    this.#ended = true;
+    this.#closing = true;
+    const current = this.#current;
+    this.#current = null;
     if (current !== null) {
       if (current.isStopped) current.stopNow();
       else current.fail(reason, diagnostic);
       current.settle();
     }
-    this.protection?.close(this.exited ?? Promise.resolve());
-    this.protection = null;
-    this.clearIdle();
-    this.commands.clear();
-    const connection = this.connection;
-    this.connection = null;
-    this.agent = null;
+    this.#protection?.close(this.#exited ?? Promise.resolve());
+    this.#protection = null;
+    this.#clearIdle();
+    this.#commands.clear();
+    const connection = this.#connection;
+    this.#connection = null;
+    this.#agent = null;
     try {
       connection?.close();
     } catch {
       // the connection is already closed
     }
-    const child = this.child;
-    this.child = null;
-    releaseChild(child, this.killTree);
-    this.onEnded(this);
+    const child = this.#child;
+    this.#child = null;
+    releaseChild(child, this.#killTree);
+    this.#onEnded(this);
   }
 
-  private armIdle(): void {
-    this.clearIdle();
+  #armIdle(): void {
+    this.#clearIdle();
     // The window starts once the last command that outlived its turn ended.
-    if (this.commands.outlived()) return;
-    this.idle = setTimeout(() => {
-      this.idle = null;
-      this.drop();
-    }, this.retention.idleMs(this.warmMs));
-    this.idle?.unref?.();
+    if (this.#commands.outlived()) return;
+    this.#idle = setTimeout(() => {
+      this.#idle = null;
+      this.#drop();
+    }, this.#retention.idleMs(this.#warmMs));
+    this.#idle?.unref?.();
   }
 
-  private clearIdle(): void {
-    if (this.idle === null) return;
-    clearTimeout(this.idle);
-    this.idle = null;
+  #clearIdle(): void {
+    if (this.#idle === null) return;
+    clearTimeout(this.#idle);
+    this.#idle = null;
   }
 
   // -- what the agent sends -------------------------------------------------
 
-  private onUpdate(params: SessionNotification): void {
+  #onUpdate(params: SessionNotification): void {
     const update = params.update;
     // Not gated on `current`: this one arrives between turns as often as
     // during one, right after `session/new` or `session/load`.
     if (update.sessionUpdate === 'available_commands_update') {
-      this.ctx?.commands(commandsOf(update.availableCommands));
+      this.#ctx?.commands(commandsOf(update.availableCommands));
       return;
     }
     // Same reason: an agent announces a mode change between two turns as well
@@ -731,8 +784,8 @@ export class AcpSession {
     // the user picked stands. A replayed one from a `session/load` is harmless,
     // the load's own answer overwrites it right after.
     if (update.sessionUpdate === 'current_mode_update') {
-      this.controls.noteMode(update.currentModeId);
-      this.ctx?.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
+      this.#controls.noteMode(update.currentModeId);
+      this.#ctx?.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
       return;
     }
     // The same announcement from an agent whose modes are a config option. Only
@@ -741,23 +794,23 @@ export class AcpSession {
     // connection carries the throwaway session the options were discovered on,
     // whose late update would otherwise overwrite the mode kept for this one.
     if (update.sessionUpdate === 'config_option_update') {
-      if (this.sessionId !== null && params.sessionId === this.sessionId) this.controls.noteOptionUpdate(update.configOptions);
+      if (this.#sessionId !== null && params.sessionId === this.#sessionId) this.#controls.noteOptionUpdate(update.configOptions);
       return;
     }
     // A running total outside a turn is still what the next one is measured
     // from: an agent may report it while a load replays, or between turns.
     if (update.sessionUpdate === 'usage_update') {
       const cost = usdCostOf(update);
-      if (cost !== null) this.reportedCost = cost;
+      if (cost !== null) this.#reportedCost = cost;
     }
     // This session's own: a `session/load` replays its history before the id is set.
-    if (this.ctx?.provider.quirks?.includes('antigravity') === true && params.sessionId === this.sessionId
-      && this.commands.note(update) && !this.busy()) {
+    if (this.#ctx?.provider.quirks?.includes('antigravity') === true && params.sessionId === this.#sessionId
+      && this.#commands.note(update) && !this.busy()) {
       // The last command a finished turn left running ended: the warm rule applies from now.
-      if (this.retention.idleMs(this.warmMs) <= 0) this.drop();
-      else if (!this.retention.viewed) this.armIdle();
+      if (this.#retention.idleMs(this.#warmMs) <= 0) this.#drop();
+      else if (!this.#retention.viewed) this.#armIdle();
     }
-    const turn = this.current;
+    const turn = this.#current;
     if (turn === null) return;
     drawUpdate(turn, update);
   }

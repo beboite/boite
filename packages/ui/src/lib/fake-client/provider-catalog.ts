@@ -6,6 +6,7 @@ import { MUSE_EFFORT, PI_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from '.
 import { turnedOff } from './checks';
 import { DATA_DIR } from './shared';
 import type { FakeContext, FakeMethods } from './context';
+import { markBlockedProviders, policyRefusal } from './policy';
 
 /**
  * The core's `modelsFor`: the descriptor's list, after what the last probe of
@@ -101,6 +102,9 @@ export function providerCatalogMethods(ctx: FakeContext) {
       if (typeof params.enabled !== 'boolean') {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'enabled must be true or false', data: { field: 'enabled', expected: 'a boolean' } });
       }
+      markBlockedProviders(ctx, ctx.providers);
+      // As the core: no switch turns on a provider the admin policy keeps off.
+      if (params.enabled && provider.policy) throw policyRefusal(ctx, provider.policy.policy);
       if (providerEnabled(provider) === params.enabled) return { loaded: structuredClone(ctx.providers), rejected: [] };
       provider.enabled = params.enabled;
       // A login the user already has is adopted now, as it is when a provider is installed.
@@ -110,13 +114,14 @@ export function providerCatalogMethods(ctx: FakeContext) {
       return result;
     },
     'providers.list': async (params) => {
-      return { loaded: structuredClone(ctx.providers), rejected: [] };
+      return { loaded: structuredClone(markBlockedProviders(ctx, ctx.providers)), rejected: [] };
     },
     'providers.reload': async (params) => {
       // As the core: a reload that changes no provider tells nobody, so a page
       // that reloads on focus keeps every model list it already read.
       const before = JSON.stringify(ctx.providers);
       ensureDefaults(ctx);
+      markBlockedProviders(ctx, ctx.providers);
       const result = { loaded: structuredClone(ctx.providers), rejected: [] };
       if (JSON.stringify(ctx.providers) !== before) ctx.emit('providers.updated', structuredClone(result));
       return result;
@@ -140,11 +145,14 @@ export function providerCatalogMethods(ctx: FakeContext) {
       }
       ctx.providers.push({
         id, name: command.name, shortName: command.name, protocol: 'acp', source: 'user', available: true,
-        executable: command.command.includes('\\') ? command.command : `${DATA_DIR}\\demo\\${command.command}.exe`,
+        executable: checked.executable.kind === 'file'
+          ? checked.executable.value
+          : `${DATA_DIR}\\demo\\${checked.executable.value}${checked.executable.value.toLowerCase().endsWith('.exe') ? '' : '.exe'}`,
         models: [{ id: 'default', name: 'Agent default', default: true }],
         capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: false, resume: true },
         login: false, alwaysIsolated: false, install: null, titles: false, enabled: true,
       });
+      markBlockedProviders(ctx, ctx.providers);
       ensureDefaults(ctx);
       const result = { loaded: structuredClone(ctx.providers), rejected: [] };
       ctx.emit('providers.updated', structuredClone(result));

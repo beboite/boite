@@ -110,3 +110,26 @@ test.each([false, true])('switching types awaits the previous save before anothe
     expect(store.settings.compactionByType?.bot?.autoCompact?.tokens).toBe(800_000);
   }
 });
+
+
+test('summary instructions flush to their original scope and empty text restores native guidance', async () => {
+  const store = render();
+  const type = async (text: string) => {
+    const field = document.querySelector<HTMLTextAreaElement>('[data-testid="compaction-summary"]')!;
+    field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  };
+  await type('Keep the decisions.');
+  await click('compaction-target-subagent');
+  expect(store.settings.compactionSummary).toBe('Keep the decisions.');
+  await flip('compaction-customize', true);
+  expect(store.settings.compactionByType?.subagent?.compactionSummary).toBe('Keep the decisions.');
+  await type('Keep the code.');
+  await click('compaction-target-bot');
+  expect(store.settings.compactionByType?.subagent?.compactionSummary).toBe('Keep the code.');
+  expect(store.settings.compactionByType?.bot).toBeUndefined();
+  await click('compaction-target-subagent');
+  await type('');
+  await click('compaction-target-common');
+  expect(store.settings.compactionByType?.subagent?.compactionSummary).toBeNull();
+  expect(store.settings.compactionSummary).toBe('Keep the decisions.');
+});

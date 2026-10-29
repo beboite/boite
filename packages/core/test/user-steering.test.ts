@@ -7,6 +7,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
+import { agentValue } from './agent-fixture.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -69,6 +70,67 @@ test('an async question answer is visible while steering and becomes one user me
   expect(after.messages.filter(message => message.role === 'user')).toHaveLength(2);
   expect(after.messages.at(-1)).toMatchObject({ role: 'user', turnId: turn.id, parts: [{ type: 'text', text: '> Which file?\n\nParser\nCheck it first.' }] });
   expect(await thrown(owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] }))).toThrow('unknown question');
+});
+
+test.each(['answer', 'user', 'coordination', 'memory', 'refused-memory'] as const)('a bot setting answer queued during %s steering reaches the same running turn', async source => {
+  const { owner, threadId, turn, inputs } = await running();
+  h.core.workforce.setLimits({ paused: true });
+  const agent = await owner.call('agents.profile.save', { value: agentValue(h.core.threads.require(threadId).accountId) });
+  let release!: (accepted: boolean) => void;
+  const handle = h.core.threads.runner.handles.get(threadId)!;
+  handle.steer = async text => {
+    inputs.push({ text, images: [] });
+    if (inputs.length === 1) return new Promise<boolean>(resolve => { release = resolve; });
+    return true;
+  };
+  let submitted: Promise<unknown> | undefined;
+  if (source === 'user') submitted = owner.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Keep checking', clientRequestId: 'busy_user_steer' });
+  else if (source === 'coordination') submitted = h.core.threads.steer(threadId, 'Shared resource update');
+  else if (source === 'memory' || source === 'refused-memory') h.core.bus.emit('resources.memory', { threadId, at: Date.now(), kind: 'pressure', state: 'critical' });
+  else {
+    const { questionId } = await owner.call('questions.ask', { threadId, text: 'Which area?', options: ['Core'] });
+    await owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
+  }
+  await waitFor(() => inputs.length === 1);
+  const { questionId } = await owner.call('agents.settings.request', { threadId, agent: agent.id, key: 'domain', value: 'release checks', reason: 'Describe the work accurately' });
+  await owner.call('agents.settings.apply', { threadId, questionId });
+  expect(h.core.workforce.records.get('profile', agent.id).domain).toBe('release checks');
+  const answer = '> Describe the work accurately\n\napplied: Ada\'s domain is now "release checks"';
+  expect((await owner.call('threads.get', { threadId })).pendingAnswers).toContain(answer);
+  const cleared = owner.next('thread.updated', row => row.id === threadId && row.pendingAnswers?.length === 0);
+  release(source !== 'refused-memory');
+  await submitted;
+  await waitFor(() => inputs.some(input => input.text === answer));
+  expect((await cleared).pendingAnswers).toEqual([]);
+  const delivered = await owner.call('threads.get', { threadId });
+  expect(delivered.pendingAnswers).toEqual([]);
+  expect(delivered.status).toBe('running');
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(delivered.messages.filter(message => message.role === 'user' && message.parts.some(part => part.type === 'text' && part.text === answer))).toHaveLength(1);
+});
+
+test.each([false, true])('a rejected async delivery with acknowledgement=%s is not replayed by queued or later answers', async acknowledged => {
+  const { owner, threadId, inputs } = await running();
+  let reject!: (error: Error) => void;
+  let accept!: () => void;
+  h.core.threads.runner.handles.get(threadId)!.steer = async (text, images, accepted) => {
+    inputs.push({ text, images });
+    if (inputs.length === 1) {
+      accept = accepted!;
+      return new Promise<boolean>((_resolve, fail) => { reject = fail; });
+    }
+    return true;
+  };
+  h.core.threads.deferred.deliverAnswer(threadId, 'First answer');
+  h.core.threads.deferred.deliverAnswer(threadId, 'Second answer');
+  if (acknowledged) accept();
+  reject(new Error('lost provider acknowledgement'));
+  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
+  await h.core.threads.deferred.flushRunning(threadId);
+  h.core.threads.deferred.deliverAnswer(threadId, 'Third answer');
+  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
+  expect(inputs.map(input => input.text)).toEqual(acknowledged ? ['First answer', 'Second answer', 'Third answer'] : ['First answer']);
+  expect((await owner.call('threads.get', { threadId })).pendingAnswers).toEqual(acknowledged ? [] : ['First answer', 'Second answer', 'Third answer']);
 });
 
 test('a question asked without stopping marks the row as needing the user until it is answered or skipped', async () => {

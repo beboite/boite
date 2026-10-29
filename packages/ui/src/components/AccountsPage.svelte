@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import LocalAcpCard from './LocalAcpCard.svelte';
@@ -58,6 +59,7 @@
     opencode: 'https://opencode.ai/docs/',
     'opencode-v2': 'https://opencode.ai/v2/docs/',
     grok: 'https://grok.com/build',
+    hermes: 'https://hermes-agent.nousresearch.com/docs/getting-started/installation',
     muse: 'https://developer.meta.com/ai/products/muse-code/',
     pi: 'https://github.com/earendil-works/pi'
   };
@@ -122,6 +124,7 @@
 
   /** What the row says under the name: state, never advice. */
   function stateText(provider: ProviderSummary, step: SetupStep): string {
+    if (provider.policy) return strings.policy.providerOff;
     if (!providerEnabled(provider)) return strings.providerSettings.off;
     const install = store.installOf(provider.id);
     if (step === 'installing' && install) {
@@ -310,6 +313,8 @@
 
 <!-- On or off. Owner only in the core, and only the owner reaches this page. -->
 {#snippet enabledSwitch(provider: ProviderSummary)}
+  <!-- A provider the admin policy keeps off: the lock says which key, and no switch turns it back on. -->
+  {#if provider.policy}<PolicyLock {store} keys={[provider.policy.policy]} />{/if}
   <input
     type="checkbox"
     role="switch"
@@ -319,7 +324,7 @@
     data-testid="provider-enabled"
     data-provider-id={provider.id}
     checked={providerEnabled(provider)}
-    disabled={!store.owner || switching !== null}
+    disabled={!store.owner || switching !== null || provider.policy !== undefined}
     onchange={(event) => void setEnabled(provider, event.currentTarget)}
   />
 {/snippet}

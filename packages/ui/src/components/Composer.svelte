@@ -6,7 +6,7 @@
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { composerPlaceholder } from '../lib/composer-placeholder';
-  import { receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
+  import { readyToSend, receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
@@ -359,9 +359,6 @@
   async function submit(nextDraft = false) {
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, state: stateForInput(), shape: sendShape(text, attachments), nextDraft }; return; }
-    const prompt = text;
-    const images = attachments;
-    const references = previewReferences;
     if (reply) {
       const answeredKey = key;
       if (canSend && await sendAnswer(store, reply)) {
@@ -371,6 +368,8 @@
       }
       return;
     }
+    const ready = readyToSend(store, stateForInput(), stateForInput, () => [text, previewReferences, choice]); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`); an answer waits in `sendAnswer`.
+    const prompt = text, images = attachments, references = previewReferences;
     if (target) {
       if (canSend && await sendToTarget(target, stateForInput(), prompt, images)) recall = null;
       requestAnimationFrame(grow);
@@ -848,7 +847,8 @@
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  .input-wrap { position: relative; }
+  /* The bottom gap sits under the box: a textarea scrolls its text through its own padding, up to the bar. */
+  .input-wrap { position: relative; margin-bottom: var(--composer-input-gap, 6px); }
 
   .input-highlight {
     position: absolute;
@@ -870,9 +870,9 @@
   textarea, .input-paint {
     /* A textarea's own text-rendering: auto drops kerning on Android, and the caret drifted from the painted letters. */
     text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: normal; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; width: 100%;
-    min-height: var(--composer-input-height, 44px);
+    min-height: calc(var(--composer-input-height, 44px) - var(--composer-input-gap, 6px));
     max-height: 200px;
-    padding: var(--composer-input-padding, 12px 14px 6px);
+    padding: var(--composer-input-padding, 12px 14px 0);
     border: none;
     background: transparent;
     font-size: var(--text-reading);

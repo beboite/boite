@@ -85,8 +85,12 @@ function isLocalHost(hostname: string): boolean {
     || (first === 192 && second === 168) || (first === 169 && second === 254));
 }
 
-/** A url the field can be handed to: a scheme it already has, or a host to prefix. */
-export function normalizeUrl(input: string): string | null {
+/**
+ * A url the field can be handed to: a scheme it already has, or a host to
+ * prefix. Other text is searched, at the admin policy's address when it sets
+ * one (`search`, `{query}` where the text goes).
+ */
+export function normalizeUrl(input: string, search?: string | null): string | null {
   const text = input.trim();
   if (text === '') return null;
   const local = /^(?:localhost|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
@@ -94,7 +98,7 @@ export function normalizeUrl(input: string): string | null {
   const scheme = /^[a-z][a-z0-9+.-]*:\S*$/i.test(text);
   const unqualified = local || host;
   const candidate = unqualified ? `https://${text}` : scheme ? text : null;
-  if (candidate === null) return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
+  if (candidate === null) return search ? search.replace('{query}', encodeURIComponent(text)) : `https://www.google.com/search?q=${encodeURIComponent(text)}`;
   try {
     const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;

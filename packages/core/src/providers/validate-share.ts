@@ -2,7 +2,7 @@
 import type { ProviderDescriptor, ProviderShare, ProviderSharedKeys, ProviderHookSource, ProviderQuirk } from '@boite/contracts';
 import { reject, asObject, asString, asArray, checkKeys } from './validate-primitives.ts';
 
-const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok'];
+const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok', 'hermes'];
 const HOOK_FORMATS: readonly ProviderHookSource['format'][] = ['events', 'modules'];
 
 /** A path under some directory: relative, no `..`, written with `/`. */

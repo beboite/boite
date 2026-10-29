@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import FirewallNotice from './FirewallNotice.svelte';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
@@ -7,6 +8,7 @@
   import NotificationKinds from './NotificationKinds.svelte';
   import LanReach from './LanReach.svelte';
   import TailscaleAccess from './TailscaleAccess.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -17,6 +19,8 @@
   import { appPage } from '../lib/app-origin';
   let { store, showServerSettings = true }: { store: Store; showServerSettings?: boolean } = $props();
   const uid = $props.id();
+  const lanLocked = $derived(lockedBy(store.policy, 'network.lan') !== null);
+  const pushLocked = $derived(lockedBy(store.policy, 'network.push') !== null);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const secure = window.isSecureContext;
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -149,10 +153,10 @@
     <div class="block">
       <label for="{uid}-listen-on-lan" class="switch-row">
         <span class="text ui-label-box">
-          <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
+          <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} /><PolicyLock {store} keys={['network.lan']} />
         </span>
         <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
-          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings || restarting}
+          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings || restarting || lanLocked}
           onchange={(event) => void toggleLan(event.currentTarget)} />
       </label>
       <LanReach {store} loopback={false} {firewall} bind:this={reach} bind:restarting />
@@ -189,8 +193,9 @@
           <InfoTip topic={strings.phone.heading} text={strings.phone.pushHint} />
           {#if subscribed}
             <button disabled={busy} onclick={disable}><span class="ui-label">{strings.phone.disable}</span></button>
-            <button disabled={busy} onclick={testPush}><span class="ui-label">{strings.phone.test}</span></button>
-          {:else}<button disabled={busy || !key} onclick={enable}><span class="ui-label">{strings.phone.enable}</span></button>{/if}
+            <button disabled={busy || pushLocked} data-testid="phone-push-test" onclick={testPush}><span class="ui-label">{strings.phone.test}</span></button>
+          {:else}<button disabled={busy || !key || pushLocked} data-testid="phone-push-enable" onclick={enable}><span class="ui-label">{strings.phone.enable}</span></button>{/if}
+          <PolicyLock {store} keys={['network.push']} />
         </div>
         {#if subscribed}<p class="hint" data-testid="phone-multi-machine">{strings.phone.multiMachine}</p>{/if}
       {/if}

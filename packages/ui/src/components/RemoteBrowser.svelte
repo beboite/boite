@@ -8,6 +8,7 @@
   import { strings } from '../lib/strings';
   import BrowserNav from './BrowserNav.svelte';
   import { normalizeUrl } from '../lib/browser-bridge';
+  import { policySearch } from '../lib/policy';
   import { dragScroll, FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   /**
    * One tab of the browser the conversation's agent drives on the machine that
@@ -352,7 +353,7 @@
   }
   function go(event: SubmitEvent) {
     event.preventDefault();
-    const url = normalizeUrl(address);
+    const url = normalizeUrl(address, policySearch(store.policy));
     if (!url) { error = strings.remoteBrowser.badAddress; return; }
     (document.activeElement as HTMLElement | null)?.blur?.();
     editingAddress = false; address = url;

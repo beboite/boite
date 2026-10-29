@@ -29,30 +29,34 @@ const GH_TIMEOUT_MS = 30_000;
  * leaves `agentLogAccess` on.
  */
 export class Diagnostics {
+  readonly #core: Core;
+
   /** The GitHub CLI; tests point it at a program that does not exist. */
   ghCommand = 'gh';
   #salt: string | null = null;
   #sequence = 0;
   readonly #reports = new Map<string, { minute: number; count: number }>();
 
-  constructor(private readonly core: Core) {}
+  constructor(core: Core) {
+    this.#core = core;
+  }
 
   /** A random per-installation value: the same project gets the same placeholder in every export of this machine. */
   private salt(): string {
     if (this.#salt !== null) return this.#salt;
-    const file = join(this.core.logs.directory, 'anonymize.salt');
+    const file = join(this.#core.logs.directory, 'anonymize.salt');
     try { this.#salt = readFileSync(file, 'utf8').trim(); } catch { this.#salt = ''; }
     if (!/^[0-9a-f]{32}$/.test(this.#salt)) {
       this.#salt = randomBytes(16).toString('hex');
       // Synchronous, once per installation: an unawaited write could still be open when the core
       // stops and its folder goes, which Windows refuses (EBUSY) and Bun 1.4.2 crashed around.
       try {
-        mkdirSync(this.core.logs.directory, { recursive: true, mode: 0o700 });
+        mkdirSync(this.#core.logs.directory, { recursive: true, mode: 0o700 });
         writeFileSync(file, `${this.#salt}\n`, { mode: 0o600 });
         // `mode` applies only to a new file: one replaced here (invalid, or from an older install) is made private too.
         if (process.platform !== 'win32') chmodSync(file, 0o600);
       } catch (error) {
-        this.core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' });
+        this.#core.logs.warn(`the anonymization salt could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.salt-failed' });
       }
     }
     return this.#salt;
@@ -61,18 +65,18 @@ export class Diagnostics {
   anonymizer(): LogAnonymizer {
     let user: string | null = null;
     try { user = userInfo().username; } catch { user = process.env.USER ?? process.env.USERNAME ?? null; }
-    const projects = this.core.projects.list().map(project => ({ path: project.path, name: project.name }));
+    const projects = this.#core.projects.list().map(project => ({ path: project.path, name: project.name }));
     // Worktrees and thread folders outside a project still name the user's layout.
-    const known = (path: string): boolean => inside(path, this.core.dataDir) || projects.some(project => project.path.length > 0 && inside(path, project.path));
+    const known = (path: string): boolean => inside(path, this.#core.dataDir) || projects.some(project => project.path.length > 0 && inside(path, project.path));
     const folders = new Set<string>();
-    for (const thread of this.core.journal.listThreads()) if (thread.cwd && !known(thread.cwd) && folders.size < 1000) folders.add(thread.cwd);
+    for (const thread of this.#core.journal.listThreads()) if (thread.cwd && !known(thread.cwd) && folders.size < 1000) folders.add(thread.cwd);
     for (const path of folders) projects.push({ path, name: '' });
-    const extra = this.core.accounts.list().flatMap(account => [account.label, account.identity ?? ''].filter(value => value.length >= 3 && !/^(?:default|claude|codex|grok|pi|opencode|muse|antigravity)$/i.test(value)));
-    return createLogAnonymizer({ salt: this.salt(), home: homedir(), user, hostname: hostname(), dataDir: this.core.dataDir, projects, extra });
+    const extra = this.#core.accounts.list().flatMap(account => [account.label, account.identity ?? ''].filter(value => value.length >= 3 && !/^(?:default|claude|codex|grok|pi|opencode|muse|antigravity)$/i.test(value)));
+    return createLogAnonymizer({ salt: this.salt(), home: homedir(), user, hostname: hostname(), dataDir: this.#core.dataDir, projects, extra });
   }
 
   environment(): DiagnosticEnvironment {
-    const settings = this.core.settings.get() as unknown as Record<string, unknown>;
+    const settings = this.#core.settings.get() as unknown as Record<string, unknown>;
     const kept: LogData = {};
     for (const [key, value] of Object.entries(settings)) {
       if (typeof value === 'boolean' || typeof value === 'number') kept[key] = value;
@@ -81,37 +85,37 @@ export class Diagnostics {
       else if (key === 'publicUrl') kept[key] = value ? 'set' : 'unset';
       else if (key === 'subscriptionProxy') kept[key] = value ? 'on' : 'off';
     }
-    const list = this.core.providers.list();
+    const list = this.#core.providers.list();
     const providers = list.loaded.map(summary => ({
       id: summary.id,
       version: summary.install?.state === 'installed' ? summary.install.version : summary.executable ? knownVersion(summary.executable) : null,
       state: summary.enabled === false ? 'off' : summary.available ? 'available' : 'not installed',
     }));
     for (const rejected of list.rejected) providers.push({ id: rejected.file.split(/[\\/]/).pop() ?? rejected.file, version: null, state: `rejected: ${rejected.field} ${rejected.message}`.slice(0, 200) });
-    const trace = this.core.procs.capability();
+    const trace = this.#core.procs.capability();
     let osBuild: string | null = null;
     try { osBuild = osVersion(); } catch { osBuild = null; }
     return {
-      version: this.core.version, channel: this.core.channel, bundleHash: this.core.bundleHash ?? null,
+      version: this.#core.version, channel: this.#core.channel, bundleHash: this.#core.bundleHash ?? null,
       platform: platform(), osRelease: release(), osVersion: osBuild, arch: arch(), cpus: cpus().length,
       memoryMb: Math.round(totalmem() / 1048576), freeMemoryMb: Math.round(freemem() / 1048576),
-      runtime: `bun ${Bun.version}`, pid: process.pid, startedAt: this.core.startedAt, uptimeMs: Date.now() - this.core.startedAt,
+      runtime: `bun ${Bun.version}`, pid: process.pid, startedAt: this.#core.startedAt, uptimeMs: Date.now() - this.#core.startedAt,
       trace: `${trace.os} ${trace.mode}`, providers, settings: kept,
     };
   }
 
   /** Throws unless this connection may read diagnostics, and returns whether they are an agent's. */
-  private gate(connection: Connection | undefined, threadId: string | undefined): boolean {
+  #gate(connection: Connection | undefined, threadId: string | undefined): boolean {
     // The router already keeps a paired device to diagnostics.report; this holds even if access.ts changes.
     if (connection?.identity.principal === 'session') throw refused('diagnostics: a paired device only reports its own errors');
     if (connection?.identity.principal !== 'agent') return false;
-    if (this.core.settings.get().agentLogAccess === false) throw refused('diagnostics: the owner turned off agent access to logs (Settings > Diagnostics)');
+    if (this.#core.settings.get().agentLogAccess === false) throw refused('diagnostics: the owner turned off agent access to logs (Settings > Diagnostics)');
     if (threadId === undefined || threadId !== connection.identity.threadId) throw refused('diagnostics: an agent names its own thread');
     return true;
   }
 
   /** The thread and every thread it started, at any depth. */
-  private family(threadId: string, threads: readonly ThreadSummary[]): Set<string> {
+  #family(threadId: string, threads: readonly ThreadSummary[]): Set<string> {
     const family = new Set([threadId]);
     let grew = true;
     while (grew) {
@@ -128,33 +132,33 @@ export class Diagnostics {
    * is what tells it whether Boite itself failed. The owner reads everything,
    * or one thread's family when it names a thread.
    */
-  private reach(threadId: string | undefined): Set<string> | null {
-    return threadId === undefined ? null : this.family(threadId, this.core.journal.listThreads());
+  #reach(threadId: string | undefined): Set<string> | null {
+    return threadId === undefined ? null : this.#family(threadId, this.#core.journal.listThreads());
   }
 
   async logs(raw: unknown, connection?: Connection): Promise<CoreLogRecord[]> {
     let query: ReturnType<typeof validateDiagnosticsLogsQuery>;
     try { query = validateDiagnosticsLogsQuery(raw); } catch (error) { throw invalidParams((error as Error).message); }
-    this.gate(connection, query.threadId);
-    const family = this.reach(query.threadId);
+    this.#gate(connection, query.threadId);
+    const family = this.#reach(query.threadId);
     // `scope: 'thread'` leaves out the records about no thread too.
     const keep = (record: CoreLogRecord): boolean => logMatches(record, { minLevel: query.minLevel, origin: query.origin, since: query.since, search: query.search })
       && (family === null || (record.threadId === undefined ? query.scope !== 'thread' : family.has(record.threadId)));
     const anonymizer = this.anonymizer();
-    return (await this.core.logs.select(keep, query.limit, query.since)).map(record => anonymizer.record(record));
+    return (await this.#core.logs.select(keep, query.limit, query.since)).map(record => anonymizer.record(record));
   }
 
   async summary(params: { threadId?: string; since?: number }, connection?: Connection): Promise<DiagnosticSummary> {
     try { validateDiagnosticsParams(params, 'diagnostics.summary'); } catch (error) { throw invalidParams((error as Error).message); }
-    this.gate(connection, params.threadId);
+    this.#gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) ? params.since : Date.now() - DAY_MS;
-    const family = this.reach(params.threadId);
+    const family = this.#reach(params.threadId);
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT, since)).map(record => anonymizer.record(record));
-    return this.summarize(records, since, anonymizer, family);
+    const records = (await this.#core.logs.select(record => record.at >= since && within(record, family), EXPORT_LIMIT, since)).map(record => anonymizer.record(record));
+    return this.#summarize(records, since, anonymizer, family);
   }
 
-  private async summarize(records: readonly CoreLogRecord[], since: number, anonymizer: LogAnonymizer, family: Set<string> | null): Promise<DiagnosticSummary> {
+  async #summarize(records: readonly CoreLogRecord[], since: number, anonymizer: LogAnonymizer, family: Set<string> | null): Promise<DiagnosticSummary> {
     const counts: Record<CoreLogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 };
     const problems = new Map<string, DiagnosticProblem>();
     const perThread = new Map<string, { warnings: number; errors: number; lastError: { at: number; message: string } | null }>();
@@ -182,8 +186,8 @@ export class Diagnostics {
         if (record.threadId && !problem.threadIds.includes(record.threadId) && problem.threadIds.length < 5) problem.threadIds.push(record.threadId);
       }
     }
-    const all = this.core.journal.listThreads();
-    const projectPaths = new Map(this.core.projects.list().map(project => [project.id, project.path]));
+    const all = this.#core.journal.listThreads();
+    const projectPaths = new Map(this.#core.projects.list().map(project => [project.id, project.path]));
     const mentioned = new Set(records.flatMap(record => [record.threadId, record.parentThreadId].filter((id): id is string => id !== undefined)));
     const threads: DiagnosticThread[] = all.filter(thread => (family === null || family.has(thread.id)) && (mentioned.has(thread.id) || (!thread.archived && thread.updatedAt >= since))).map(thread => {
       const seen = perThread.get(thread.id);
@@ -195,13 +199,13 @@ export class Diagnostics {
       };
     });
     return {
-      generatedAt: Date.now(), environment: this.anonymizeEnvironment(this.environment(), anonymizer),
+      generatedAt: Date.now(), environment: this.#anonymizeEnvironment(this.environment(), anonymizer),
       problems: [...problems.values()].sort((a, b) => (b.level === 'error' ? 1 : 0) - (a.level === 'error' ? 1 : 0) || b.lastAt - a.lastAt),
-      threads, logFiles: await this.core.logs.files(), counts, since,
+      threads, logFiles: await this.#core.logs.files(), counts, since,
     };
   }
 
-  private anonymizeEnvironment(environment: DiagnosticEnvironment, anonymizer: LogAnonymizer): DiagnosticEnvironment {
+  #anonymizeEnvironment(environment: DiagnosticEnvironment, anonymizer: LogAnonymizer): DiagnosticEnvironment {
     return {
       ...environment,
       osVersion: environment.osVersion === null ? null : anonymizer.text(environment.osVersion),
@@ -212,37 +216,37 @@ export class Diagnostics {
 
   async export(params: DiagnosticsExportParams, connection?: Connection): Promise<DiagnosticsExport> {
     try { validateDiagnosticsParams(params, 'diagnostics.export'); } catch (error) { throw invalidParams((error as Error).message); }
-    const agent = this.gate(connection, params.threadId);
+    const agent = this.#gate(connection, params.threadId);
     const since = typeof params.since === 'number' && Number.isFinite(params.since) && params.since >= 0 ? params.since : Date.now() - DAY_MS;
     const limit = params.limit === undefined ? EXPORT_LIMIT : params.limit;
     if (!Number.isInteger(limit) || limit < 1 || limit > EXPORT_LIMIT) throw invalidParams(`diagnostics.export limit: expected an integer from 1 to ${EXPORT_LIMIT}`);
     // An agent exports its own family whatever it names; the owner may focus on one.
-    const family = agent ? this.reach(params.threadId) : params.focusThreadId ? this.family(params.focusThreadId, this.core.journal.listThreads()) : null;
+    const family = agent ? this.#reach(params.threadId) : params.focusThreadId ? this.#family(params.focusThreadId, this.#core.journal.listThreads()) : null;
     const anonymizer = this.anonymizer();
-    const records = (await this.core.logs.select(record => record.at >= since && within(record, family), limit, since))
+    const records = (await this.#core.logs.select(record => record.at >= since && within(record, family), limit, since))
       .map(record => anonymizer.record(record));
-    const summary = await this.summarize(records, since, anonymizer, family);
+    const summary = await this.#summarize(records, since, anonymizer, family);
     // The raw console of the core can name any conversation: the owner's export only.
-    const tails = agent ? [] : await this.tails(anonymizer);
+    const tails = agent ? [] : await this.#tails(anonymizer);
     const text = renderExport(summary, records, tails);
     const stamp = formatLogTime(Date.now()).replace(/[-:]/g, '').replace(' ', '-').replace(/\.\d+Z$/, '');
     // Two exports in one second (an issue and a manual export) must not share a file.
     const name = `boite-diagnostics-${stamp}-${String(++this.#sequence).padStart(3, '0')}.txt`;
-    let path: string | null = join(this.core.logs.directory, 'exports', name);
+    let path: string | null = join(this.#core.logs.directory, 'exports', name);
     try {
-      await mkdir(join(this.core.logs.directory, 'exports'), { recursive: true, mode: 0o700 });
+      await mkdir(join(this.#core.logs.directory, 'exports'), { recursive: true, mode: 0o700 });
       await writeFile(path, text, { mode: 0o600 });
       // No Unix modes on Windows, where Bun 1.4.2 also crashed around fs chmod calls in these tests.
       if (process.platform !== 'win32') await chmod(path, 0o600);
     } catch (error) {
-      this.core.logs.warn(`the diagnostic export could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.export-failed' });
+      this.#core.logs.warn(`the diagnostic export could not be saved: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.export-failed' });
       path = null;
     }
     // The file is written: a failed cleanup of older ones does not hide it.
     if (path !== null) {
-      await this.pruneExports().catch(error => this.core.logs.warn(`older diagnostic exports could not be removed: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.prune-failed' }));
+      await this.#pruneExports().catch(error => this.#core.logs.warn(`older diagnostic exports could not be removed: ${messageOf(error)}`, { source: 'diagnostics', event: 'diagnostics.prune-failed' }));
     }
-    this.core.logs.info(`Diagnostics exported: ${records.length} records since ${formatLogTime(since)}`, {
+    this.#core.logs.info(`Diagnostics exported: ${records.length} records since ${formatLogTime(since)}`, {
       source: 'diagnostics', event: 'diagnostics.exported', ...(connection?.identity.threadId ? { threadId: connection.identity.threadId } : {}),
       data: { records: records.length, bytes: Buffer.byteLength(text), by: connection?.identity.principal ?? 'owner' },
     });
@@ -250,17 +254,17 @@ export class Diagnostics {
     return { name, path: agent ? null : path, bytes: Buffer.byteLength(text), records: records.length, text, summary };
   }
 
-  private async pruneExports(): Promise<void> {
-    const directory = join(this.core.logs.directory, 'exports');
+  async #pruneExports(): Promise<void> {
+    const directory = join(this.#core.logs.directory, 'exports');
     const names = (await readdir(directory)).filter(name => /^boite-diagnostics-.*\.txt$/.test(name)).sort();
     for (const name of names.slice(0, Math.max(0, names.length - EXPORTS_KEPT))) await unlink(join(directory, name)).catch(() => undefined);
   }
 
   /** The ends of the raw files no record covers: the resident core's console and the shell's failures. */
-  private async tails(anonymizer: LogAnonymizer): Promise<{ name: string; text: string }[]> {
+  async #tails(anonymizer: LogAnonymizer): Promise<{ name: string; text: string }[]> {
     const tails: { name: string; text: string }[] = [];
     for (const name of ['core-output.log', 'shell-error.log']) {
-      const path = join(this.core.dataDir, name);
+      const path = join(this.#core.dataDir, name);
       if (!existsSync(path)) continue;
       let handle;
       try {
@@ -270,7 +274,7 @@ export class Diagnostics {
         const buffer = Buffer.alloc(length);
         // A file cut meanwhile reads short: only what was read, never the zeroed rest.
         const { bytesRead } = await handle.read(buffer, 0, length, size - length);
-        const text = buffer.subarray(0, bytesRead).toString('utf8').split('\n').slice(size > length ? 1 : 0).map(line => anonymizer.text(this.redact(line))).join('\n');
+        const text = buffer.subarray(0, bytesRead).toString('utf8').split('\n').slice(size > length ? 1 : 0).map(line => anonymizer.text(this.#redact(line))).join('\n');
         tails.push({ name: `${name} (last ${formatBytes(length)} of ${formatBytes(size)})`, text });
       } catch (error) {
         tails.push({ name, text: `unreadable: ${messageOf(error)}` });
@@ -279,18 +283,19 @@ export class Diagnostics {
     return tails;
   }
 
-  private redact(line: string): string { return this.core.logs.redact(line); }
+  #redact(line: string): string { return this.#core.logs.redact(line); }
 
   async issue(params: DiagnosticsIssueParams, connection?: Connection): Promise<DiagnosticsIssue> {
     try { validateDiagnosticsParams(params, 'diagnostics.issue'); } catch (error) { throw invalidParams((error as Error).message); }
-    this.gate(connection, params.threadId);
+    this.#gate(connection, params.threadId);
+    this.#core.policy.assert(this.#core.policy.issueReportsOff(), 'issueReports');
     const title = typeof params.title === 'string' ? params.title.trim() : '';
     if (title.length < 4 || title.length > 200 || /[\x00-\x1f\x7f]/.test(title)) throw invalidParams('diagnostics.issue title: expected 4 to 200 characters on one line');
     const description = typeof params.description === 'string' ? params.description.trim() : '';
     if (description.length < 1 || description.length > 20_000) throw invalidParams('diagnostics.issue description: expected 1 to 20000 characters');
     const anonymizer = this.anonymizer();
-    const safeTitle = anonymizer.text(this.redact(title));
-    const safeDescription = anonymizer.text(this.redact(description));
+    const safeTitle = anonymizer.text(this.#redact(title));
+    const safeDescription = anonymizer.text(this.#redact(description));
     let exported: DiagnosticsExport | null = null;
     if (params.includeLogs !== false) exported = await this.export({ ...(params.threadId ? { threadId: params.threadId } : {}), since: Date.now() - DAY_MS }, connection);
     const body = renderIssueBody(safeDescription, exported, ISSUE_BODY_CHARS);
@@ -304,25 +309,25 @@ export class Diagnostics {
     else if (params.submit === true) {
       if (gh !== 'ready') error = gh === 'missing' ? 'GitHub CLI (gh) is not installed on this machine' : 'GitHub CLI (gh) is not signed in: run gh auth login';
       else {
-        try { url = await this.createIssue(safeTitle, body); }
+        try { url = await this.#createIssue(safeTitle, body); }
         catch (cause) { error = messageOf(cause).slice(0, 500); }
       }
-      this.core.logs.record(url ? 'info' : 'warn', url ? `Issue created on ${ISSUE_REPOSITORY}: ${url}` : `Issue not created: ${error}`, {
+      this.#core.logs.record(url ? 'info' : 'warn', url ? `Issue created on ${ISSUE_REPOSITORY}: ${url}` : `Issue not created: ${error}`, {
         source: 'diagnostics', event: url ? 'diagnostics.issue-created' : 'diagnostics.issue-failed', ...(connection?.identity.threadId ? { threadId: connection.identity.threadId } : {}),
       });
     }
     return { repository: ISSUE_REPOSITORY, title: safeTitle, body, url, prefillUrl, gh, error, exportPath: exported?.path ?? null };
   }
 
-  private async gh(args: string[], timeoutMs = GH_TIMEOUT_MS): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  async #gh(args: string[], timeoutMs = GH_TIMEOUT_MS): Promise<{ code: number | null; stdout: string; stderr: string }> {
     const scope = `diagnostics:gh:${++this.#sequence}`;
     let spawned;
-    try { spawned = this.core.procs.spawn(scope, this.ghCommand, args, { agentRoot: false, env: { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } }); }
+    try { spawned = this.#core.procs.spawn(scope, this.ghCommand, args, { agentRoot: false, env: { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } }); }
     catch (error) { if (/ENOENT|not found|No such file/i.test(messageOf(error))) return { code: null, stdout: '', stderr: 'missing' }; throw error; }
     // A grandchild holding the pipes keeps the reads open after the kill: the timeout settles the call itself.
     let onTimeout: () => void = () => undefined;
     const timedOut = new Promise<never>((_, reject) => { onTimeout = () => reject(new Error(`gh did not answer in ${Math.round(timeoutMs / 1000)} s`)); });
-    const timer = setTimeout(() => { try { this.core.procs.killTree(scope); } catch { /* The timeout still settles. */ } onTimeout(); }, timeoutMs);
+    const timer = setTimeout(() => { try { this.#core.procs.killTree(scope); } catch { /* The timeout still settles. */ } onTimeout(); }, timeoutMs);
     timer.unref?.();
     try {
       const [stdout, stderr, code] = await Promise.race([Promise.all([new Response(spawned.proc.stdout).text(), new Response(spawned.proc.stderr).text(), spawned.exited]), timedOut]);
@@ -332,19 +337,19 @@ export class Diagnostics {
 
   async ghStatus(): Promise<DiagnosticsIssue['gh']> {
     try {
-      const result = await this.gh(['auth', 'status', '--hostname', 'github.com'], 10_000);
+      const result = await this.#gh(['auth', 'status', '--hostname', 'github.com'], 10_000);
       if (result.code === null) return 'missing';
       return result.code === 0 ? 'ready' : 'unauthenticated';
       // gh is there (a missing one answers code null) but did not answer in time or could not start.
     } catch { return 'unauthenticated'; }
   }
 
-  private async createIssue(title: string, body: string): Promise<string> {
-    const file = join(this.core.logs.directory, `issue-${process.pid}-${++this.#sequence}.md`);
+  async #createIssue(title: string, body: string): Promise<string> {
+    const file = join(this.#core.logs.directory, `issue-${process.pid}-${++this.#sequence}.md`);
     await writeFile(file, body, { mode: 0o600 });
     try {
-      const result = await this.gh(['issue', 'create', '--repo', ISSUE_REPOSITORY, '--title', title, '--body-file', file]);
-      if (result.code !== 0) throw new Error(this.redact(result.stderr.trim() || `gh exited with ${result.code}`));
+      const result = await this.#gh(['issue', 'create', '--repo', ISSUE_REPOSITORY, '--title', title, '--body-file', file]);
+      if (result.code !== 0) throw new Error(this.#redact(result.stderr.trim() || `gh exited with ${result.code}`));
       const url = result.stdout.match(/https:\/\/github\.com\/\S+\/issues\/\d+/)?.[0];
       if (!url) throw new Error('gh did not print the new issue address');
       return url;
@@ -354,7 +359,7 @@ export class Diagnostics {
   /** A client's own errors. Bounded per connection, so a render loop cannot flood the files. */
   report(raw: unknown, connection: Connection): { accepted: number } {
     let records: DiagnosticReportRecord[];
-    try { records = this.core.logs.validateReport(raw); } catch (error) { throw invalidParams((error as Error).message); }
+    try { records = this.#core.logs.validateReport(raw); } catch (error) { throw invalidParams((error as Error).message); }
     const minute = Math.floor(Date.now() / 60_000);
     const budget = this.#reports.get(connection.id);
     const used = budget?.minute === minute ? budget.count : 0;
@@ -375,18 +380,18 @@ export class Diagnostics {
       // A reporter names a thread; only one that exists is kept, so no client can file problems under an invented one.
       // A paired device files problems only under a thread it has open, as its other reads are scoped;
       // an agent (refused this method by the router today) only under its own.
-      const known = record.threadId && this.core.journal.getThread(record.threadId) ? record.threadId : undefined;
+      const known = record.threadId && this.#core.journal.getThread(record.threadId) ? record.threadId : undefined;
       const principal = connection.identity.principal;
       const allowed = principal === 'owner' || (principal === 'session' ? connection.subscriptions.has(known ?? '') : known === connection.identity.threadId);
       const threadId = known && allowed ? known : undefined;
-      this.core.logs.record(record.level, record.message, {
+      this.#core.logs.record(record.level, record.message, {
         origin: 'ui', source: record.source, event: record.event, ...(threadId ? { threadId } : {}),
         ...(record.durationMs === undefined ? {} : { durationMs: record.durationMs }),
         data: { ...(record.data ?? {}), client, remote: connection.remote !== false },
       }, at);
     }
     if (accepted.length < records.length && used < REPORTS_PER_MINUTE) {
-      this.core.logs.warn(`A client sent more than ${REPORTS_PER_MINUTE} diagnostics in a minute; the rest of this minute is dropped`, { source: 'diagnostics', event: 'diagnostics.report-throttled', data: { client } });
+      this.#core.logs.warn(`A client sent more than ${REPORTS_PER_MINUTE} diagnostics in a minute; the rest of this minute is dropped`, { source: 'diagnostics', event: 'diagnostics.report-throttled', data: { client } });
     }
     return { accepted: accepted.length };
   }

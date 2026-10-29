@@ -147,11 +147,21 @@ function prepare(core: Core): Prepared[] {
 /** The Douane a move talks to: the proxy's, or with `plugin` the Douane plugin running on this core. */
 function douaneOf(core: Core, target: unknown = 'proxy'): SubscriptionProxy | null {
   if (target !== 'proxy' && target !== 'plugin') throw invalidParams('target must be proxy, plugin or absent', { field: 'target', expected: 'proxy or plugin' });
+  let proxy: SubscriptionProxy | null;
   if (target === 'plugin') {
-    return core.plugins.gateways.running(DOUANE_PLUGIN) ? localProxy({ enabled: false, kind: 'douane', baseUrl: '', dashboardUrl: '' }, core.plugins.gateways.port(DOUANE_PLUGIN)) : null;
+    proxy = core.plugins.gateways.running(DOUANE_PLUGIN) ? localProxy({ enabled: false, kind: 'douane', baseUrl: '', dashboardUrl: '' }, core.plugins.gateways.port(DOUANE_PLUGIN)) : null;
+  } else {
+    const saved = core.settings.get().subscriptionProxy;
+    proxy = saved && saved.kind === 'douane' && saved.baseUrl ? saved : null;
   }
-  const proxy = core.settings.get().subscriptionProxy;
-  return proxy && proxy.kind === 'douane' && proxy.baseUrl ? proxy : null;
+  assertGateway(core, proxy);
+  return proxy;
+}
+
+/** Check the resolved address, including disabled saved proxies and the plugin's local port. */
+function assertGateway(core: Core, proxy: SubscriptionProxy | null): void {
+  const key = core.policy.gatewayBlock(proxy?.baseUrl);
+  if (key !== null) throw core.policy.refusal(key, proxy?.baseUrl);
 }
 
 function managementToken(core: Core): string | null {
@@ -179,7 +189,8 @@ function scrub(message: string, secrets: readonly string[]): string {
 }
 
 /** One management call. A login page, a refusal or a silence becomes a sentence naming what to do. */
-async function gatewayCall(proxy: SubscriptionProxy, token: string | null, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+async function gatewayCall(core: Core, proxy: SubscriptionProxy, token: string | null, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+  assertGateway(core, proxy);
   const origin = subscriptionProxyOrigin(proxy);
   const url = `${proxyApiUrl(proxy).replace(/\/v1$/, '')}/admin/api${path}`;
   let response: Response;
@@ -193,6 +204,8 @@ async function gatewayCall(proxy: SubscriptionProxy, token: string | null, path:
   } catch {
     throw unavailable(`Douane at ${origin} could not be reached`);
   }
+  try { assertGateway(core, proxy); }
+  catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
   const type = response.headers.get('content-type') ?? '';
   if ((response.status >= 300 && response.status < 400) || /text\/html/i.test(type)) {
     await response.body?.cancel().catch(() => {});
@@ -208,6 +221,7 @@ async function gatewayCall(proxy: SubscriptionProxy, token: string | null, path:
   }
   let json: Record<string, unknown> | null = null;
   try { json = record(await response.json()); } catch { /* answered below */ }
+  assertGateway(core, proxy);
   if (json === null) throw unavailable(`Douane at ${origin} answered HTTP ${response.status} without JSON`);
   return { status: response.status, json };
 }
@@ -242,7 +256,7 @@ export async function moveToGateway(core: Core, ids: unknown, token: unknown, ta
     }
     const secret = managementToken(core);
     const known = new Map(prepare(core).map(entry => [entry.item.id, entry]));
-    const listed = await gatewayCall(proxy, secret, '/accounts');
+    const listed = await gatewayCall(core, proxy, secret, '/accounts');
     const before: GatewayAccount[] = Array.isArray(listed.json.accounts) ? listed.json.accounts.filter(record) as GatewayAccount[] : [];
     const before_ids = new Set(before.map(account => account.id).filter((id): id is string => typeof id === 'string'));
     const outcomes: GatewayMoveOutcome[] = [];
@@ -274,7 +288,7 @@ export async function moveToGateway(core: Core, ids: unknown, token: unknown, ta
       catch { outcomes.push({ id, outcome: 'refused', reason: 'unreadable', message: null }); continue; }
       const secrets = secretsOf(payload);
       try {
-        const answer = await gatewayCall(proxy, secret, '/accounts/import', { files: [{ content: payload }] });
+        const answer = await gatewayCall(core, proxy, secret, '/accounts/import', { files: [{ content: payload }] });
         const accounts = Array.isArray(answer.json.accounts) ? answer.json.accounts.map(record) : [];
         const errors = Array.isArray(answer.json.errors) ? answer.json.errors.map(record) : [];
         const taken = accounts[0];
@@ -287,6 +301,7 @@ export async function moveToGateway(core: Core, ids: unknown, token: unknown, ta
           outcomes.push({ id, outcome: 'refused', reason: null, message: scrub(typeof said === 'string' && said ? said : `HTTP ${answer.status}`, secrets) });
         }
       } catch (error) {
+        assertGateway(core, proxy);
         const message = error instanceof RpcFailure || error instanceof Error ? error.message : String(error);
         outcomes.push({ id, outcome: 'refused', reason: null, message: scrub(message, secrets) });
       }

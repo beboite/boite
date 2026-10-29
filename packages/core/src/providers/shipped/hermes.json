@@ -1,0 +1,64 @@
+{
+  "id": "hermes",
+  "schemaVersion": 1,
+  "name": "Hermes Agent",
+  "shortName": "Hermes",
+  "protocol": "acp",
+  "roots": ["{home}/.hermes", "{home}/AppData/Local/hermes", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "update": { "args": ["update", "--yes"] },
+      "executable": [
+        { "kind": "file", "value": "{home}/AppData/Local/hermes/hermes-agent/venv/Scripts/hermes.exe" },
+        { "kind": "path", "value": "hermes" }
+      ],
+      "launch": { "args": ["acp"] },
+      "isolation": { "HERMES_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1" },
+      "unsetEnv": ["HERMES_SESSION_ID", "HERMES_TUI_GATEWAY_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+      "close": { "processes": ["hermes.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "update": { "args": ["update", "--yes"] },
+      "executable": [
+        { "kind": "path", "value": "hermes" },
+        { "kind": "file", "value": "{home}/.local/bin/hermes" },
+        { "kind": "file", "value": "{home}/.hermes/hermes-agent/venv/bin/hermes" }
+      ],
+      "launch": { "args": ["acp"] },
+      "isolation": { "HERMES_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1" },
+      "unsetEnv": ["HERMES_SESSION_ID", "HERMES_TUI_GATEWAY_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+      "close": { "processes": ["hermes"] }
+    },
+    "macos": {
+      "detect": {},
+      "update": { "args": ["update", "--yes"] },
+      "executable": [
+        { "kind": "path", "value": "hermes" },
+        { "kind": "file", "value": "{home}/.local/bin/hermes" },
+        { "kind": "file", "value": "{home}/.hermes/hermes-agent/venv/bin/hermes" }
+      ],
+      "launch": { "args": ["acp"] },
+      "isolation": { "HERMES_HOME": "{isolationDir}" },
+      "env": { "NO_COLOR": "1" },
+      "unsetEnv": ["HERMES_SESSION_ID", "HERMES_TUI_GATEWAY_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+      "close": { "processes": ["hermes"] }
+    }
+  },
+  "auth": { "kind": "api-key", "session": ["config.yaml"] },
+  "login": { "command": ["hermes", "model"], "terminal": true },
+  "quirks": ["hermes"],
+  "shared": [{ "variable": "HERMES_HOME", "paths": ["skills", "SOUL.md"] }],
+  "models": [{ "id": "default", "name": "Hermes default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": false,
+    "checkpoint": false,
+    "images": true,
+    "planMode": false,
+    "resume": true
+  }
+}

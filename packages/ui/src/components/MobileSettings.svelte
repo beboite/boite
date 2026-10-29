@@ -26,6 +26,8 @@
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import CompactionSettings from './CompactionSettings.svelte';
   import InfoTip from './InfoTip.svelte';
+  import PolicyBanner from './PolicyBanner.svelte';
+  import PolicySettings from './PolicySettings.svelte';
   import { tick, type Snippet } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
   import { phonePage } from '../lib/settings-tabs';
@@ -115,6 +117,7 @@
   {#if shown === 'home'}
     <!-- The header already says Settings: the screen opens on its two groups, what this phone keeps and what the machine runs. -->
     <div class="home" data-testid="mobile-settings-home">
+      <PolicyBanner store={target} />
       <section aria-labelledby="phone-preferences">
         <h2 id="phone-preferences">{strings.mobile.settingsDevice}</h2>
         <div class="rows">
@@ -167,6 +170,7 @@
           </button>
         </div>
       </section>
+      <PolicySettings store={target} />
     </div>
   {:else}
     {@const title = titleOf(shown)}
@@ -253,6 +257,7 @@
   .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .settings-screen:is([data-slide], .arrived) > :is(.home, .detail) { animation: none; }
   .home { padding: 16px; }
+  .home > :global(.policy-banner) { margin-bottom: 20px; }
   /* The group's first row is the machine itself: its name over its connection. */
   .machine-link { min-height: 64px; }
   .machine-link strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }

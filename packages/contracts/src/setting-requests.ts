@@ -127,6 +127,7 @@ export const REQUESTABLE_SETTINGS = {
   warmProcessMinutes: { page: 'advanced', section: 'execution', sensitive: false },
   autoCompact: { page: 'advanced', section: 'auto-compact', sensitive: false },
   compactionByType: { page: 'advanced', section: 'auto-compact', sensitive: false },
+  compactionSummary: { page: 'advanced', section: 'auto-compact', sensitive: false },
   autoResumeLimitedThreads: { page: 'limits', section: 'limit-resume', sensitive: false },
   backgroundCompaction: { page: 'experiments', section: 'background-compaction', sensitive: false },
   deviceStream: { page: 'experiments', section: 'device-stream', sensitive: false },
@@ -256,6 +257,7 @@ const MISSING: Partial<Record<RequestableSetting, unknown>> = {
   titleModel: null,
   autoCompact: null,
   compactionByType: {},
+  compactionSummary: null,
   publicUrl: null,
   browserOrigins: [],
 };

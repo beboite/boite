@@ -44,6 +44,8 @@ type ErasedHandler = (params: never, ctx: RpcContext) => unknown;
 export class Router {
   /** Host execution policy, in addition to the static caller-role map. Local sessions have no shared binding. */
   guard?: (method: RpcMethodName, params: unknown, ctx: RpcContext) => void;
+  /** The admin policy's refusals (`policy-gate.ts`), for every caller the owner included. */
+  policy?: (method: RpcMethodName, params: unknown) => void;
   private readonly handlers = new Map<RpcMethodName, ErasedHandler>();
   private accepting = true;
   private active = 0;
@@ -85,6 +87,7 @@ export class Router {
     // A method with rules in contracts gets only params they accepted, as they normalized them.
     const checked = checkRpcParams(method, params);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    this.policy?.(method as RpcMethodName, checked.params);
     this.guard?.(method as RpcMethodName, checked.params, ctx);
     return await this.trackRequest(() => handler(checked.params as never, ctx));
   }
