@@ -91,6 +91,9 @@ export class Composer {
     this.#schedule(this.storage.queued.values());
   }
 
+  /** Retry requested input once the native turn can accept it, before any tool output. */
+  inputReady(threadId: string): void { this.#schedule([{ section: 'inputs', id: threadId }]); }
+
   put(params: RpcParams<'composer.put'>, connection: Connection): { accepted: boolean; record: ComposerRecord } {
     if (!params || !['inputs', 'drafts'].includes(params.section) || typeof params.id !== 'string' || !params.id || !Number.isSafeInteger(params.expectedRevision) || params.expectedRevision < 0) throw invalidParams('composer.put: expected section inputs/drafts, non-empty id and non-negative expectedRevision');
     // Soft-deleted rows remain undoable. Missing rows cannot adopt an offline
@@ -205,7 +208,7 @@ export class Composer {
           for (const entry of batch.entries) this.#reserve(record, entry, id, batch.requestId);
           const accepted = await Promise.race([this.#stopped, steerUser(this.#core, this.#core.threads, { threadId: id, turnId: turn.id, prompt: batch.text, attachments, previewReferences: batch.previewReferences, clientRequestId: batch.requestId, expectedSelectionVersion: thread.selectionVersion ?? 0 }, batch.entries[0]!.sentFrom ?? null)]);
           if (!accepted || this.#closed) return;
-          if (!accepted.accepted) { for (const entry of batch.entries) this.storage.release(entry.id); this.#boundaries.delete(id); return; }
+          if (!accepted.accepted) { for (const entry of batch.entries) this.storage.release(entry.id); return; }
           this.#complete(section, id, batch.entries.map(entry => entry.id)); continue;
         }
         this.#boundaries.delete(id);

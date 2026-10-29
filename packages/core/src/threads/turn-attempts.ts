@@ -259,6 +259,7 @@ export class TurnAttempts {
       assertDriverRunnable(provider.protocol, this.#core.providers.summary(provider.id), account);
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);
+      this.#core.composer.inputReady(threadId);
       permissions.attach(handle);
       const settings = this.#liveSettings.get(threadId)?.settings;
       settings?.attach(handle);

@@ -160,6 +160,8 @@ export interface TurnContext {
   reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
   /** A provider signal that need not mean execution advanced. */
   reportProviderEvent?(): void;
+  /** The running turn can now accept native user input. Does not report model progress. */
+  inputReady?(): void;
   /** A native authentication refusal invalidates the account's passive status. */
   authenticationFailed?(): void;
   /**

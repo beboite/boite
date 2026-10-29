@@ -284,7 +284,7 @@ export class CodexSession {
           ...(ctx.thread.effort === null ? {} : { effort: ctx.thread.effort }),
           serviceTier: ctx.thread.speed ?? "default",
         });
-        turn.turnId = started.turn.id;
+        turn.turnId = started.turn.id; ctx.inputReady?.();
         if (turn.isStopped) this.#interrupt(turn);
         // A server that answers with a turn already finished settles it here;
         // the one that answers `inProgress` settles on `turn/completed`.
