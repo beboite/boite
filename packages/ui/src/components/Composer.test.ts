@@ -6,11 +6,13 @@ import App from '../App.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
-import { store } from '../lib/store.svelte';
+import { Store, store } from '../lib/store.svelte';
 import { repliesOf, sendAnswer, TYPING_PAUSE_MS } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 import { setExperiment } from '../lib/experiments';
+import { retryTurn } from '../lib/composer-edit';
+import { strings } from '../lib/strings';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -1007,6 +1009,89 @@ test('a pending send cannot duplicate a turn or erase text typed for the next pr
   expect(input().value).toBe('still composing the next prompt [Image 1] ');
   expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+});
+
+test('a prompt on its way when the app dies comes back after a restart, its images too, and reaches the thread once', async ({ oldCoreApp: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  const starts: string[] = [];
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    // A prompt and its picture uploading over a slow link: the app dies before the core has it.
+    if (method === 'turns.start') { starts.push((params as { clientRequestId: string }).clientRequestId); return new Promise(() => {}); }
+    return call(method, params);
+  });
+  await type('a long prompt in flight ');
+  paste(pngFile('flight.png'));
+  await waitFor(() => chips().length === 1);
+  press('Enter');
+  await waitFor(() => starts.length === 1 && input().value === '');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // No pagehide, no flush: the page is gone. The next app reads the synchronous backup the old one left.
+  const core = (client as FakeClient).core!;
+  const next = new Store();
+  next.machineId = store.machineId;
+  next.endpointUrl = store.endpointUrl;
+  const restarted = new FakeClient({ delayMs: 0, missing: OLD_CORE });
+  const nextStarts: string[] = [];
+  const nextCall = restarted.call.bind(restarted);
+  vi.spyOn(restarted, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') nextStarts.push((params as { clientRequestId: string }).clientRequestId);
+    return nextCall(method, params);
+  });
+  await restarted.connect();
+  restarted.core!.hostname = core.hostname;
+  restarted.core!.dataDir = core.dataDir;
+  next.attach(restarted);
+  try {
+    await next.connect();
+    // Asked again under the id it first went out with, so a core that did take it answers with that turn.
+    await waitFor(() => nextStarts.length === 1, 2000);
+    expect(nextStarts).toEqual(starts);
+    await waitFor(() => (next.composerStates['t-trace']?.queued.length ?? 0) === 0, 2000);
+    const thread = await restarted.call('threads.get', { threadId: 't-trace' });
+    const sent = thread.messages.filter(message => message.role === 'user' && message.parts.some(part => part.type === 'text' && part.text.includes('a long prompt in flight')));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.parts.filter(part => part.type === 'image')).toHaveLength(1);
+  } finally { next.detach(); restarted.close(); }
+});
+
+test('a new conversation whose creation is on its way when the app dies comes back as its draft, image included', async ({ app: _app }) => {
+  store.startDraft(store.projects[0]!.id);
+  await waitFor(() => store.draft !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let creating = false;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.create') { creating = true; return new Promise(() => {}); }
+    return call(method, params);
+  });
+  await type('the first prompt of a new conversation ');
+  paste(pngFile('first.png'));
+  await waitFor(() => chips().length === 1);
+  press('Enter');
+  await waitFor(() => creating && input().value === '');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const core = (client as FakeClient).core!;
+  const next = new Store();
+  next.machineId = store.machineId;
+  next.endpointUrl = store.endpointUrl;
+  const restarted = new FakeClient({ delayMs: 0 });
+  await restarted.connect();
+  restarted.core!.hostname = core.hostname;
+  restarted.core!.dataDir = core.dataDir;
+  next.attach(restarted);
+  try {
+    await next.connect();
+    // Its conversation may or may not exist: the words wait in their draft, nothing starts by itself.
+    await waitFor(() => next.draftEntries.some(row => row.text.startsWith('the first prompt of a new conversation')), 2000);
+    const id = next.draftEntries.find(row => row.text.startsWith('the first prompt of a new conversation'))!.id;
+    next.startDraft(store.projects[0]!.id, { draftId: id });
+    expect(next.composerStates.draft?.text).toBe('the first prompt of a new conversation [Image 1] ');
+    expect(next.composerStates.draft?.attachments.map(item => item.name)).toEqual(['first.png']);
+    expect(next.composerStates.draft?.queued).toEqual([]);
+  } finally { next.detach(); restarted.close(); }
 });
 
 // -- images -------------------------------------------------------------------
@@ -2171,6 +2256,205 @@ test('Ctrl+Z after deleting everything and a stray key brings back the text and 
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(input().value).toBe('');
   expect(chips()).toEqual([]);
+});
+
+test('Edit on a sent message over a long unsent draft is one undo step: Ctrl+Z gives the draft back as a plain draft', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('the sent prompt');
+  const draft = 'an unsent draft that took an hour to write '.repeat(500);
+  await type(draft);
+  paste(pngFile('unsent.png'));
+  await waitFor(() => chips().length === 1);
+  const full = input().value;
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'the sent prompt')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'the sent prompt');
+  const message = store.composerStates['t-trace']!.editing;
+  expect(message).toBeTruthy();
+  input().focus();
+  press('z', { ctrlKey: true });
+  await waitFor(() => input().value === full && chips().length === 1);
+  // Back to what it was: a draft, which sending would not turn into an edit of that message.
+  expect(store.composerStates['t-trace']!.editing ?? null).toBeNull();
+  expect(document.querySelector('[data-testid=composer-editing]')).toBeNull();
+  press('y', { ctrlKey: true });
+  await waitFor(() => input().value === 'the sent prompt');
+  expect(store.composerStates['t-trace']!.editing).toBe(message);
+});
+
+test('on a phone, a draft emptied at once or replaced by Edit offers Undo in a toast that brings back its text and images', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('the sent prompt');
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  paste(pngFile('phone.png'));
+  await waitFor(() => chips().length === 1);
+  const full = input().value;
+  input().focus();
+  // Select all, then the keyboard's delete: the phone has no Ctrl+Z to take it back.
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]') !== null);
+  expect(query('[data-testid=undo-toast]')!.textContent).toContain(strings.composer.draftCleared);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+  // Edit on a sent message replaces the draft the same way, and the toast gives it back.
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'the sent prompt')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'the sent prompt' && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftReplaced) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+  expect(store.composerStates['t-trace']!.editing ?? null).toBeNull();
+});
+
+test('on a phone, cutting a whole draft with its image offers Undo that brings both back', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  paste(pngFile('phone.png'));
+  // A picture still loading is not copied: the cut waits until it is read.
+  await waitFor(() => chips().length === 1 && loaded());
+  const full = input().value;
+  input().focus();
+  // Cut takes the `[Image 1]` reference and its picture through the composer's own clipboard path.
+  input().setSelectionRange(0, full.length);
+  clipboardEvent('cut', clipboard());
+  await waitFor(() => input().value === '' && chips().length === 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => input().value === full && chips().length === 1);
+});
+
+test('on a phone, the Undo offer of a cleared draft ends when another conversation opens, so it never rewrites the one left behind', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  // The same box now writes to another conversation: an Undo here would put the first one's draft back behind the user's back.
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+  expect(store.composerStates['t-trace']?.text ?? '').toBe('');
+});
+
+test('on a phone, the Undo offer of a cleared new conversation ends when another new conversation opens in the same box', async ({ app: _app }) => {
+  store.startDraft(null, { fresh: true });
+  await waitFor(() => !store.openThread && store.draft !== null && input() !== null);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('another conversation, parked');
+  const other = store.draft!.id;
+  store.startDraft(null, { fresh: true });
+  await waitFor(() => store.draft !== null && store.draft.id !== other && input().value === '');
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  // Both are the box's `draft` key: only the draft's own identity tells them apart.
+  store.startDraft(null, { draftId: other });
+  await waitFor(() => store.draft?.id === other && input().value === 'another conversation, parked');
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+});
+
+test('on a phone, a file attached after the draft was cleared ends the Undo offer, which would take the file back instead', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]') !== null);
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') === null);
+});
+
+test('on a phone, removing the only file or picture of a draft offers Undo that brings it back', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 1);
+  // The chip's remove button fires no input event, yet it empties the draft as surely as select-all and delete.
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => chips().length === 1);
+  // A picture leaves only the space after its `[Image 1]` reference behind: the draft is just as empty.
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  paste(pngFile('only.png'));
+  await waitFor(() => chips().length === 1 && input().value.includes('[Image 1]') && document.querySelector('[data-testid=undo-toast]') === null);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0 && document.querySelector('[data-testid=undo-toast]')?.textContent?.includes(strings.composer.draftCleared) === true);
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => chips().length === 1 && input().value.includes('[Image 1]'));
+});
+
+test('on a phone, a file that finishes reading in a conversation left behind keeps the Undo offer of the one on screen', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: media === '(pointer: coarse)', onchange: null, addListener() {}, removeListener() {},
+  }) as unknown as MediaQueryList);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const read = FileReader.prototype.readAsDataURL;
+  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, file: Blob) { void gate.then(() => read.call(this, file)); });
+  paste(new File(['notes'], 'slow.txt', { type: 'text/plain' }));
+  await store.open('t-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
+  await type('a long prompt typed on the phone '.repeat(300));
+  const full = input().value;
+  input().focus();
+  input().setSelectionRange(0, full.length);
+  edit('deleteContentBackward', '', 0);
+  await waitFor(() => document.querySelector('[data-testid=undo-toast]') !== null);
+  release();
+  await waitFor(() => store.composerStates['t-trace']?.attachments.length === 1);
+  expect(document.querySelector('[data-testid=undo-toast]')).not.toBeNull();
+});
+
+test('a retry whose resend fails leaves the words typed meanwhile in the box and holds its prompt in the queue', async ({ oldCoreApp: _app }) => {
+  await store.open('t-trace');
+  await send('the prompt to retry');
+  const prompt = store.openThread!.messages.findLast(message => message.role === 'user')!;
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') { await gate; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'resend refused' }); }
+    return call(method, params);
+  });
+  const retrying = retryTurn(store, 't-trace', prompt);
+  await type('the next prompt, typed while the retry went out');
+  release();
+  await retrying;
+  expect(input().value).toBe('the next prompt, typed while the retry went out');
+  expect(store.composerStates['t-trace']!.queued.map(entry => entry.text)).toEqual(['the prompt to retry']);
+  expect(store.composerStates['t-trace']!.paused).toBe(true);
 });
 
 test('a picture refused while it loads leaves no undo step naming it, and keeps the typing done meanwhile', async ({ app: _app }) => {
