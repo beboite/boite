@@ -205,9 +205,9 @@ the other members that it changed, which settles their open cards.
 
 The `bot.*` operations, also sealed and group-only, let a bot of one member
 look after the projects of another that its owner entrusted to it:
-`bot.lease`, `bot.threads`, `bot.thread`, `bot.send`, `bot.act` and
-`bot.answer` go to the member that holds the project, each with the bot's
-lease, and `bot.event` comes back with a turn, a question or a failure. The
+`bot.lease`, `bot.threads`, `bot.thread`, `bot.send`, `bot.act`,
+`bot.answer` and `bot.start` (a thread the bot starts there) go to the member
+that holds the project, each with the bot's lease, and `bot.event` comes back with a turn, a question or a failure. The
 holding member refuses all of them while its own `groupBots` setting is off
 ([bots](bots.md#projects-of-the-other-machines-of-the-group)).
 

@@ -129,36 +129,38 @@ export function midnight(at = Date.now()): number {
  * held events wait for the thread to be free.
  */
 export class AgentRuntime {
-  private closed = false;
-  private readonly timer: ReturnType<typeof setInterval>;
-  private readonly off: () => void;
+  #closed = false;
+  readonly #timer: ReturnType<typeof setInterval>;
+  readonly #off: () => void;
   private readonly pending = new Map<string, Pending>();
   /** Autonomous turns held by `admit`, by thread and source, each started again once the agent is admitted. */
-  private readonly waiting = new Map<string, Map<string, () => void>>();
+  readonly #waiting = new Map<string, Map<string, () => void>>();
   /** The holds already said in an agent's thread, so a retried turn leaves one line. */
-  private readonly told = new Set<string>();
+  readonly #told = new Set<string>();
   /** Fact times per agent in the last hour, and the drops said in its thread. Reset by a restart. */
-  private readonly sent = new Map<string, { at: number[]; told: number[] }>();
+  readonly #sent = new Map<string, { at: number[]; told: number[] }>();
 
-  constructor(private readonly core: Core) {
+  readonly #core: Core;
+  constructor(core: Core) {
+    this.#core = core;
     for (const row of core.journal.db.query("SELECT key, value FROM settings WHERE key LIKE 'agents:pending:%'").all() as { key: string; value: string }[]) {
       try { this.pending.set(row.key.slice(PENDING.length), JSON.parse(row.value) as Pending); }
       catch (error) { core.log('warn', `agent pending wakes ${row.key}: ${messageOf(error)}`); }
     }
-    this.off = core.bus.onAny((name, payload) => {
-      if (this.closed || core.journal.isClosed()) return;
+    this.#off = core.bus.onAny((name, payload) => {
+      if (this.#closed || core.journal.isClosed()) return;
       try {
-        if (name === 'turn.finished') this.finished(payload as Turn);
-        else if (name === 'turn.started' && this.store.agentOfThread((payload as Turn).threadId)) this.store.changed();
+        if (name === 'turn.finished') this.#finished(payload as Turn);
+        else if (name === 'turn.started' && this.#store.agentOfThread((payload as Turn).threadId)) this.#store.changed();
       } catch (error) { core.log('warn', `agent runtime after ${name}: ${messageOf(error)}`); }
     });
-    this.timer = setInterval(() => {
+    this.#timer = setInterval(() => {
       try { this.tick(); }
-      catch (error) { this.core.log('error', `Agent scheduler: ${messageOf(error)}`); }
+      catch (error) { this.#core.log('error', `Agent scheduler: ${messageOf(error)}`); }
     }, 500);
-    this.timer.unref?.();
+    this.#timer.unref?.();
   }
-  private get store() { return this.core.workforce; }
+  get #store() { return this.#core.workforce; }
   /** Nothing the agents runtime holds keeps the core from restarting: pending wakes survive it. */
   get busy(): boolean { return false; }
 
@@ -168,23 +170,23 @@ export class AgentRuntime {
    * or its daily budget is spent (said once a day in its thread).
    */
   wake(agentId: string, wake: AgentWake): Turn | null {
-    const agent = this.store.records.find('profile', agentId);
+    const agent = this.#store.records.find('profile', agentId);
     return agent ? this.attempt(agent, wake).turn ?? null : null;
   }
 
   /** `wake` with the reason it did not start. */
   attempt(agent: AgentProfile, wake: AgentWake): { turn?: Turn; held?: WakeHeld } {
-    if (this.closed || this.core.stopping) return { held: 'paused' };
-    const paused = this.refusal(agent);
+    if (this.#closed || this.#core.stopping) return { held: 'paused' };
+    const paused = this.#refusal(agent);
     if (paused !== null) return { held: paused };
     let thread: ThreadSummary;
-    try { thread = this.core.threads.require(this.store.open(agent.id).threadId); }
-    catch (error) { this.core.log('warn', `agent ${agent.id}: no thread to wake: ${messageOf(error)}`); return { held: 'failed' }; }
-    if (this.atWork(thread)) return { held: 'busy' };
-    if (this.overBudget(agent, thread, wake.label)) return { held: 'budget' };
-    try { return { turn: this.begin(thread, wake) }; }
+    try { thread = this.#core.threads.require(this.#store.open(agent.id).threadId); }
+    catch (error) { this.#core.log('warn', `agent ${agent.id}: no thread to wake: ${messageOf(error)}`); return { held: 'failed' }; }
+    if (this.#atWork(thread)) return { held: 'busy' };
+    if (this.#overBudget(agent, thread, wake.label)) return { held: 'budget' };
+    try { return { turn: this.#begin(thread, wake) }; }
     catch (error) {
-      this.core.log('warn', `agent ${agent.id}: ${wake.label} could not start: ${messageOf(error)}`);
+      this.#core.log('warn', `agent ${agent.id}: ${wake.label} could not start: ${messageOf(error)}`);
       return { held: 'failed' };
     }
   }
@@ -194,15 +196,15 @@ export class AgentRuntime {
    * meets: an archived or paused agent, or paused agents, start none. The
    * daily budget is read apart, with the thread (`overBudget`, `spent`).
    */
-  private refusal(agent: AgentProfile): WakeHeld | null {
+  #refusal(agent: AgentProfile): WakeHeld | null {
     if (agent.status !== 'active') return agent.status === 'paused' ? 'paused' : 'inactive';
-    if (this.store.limits().paused) return 'paused';
+    if (this.#store.limits().paused) return 'paused';
     return null;
   }
 
   /** What the agent's thread and the threads below it spent today against its budget, or null when it has room. */
-  private spent(agent: AgentProfile, threadId: string): { spent: number; budget: number } | null {
-    const budget = this.store.resident.config(agent.id).dailyBudgetUsd ?? null;
+  #spent(agent: AgentProfile, threadId: string): { spent: number; budget: number } | null {
+    const budget = this.#store.resident.config(agent.id).dailyBudgetUsd ?? null;
     if (budget === null) return null;
     const spent = this.spentToday(threadId);
     return spent < budget ? null : { spent, budget };
@@ -218,59 +220,59 @@ export class AgentRuntime {
    */
   admit(thread: ThreadSummary, source: AutonomousSource): void {
     if (thread.parentThreadId) return;
-    const agent = this.store.agentOfThread(thread.id);
+    const agent = this.#store.agentOfThread(thread.id);
     if (!agent) return;
-    const held = this.refusal(agent);
-    const over = held === null ? this.spent(agent, thread.id) : null;
+    const held = this.#refusal(agent);
+    const over = held === null ? this.#spent(agent, thread.id) : null;
     const key = `${agent.id}:${source}`;
-    if (held === null && over === null) { this.told.delete(key); return; }
+    if (held === null && over === null) { this.#told.delete(key); return; }
     const why = held === 'inactive' ? `${agent.name} is archived`
       : held === 'paused' ? (agent.status === 'paused' ? `${agent.name} is paused` : 'bots are paused')
         : `today's turns cost $${over!.spent.toFixed(2)}, past the daily budget of $${over!.budget.toFixed(2)}`;
     const after = source === 'resume' ? 'It was dropped.' : held === 'inactive' ? 'It will not run.' : over ? 'It runs tomorrow, or once the budget is raised.'
       : agent.status === 'paused' ? `It runs once ${agent.name} resumes.` : 'It runs once bots resume.';
     const text = `Held ${SOURCE_TEXT[source]}: ${why}. ${after}`;
-    if (!this.told.has(key)) {
-      this.told.add(key);
+    if (!this.#told.has(key)) {
+      this.#told.add(key);
       // After the caller's transaction, which this refusal rolls back.
-      queueMicrotask(() => { if (!this.closed && !this.core.journal.isClosed()) this.line(agent.id, text); });
+      queueMicrotask(() => { if (!this.#closed && !this.#core.journal.isClosed()) this.line(agent.id, text); });
     }
     throw refused(text, { reason: AGENT_HELD, threadId: thread.id, source, held: held ?? 'budget' });
   }
 
   /** Runs `retry` once `admit` would let the thread's turn of this `key` start; a later one for the same key replaces it. */
   whenAdmitted(threadId: string, key: string, retry: () => void): void {
-    const held = this.waiting.get(threadId) ?? new Map<string, () => void>();
+    const held = this.#waiting.get(threadId) ?? new Map<string, () => void>();
     held.set(key, retry);
-    this.waiting.set(threadId, held);
+    this.#waiting.set(threadId, held);
   }
 
   /** The held autonomous turns of agents admitted again, each on a free thread. */
-  private retryHeld(): void {
-    for (const [threadId, held] of [...this.waiting]) {
-      const agent = this.store.agentOfThread(threadId);
-      const thread = this.core.journal.getThread(threadId);
-      if (!agent || !thread || thread.archived) { this.waiting.delete(threadId); continue; }
-      if (this.refusal(agent) !== null || this.spent(agent, threadId) !== null || this.atWork(thread)) continue;
+  #retryHeld(): void {
+    for (const [threadId, held] of [...this.#waiting]) {
+      const agent = this.#store.agentOfThread(threadId);
+      const thread = this.#core.journal.getThread(threadId);
+      if (!agent || !thread || thread.archived) { this.#waiting.delete(threadId); continue; }
+      if (this.#refusal(agent) !== null || this.#spent(agent, threadId) !== null || this.#atWork(thread)) continue;
       const [key, retry] = held.entries().next().value!;
       held.delete(key);
-      if (held.size === 0) this.waiting.delete(threadId);
-      try { retry(); } catch (error) { this.core.log('warn', `agent ${agent.id}: a held turn did not start again: ${messageOf(error)}`); }
+      if (held.size === 0) this.#waiting.delete(threadId);
+      try { retry(); } catch (error) { this.#core.log('warn', `agent ${agent.id}: a held turn did not start again: ${messageOf(error)}`); }
     }
   }
 
   /** The owner's own start (Run now): no pause or budget holds it; a busy thread refuses it. */
   start(agent: AgentProfile, wake: AgentWake): Turn {
-    const thread = this.core.threads.require(this.store.open(agent.id).threadId);
-    if (this.atWork(thread)) throw refused(`${agent.name} is at work; run it again once its turn ends`, { threadId: thread.id, field: 'routineId' });
-    return this.begin(thread, wake);
+    const thread = this.#core.threads.require(this.#store.open(agent.id).threadId);
+    if (this.#atWork(thread)) throw refused(`${agent.name} is at work; run it again once its turn ends`, { threadId: thread.id, field: 'routineId' });
+    return this.#begin(thread, wake);
   }
 
   /** An event that waits for the thread to be free, replacing one held under the same key. */
   queue(agentId: string, key: string, event: Omit<AgentWake, 'kind' | 'requestId'>): void {
-    const pending = this.held(agentId);
+    const pending = this.#held(agentId);
     pending.events = [...pending.events.filter(e => e.key !== key), { key, label: event.label, prompt: event.prompt, at: Date.now() }];
-    this.save(agentId, pending);
+    this.#save(agentId, pending);
   }
 
   /**
@@ -280,21 +282,21 @@ export class AgentRuntime {
    * old. False when it was dropped (over the hourly cap) or is already there.
    */
   fact(agentId: string, fact: AgentFact): boolean {
-    if (this.closed) return false;
+    if (this.#closed) return false;
     const now = Date.now();
-    const pending = this.held(agentId);
+    const pending = this.#held(agentId);
     const previous = pending.facts.find(f => f.key === fact.key);
     if (previous && !fact.replace) return false;
-    const wakes = fact.urgent || this.store.resident.config(agentId).eventWakes === true;
-    const sent = this.sent.get(agentId) ?? { at: [], told: [] };
+    const wakes = fact.urgent || this.#store.resident.config(agentId).eventWakes === true;
+    const sent = this.#sent.get(agentId) ?? { at: [], told: [] };
     sent.at = sent.at.filter(at => at > now - HOUR);
     sent.told = sent.told.filter(at => at > now - HOUR);
-    this.sent.set(agentId, sent);
+    this.#sent.set(agentId, sent);
     // A replacement adds no wake: it takes the place of one already counted.
     const counted = wakes && !(previous && !previous.deferred);
     if (counted && sent.at.length >= NOTICES_PER_HOUR) {
-      this.core.log('warn', `agent ${agentId}: more than ${NOTICES_PER_HOUR} events this hour; dropped ${fact.key}`);
-      this.dropped(agentId, sent, `Event dropped: more than ${NOTICES_PER_HOUR} arrived this hour. ${about(fact.text)}`);
+      this.#core.log('warn', `agent ${agentId}: more than ${NOTICES_PER_HOUR} events this hour; dropped ${fact.key}`);
+      this.#dropped(agentId, sent, `Event dropped: more than ${NOTICES_PER_HOUR} arrived this hour. ${about(fact.text)}`);
       return false;
     }
     if (counted) sent.at.push(now);
@@ -305,13 +307,13 @@ export class AgentRuntime {
     let facts = previous ? pending.facts.map(f => f.key === fact.key ? held : f) : [...pending.facts, held];
     // Deferred facts remain protected through re-enable and restart; only automatic arrivals compete for their cap.
     const automatic = facts.filter(f => !f.deferred);
-    while (wakes && automatic.length > 1 && this.eventPrompt(automatic).length > EVENT_PROMPT_MAX) {
+    while (wakes && automatic.length > 1 && this.#eventPrompt(automatic).length > EVENT_PROMPT_MAX) {
       const dropped = automatic.shift()!;
-      this.dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(dropped.text)}`);
+      this.#dropped(agentId, sent, `Event dropped to keep the next wake under ${EVENT_PROMPT_MAX} characters. ${about(dropped.text)}`);
       facts = facts.filter(f => f.key !== dropped.key);
     }
     pending.facts = facts;
-    this.save(agentId, pending);
+    this.#save(agentId, pending);
     return true;
   }
 
@@ -320,7 +322,7 @@ export class AgentRuntime {
    * agent know what it was not told; past `DROP_LINES_PER_HOUR` in an hour,
    * one more line says the rest go unlisted.
    */
-  private dropped(agentId: string, sent: { told: number[] }, text: string): void {
+  #dropped(agentId: string, sent: { told: number[] }, text: string): void {
     if (sent.told.length > DROP_LINES_PER_HOUR) return;
     sent.told.push(Date.now());
     this.line(agentId, sent.told.length > DROP_LINES_PER_HOUR ? `More events were dropped this hour; they are not listed.` : text);
@@ -340,74 +342,74 @@ export class AgentRuntime {
     if (!pending) return;
     const facts = pending.facts.filter(keep);
     if (facts.length === pending.facts.length) return;
-    this.save(agentId, { ...pending, facts });
+    this.#save(agentId, { ...pending, facts });
   }
 
   /** Drops what waits for an agent that is gone or archived. */
   forget(agentId: string): void {
     this.pending.delete(agentId);
-    this.core.journal.deleteSetting(`${PENDING}${agentId}`);
+    this.#core.journal.deleteSetting(`${PENDING}${agentId}`);
   }
 
-  private held(agentId: string): Pending {
+  #held(agentId: string): Pending {
     const held = this.pending.get(agentId) ?? { facts: [], events: [] };
     return { facts: [...held.facts], events: [...held.events] };
   }
 
-  private save(agentId: string, pending: Pending): void {
+  #save(agentId: string, pending: Pending): void {
     if (pending.facts.length === 0 && pending.events.length === 0) this.forget(agentId);
     else {
       this.pending.set(agentId, pending);
-      this.core.journal.setSetting(`${PENDING}${agentId}`, pending);
+      this.#core.journal.setSetting(`${PENDING}${agentId}`, pending);
     }
-    this.store.changed();
+    this.#store.changed();
   }
 
-  private eventPrompt(facts: readonly HeldFact[]): string { return eventPrompt(facts); }
+  #eventPrompt(facts: readonly HeldFact[]): string { return eventPrompt(facts); }
 
-  private atWork(thread: ThreadSummary): boolean {
-    return this.core.threads.isBusy(thread.id);
+  #atWork(thread: ThreadSummary): boolean {
+    return this.#core.threads.isBusy(thread.id);
   }
 
-  private begin(thread: ThreadSummary, wake: AgentWake): Turn {
+  #begin(thread: ThreadSummary, wake: AgentWake): Turn {
     // A routine retried after restart already owns its original prompt and facts.
-    const prior = wake.kind === 'routine' && wake.requestId ? this.core.journal.turnRequest(thread.id, wake.requestId) : null;
-    if (prior) return this.core.journal.getTurn(prior.turn_id)!;
-    const agent = this.store.agentOfThread(thread.id);
-    const pending = agent && wake.kind === 'routine' && this.store.resident.config(agent.id).eventWakes !== true ? this.held(agent.id) : null;
-    if (!pending?.facts.length) return this.core.threads.startTurn(thread.id, { prompt: wake.prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId });
-    const facts = pending?.facts.filter(f => this.factThreads(f).every(id => this.store.projects.mayHear(agent!, id))) ?? [];
-    const prompt = facts.length ? `${wake.prompt}\n\n${this.eventPrompt(facts)}` : wake.prompt;
+    const prior = wake.kind === 'routine' && wake.requestId ? this.#core.journal.turnRequest(thread.id, wake.requestId) : null;
+    if (prior) return this.#core.journal.getTurn(prior.turn_id)!;
+    const agent = this.#store.agentOfThread(thread.id);
+    const pending = agent && wake.kind === 'routine' && this.#store.resident.config(agent.id).eventWakes !== true ? this.#held(agent.id) : null;
+    if (!pending?.facts.length) return this.#core.threads.startTurn(thread.id, { prompt: wake.prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId });
+    const facts = pending?.facts.filter(f => this.factThreads(f).every(id => this.#store.projects.mayHear(agent!, id))) ?? [];
+    const prompt = facts.length ? `${wake.prompt}\n\n${this.#eventPrompt(facts)}` : wake.prompt;
     const keys = new Set(pending.facts.map(f => f.key));
     // Acceptance journals the facts with the routine and consumes the durable queue
     // in the same transaction. Failed admission leaves the queue intact.
-    return this.core.threads.startTurn(thread.id, { prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId }, { persistAdmission: () => {
-      const held = this.held(agent!.id);
+    return this.#core.threads.startTurn(thread.id, { prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId }, { persistAdmission: () => {
+      const held = this.#held(agent!.id);
       const next = { ...held, facts: held.facts.filter(f => !keys.has(f.key)) };
       const empty = next.facts.length === 0 && next.events.length === 0;
-      if (empty) this.core.journal.deleteSetting(`${PENDING}${agent!.id}`);
-      else this.core.journal.setSetting(`${PENDING}${agent!.id}`, next);
+      if (empty) this.#core.journal.deleteSetting(`${PENDING}${agent!.id}`);
+      else this.#core.journal.setSetting(`${PENDING}${agent!.id}`, next);
       return () => {
         if (empty) this.pending.delete(agent!.id);
         else this.pending.set(agent!.id, next);
-        this.store.changed();
+        this.#store.changed();
       };
     } });
   }
 
   /** What the agent's thread and its subagents spent today, in API-equivalent dollars (`agentSpend`). */
   spentToday(threadId: string, now = Date.now()): number {
-    return agentSpend(this.core, threadId, midnight(now)).costUsd;
+    return agentSpend(this.#core, threadId, midnight(now)).costUsd;
   }
 
   /** Past its daily budget a wake is skipped; the first skip of the day says so in its thread. */
-  private overBudget(agent: AgentProfile, thread: ThreadSummary, label: string): boolean {
-    const over = this.spent(agent, thread.id);
+  #overBudget(agent: AgentProfile, thread: ThreadSummary, label: string): boolean {
+    const over = this.#spent(agent, thread.id);
     if (over === null) return false;
     const { spent, budget } = over;
     const day = new Date(midnight()).toISOString().slice(0, 10);
-    if (this.core.journal.getSetting(`${BUDGET_NOTED}${agent.id}`) !== day) {
-      this.core.journal.setSetting(`${BUDGET_NOTED}${agent.id}`, day);
+    if (this.#core.journal.getSetting(`${BUDGET_NOTED}${agent.id}`) !== day) {
+      this.#core.journal.setSetting(`${BUDGET_NOTED}${agent.id}`, day);
       this.line(agent.id, `Skipped ${label}: today's turns cost $${spent.toFixed(2)}, past the daily budget of $${budget.toFixed(2)}. Wakes resume tomorrow; your messages still run.`);
     }
     return true;
@@ -415,45 +417,45 @@ export class AgentRuntime {
 
   /** A line of Boite's own in the agent's thread, on its last turn. */
   line(agentId: string, text: string): void {
-    const threadId = this.store.sessionOf(agentId)?.threadId;
-    if (!threadId || !this.core.journal.getThread(threadId)) return;
-    const turnId = this.core.journal.lastTurn(threadId)?.id ?? newId('trn_');
+    const threadId = this.#store.sessionOf(agentId)?.threadId;
+    if (!threadId || !this.#core.journal.getThread(threadId)) return;
+    const turnId = this.#core.journal.lastTurn(threadId)?.id ?? newId('trn_');
     const part: MessagePart = { type: 'text', text };
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [part], state: 'complete', createdAt: Date.now() };
-    this.core.journal.append({ type: 'thread.resident', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
-    this.core.bus.emit('message.started', message);
-    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+    this.#core.journal.append({ type: 'thread.resident', threadId, version: 1, payload: message }, () => this.#core.journal.putMessage(message));
+    this.#core.bus.emit('message.started', message);
+    this.#core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
   }
 
   /** Starts what waits once a thread is free: held events first, then gathered facts. */
   private tick(): void {
-    if (this.closed || this.core.stopping || this.core.journal.isClosed()) return;
-    this.store.routines.tick();
-    this.store.memory.tick();
-    this.store.projects.tick();
-    if (this.waiting.size) this.retryHeld();
-    if (this.pending.size === 0 || this.store.limits().paused) return;
+    if (this.#closed || this.#core.stopping || this.#core.journal.isClosed()) return;
+    this.#store.routines.tick();
+    this.#store.memory.tick();
+    this.#store.projects.tick();
+    if (this.#waiting.size) this.#retryHeld();
+    if (this.pending.size === 0 || this.#store.limits().paused) return;
     const now = Date.now();
     for (const [agentId, pending] of [...this.pending]) {
-      const agent = this.store.records.find('profile', agentId);
+      const agent = this.#store.records.find('profile', agentId);
       if (!agent || agent.status === 'archived') { this.forget(agentId); continue; }
       if (agent.status !== 'active') continue;
       const event = pending.events[0];
       if (event) {
         const attempt = this.attempt(agent, { kind: 'event', label: event.label, prompt: event.prompt, requestId: `event-${agentId.slice(-40)}-${event.at}` });
         if (attempt.held === 'busy' || attempt.held === 'paused') continue;
-        this.save(agentId, { ...this.held(agentId), events: this.held(agentId).events.filter(e => e !== event && e.key !== event.key) });
+        this.#save(agentId, { ...this.#held(agentId), events: this.#held(agentId).events.filter(e => e !== event && e.key !== event.key) });
         continue;
       }
       // With event wakes off only urgent facts wake the agent; the others wait for its next routine.
-      const eventWakes = this.store.resident.config(agentId).eventWakes === true;
+      const eventWakes = this.#store.resident.config(agentId).eventWakes === true;
       const waking = pending.facts.filter(f => eventWakes || f.urgent);
       if (waking.length === 0 || Math.min(...waking.map(f => f.notBefore)) > now) continue;
       // What the agent may hear is read again now: a project taken back since a fact arrived takes the fact with it.
-      const heard = pending.facts.filter(fact => this.factThreads(fact).every(id => this.store.projects.mayHear(agent, id)));
+      const heard = pending.facts.filter(fact => this.factThreads(fact).every(id => this.#store.projects.mayHear(agent, id)));
       if (heard.length < pending.facts.length) {
-        this.core.log('info', `agent ${agentId}: ${pending.facts.length - heard.length} events about threads it may no longer see were dropped`);
-        this.save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => heard.some(kept => kept.key === f.key)) });
+        this.#core.log('info', `agent ${agentId}: ${pending.facts.length - heard.length} events about threads it may no longer see were dropped`);
+        this.#save(agentId, { ...this.#held(agentId), facts: this.#held(agentId).facts.filter(f => heard.some(kept => kept.key === f.key)) });
       }
       const facts = heard.filter(f => eventWakes || f.urgent);
       if (facts.length === 0) continue;
@@ -461,7 +463,7 @@ export class AgentRuntime {
       const batch: HeldFact[] = [];
       let prompt = EVENT_HEADER;
       for (const fact of facts) {
-        const addition = this.eventPrompt([fact]).slice(EVENT_HEADER.length);
+        const addition = this.#eventPrompt([fact]).slice(EVENT_HEADER.length);
         if (batch.length && prompt.length + addition.length > EVENT_PROMPT_MAX) break;
         batch.push(fact);
         prompt += addition;
@@ -474,23 +476,23 @@ export class AgentRuntime {
       if (attempt.held === 'busy' || attempt.held === 'paused') continue;
       // Started, skipped for the budget or failed: these facts are spent. Those that arrived meanwhile stay.
       const keys = new Set(batch.map(f => f.key));
-      this.save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => !keys.has(f.key)) });
+      this.#save(agentId, { ...this.#held(agentId), facts: this.#held(agentId).facts.filter(f => !keys.has(f.key)) });
     }
   }
 
   /** A turn of an agent's thread ended: its routine's outcome, the memory pass, the status. */
-  private finished(turn: Turn): void {
-    const agent = this.store.agentOfThread(turn.threadId);
+  #finished(turn: Turn): void {
+    const agent = this.#store.agentOfThread(turn.threadId);
     if (!agent) return;
-    this.store.routines.finished(turn);
-    this.store.contextEnded(turn);
-    this.store.countUnread(turn);
+    this.#store.routines.finished(turn);
+    this.#store.contextEnded(turn);
+    this.#store.countUnread(turn);
     const operation = turn.execution?.operation;
-    if (turn.status === 'done' && !turn.quiet && operation !== 'compact' && operation !== 'keepalive') this.store.memory.after(agent, turn);
-    this.store.changed();
+    if (turn.status === 'done' && !turn.quiet && operation !== 'compact' && operation !== 'keepalive') this.#store.memory.after(agent, turn);
+    this.#store.changed();
   }
 
   async close(): Promise<void> {
-    this.closed = true; clearInterval(this.timer); this.off();
+    this.#closed = true; clearInterval(this.#timer); this.#off();
   }
 }

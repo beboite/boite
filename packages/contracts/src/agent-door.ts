@@ -84,6 +84,8 @@ export interface AgentSpawn {
   address: AgentAddress;
   /** The project's name. */
   project: string;
+  /** The other machine of the group the thread started on, as `--machine` and `<machine>/<thread-id>` name it, when it is not this one. */
+  machine?: string;
 }
 
 /** What `agent.move` answers: where the thread goes, and when. */
@@ -166,6 +168,9 @@ export interface AgentDoorRpcMethods {
    * machine of the caller's group, in a project named there, once that
    * machine's owner turned on `groupThreads`. The same gates apply on the
    * caller's side, and that machine across projects in every case.
+   * A bot names a project of another machine entrusted to it as
+   * `<machine>/<name>`, or with `machine`; that machine starts it while its
+   * owner turned on `groupBots`, and the thread goes on the bot's desk.
    */
   'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; context?: ContextRequest | ContextPreset; requestId: string; machine?: string }; result: AgentSpawn };
 }

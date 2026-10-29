@@ -53,7 +53,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
                                  comes back to you (--worktree, --title <title>,
                                  --machine <name>: on another machine of the
                                  group, in a project there, once its owner
-                                 lets the group start threads there)
+                                 lets the group start threads there; a bot
+                                 names a project of another machine entrusted
+                                 to it as <machine>/<project>)
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -563,16 +565,18 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
-        // A bot hears of it through events on its desk, not as a message.
-        const persistent = parsed.machine === undefined && await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
+        // A bot hears of it through events on its desk, not as a message, on this machine or another.
+        const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
+        const machine = spawned.machine ?? parsed.machine;
+        const ref = machine === undefined ? spawned.thread.id : `${machine}/${spawned.thread.id}`;
         print([
           `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`,
-          ...(parsed.machine === undefined ? [] : [`machine: ${parsed.machine}`]), `cwd: ${spawned.thread.cwd}`,
+          ...(machine === undefined ? [] : [`machine: ${machine}`]), `cwd: ${spawned.thread.cwd}`,
           ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
           `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
           `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
           persistent
-            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${spawned.thread.id} <text> steers it.`
+            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${ref} <text> steers it.`
             : 'Its first answer comes back to you as a message; do not poll. boite threads send <address> <text> steers it.',
         ], spawned);
         return;
