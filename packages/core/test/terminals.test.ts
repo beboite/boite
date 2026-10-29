@@ -90,7 +90,13 @@ describe('terminals', () => {
       await harness.core.terminals.close(id);
       await waitFor(() => !running(), 3000);
     } finally {
-      if (job > 0 && running()) process.kill(job, 'SIGKILL');
+      if (job > 0 && running()) {
+        try { process.kill(job, 'SIGKILL'); }
+        catch (error) {
+          // The job can disappear between reading /proc and sending the signal.
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+        }
+      }
       await harness.core.terminals.close(id);
       if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
       else process.env['BOITE_TERMINAL_SHELL'] = chosen;

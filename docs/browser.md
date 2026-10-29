@@ -230,7 +230,14 @@ command, every frame, input or copy of a viewer, and when its conversation
 starts a turn, so the agent's pages run while it works, as they did when it
 last looked. Freezing and waking take turns per tab: a command that arrives
 while the page is being frozen waits for the freeze, wakes the page and only
-then runs, and the page is visible and focused again when it does. A tab
+then runs, and the page is visible and focused again when it does. The
+browser draws one tab in front; the others are drawn only because focus
+emulation keeps them shown, and the freeze hides them. A woken tab of the
+core's own browser is therefore brought to the front last: before that, a page
+that was not in front stayed hidden after its wake, and a screenshot of it
+waited 30 seconds for a frame (measured on 2026-10-28 with two tabs in one
+profile, of one conversation or two). A tab the desktop app hosts is not
+raised, which could show its window. A tab
 closed while asleep is woken first, and a freeze that fails is tried again after the wait. A page asleep keeps its state; its timers
 resume where they stopped, and a page that reads the clock sees the time pass.
 The browser answers the freeze once it has passed it to the renderer, not once
@@ -638,7 +645,7 @@ profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
 once nobody uses it and meets the next command and viewer awake and focused
 (its page busy 400 ms each time it is hidden, so each freeze lands late),
-one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
+a background tab whose screenshot answers once it wakes, one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app

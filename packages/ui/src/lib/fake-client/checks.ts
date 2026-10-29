@@ -126,6 +126,13 @@ export function missingFolder(path: string): boolean {
 
 /** The core's refusal for a provider turned off: a turn and a probe answer the same sentence. */
 export function turnedOff(provider: ProviderSummary): RpcFailure {
+  if (provider.policy) {
+    return new RpcFailure({
+      code: RpcErrorCode.Unavailable,
+      message: `${provider.name} is blocked by your organization's policy, key ${provider.policy.policy} in ${provider.policy.file}`,
+      data: { providerId: provider.id, disabled: true, ...provider.policy },
+    });
+  }
   return new RpcFailure({
     code: RpcErrorCode.Unavailable,
     message: `${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`,

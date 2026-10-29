@@ -16,6 +16,7 @@
   import ConversationSwitches from './ConversationSwitches.svelte';
   import NotificationKinds from './NotificationKinds.svelte';
   import SyncMark from './SyncMark.svelte';
+  import PolicySettings from './PolicySettings.svelte';
 
   /**
    * What the app does for the person in front of it: how a thread
@@ -96,4 +97,5 @@
   </section>
 
   <TelemetrySettings {store} />
+  <PolicySettings {store} />
 </div>

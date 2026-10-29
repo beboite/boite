@@ -9,6 +9,7 @@ import {
   type ClientPreferences,
   type ExperimentId,
   type QuotaAlerts,
+  ChangeLog,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -55,6 +56,7 @@ import {
   type DesktopUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
+  type PolicyState,
   type TelemetryState,
   type Thread,
   type ThreadId,
@@ -84,6 +86,7 @@ import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
 import { addGoalCard, agentTodos, followGoal, unlinkGoalCards } from './todos';
+import { applyPolicy, lockedSettingsOf, policyFixture } from './policy';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -117,6 +120,8 @@ export interface FakeClientOptions {
   diagrams?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
+  /** Seeds this many more threads at rest, a long sidebar (`working-seed.ts`). */
+  idle?: number;
   /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
   load?: number;
   /** Milliseconds between two ticks of that load, 100 unless `&loadtick=<ms>` says otherwise. */
@@ -154,6 +159,8 @@ export interface FakeClientOptions {
   rttMs?: number;
   /** Stable public identity for multi-machine coordination tests. */
   coreId?: string;
+  /** The admin policy this core enforces; `?fake=1&policy=managed`, `broken` or `closed` picks a fixture (`policy.ts`). */
+  policy?: PolicyState;
   coreName?: string;
   publicUrl?: string;
   /**
@@ -207,6 +214,10 @@ export class FakeContext {
   /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
+  /** The user's analytics choice, before the policy's ceiling is applied. */
+  telemetryMode: TelemetryState['mode'] = 'basic';
+  /** The admin policy, as `policy.get` answers it: none, as on most machines, unless `?policy=` names a fixture (`policy.ts`). */
+  policy: PolicyState;
   projects: Project[] = [];
   /** The image of each project whose icon is one, as `projects.icon` answers it. */
   projectImages = new Map<string, { version: string; dataUrl: string }>();
@@ -264,7 +275,29 @@ export class FakeContext {
   /** The working tree `files.list`, `files.read` and `files.write` share. */
   readonly files = new Map<string, string>(Object.entries(FAKE_TREE));
   readonly artifactUrls = new Set<string>();
-  settings: Settings;
+  private storedSettings!: Settings;
+
+  /** As in the core, policy values are read over the saved choices, never saved over them. */
+  get settings(): Settings {
+    const saved = this.storedSettings;
+    return this.policy?.present ? { ...saved, ...lockedSettingsOf(this.policy.values, saved) } : saved;
+  }
+
+  set settings(next: Settings) {
+    const saved = this.storedSettings;
+    if (!saved || !this.policy?.present) { this.storedSettings = next; return; }
+    const held = lockedSettingsOf(this.policy.values, saved);
+    const kept = { ...next };
+    for (const key of ['listenOnLan', 'autoInstallUpdates', 'autoUpdateHarnesses', 'groupThreads', 'groupBots'] as const) {
+      if (key in held) Object.assign(kept, { [key]: saved[key] });
+    }
+    // Configuring a gateway while its switch is held off still saves the new address.
+    const proxy = kept.subscriptionProxy;
+    if (proxy && !proxy.enabled && saved.subscriptionProxy?.enabled && lockedSettingsOf(this.policy.values, { ...saved, subscriptionProxy: { ...proxy, enabled: true } }).subscriptionProxy) {
+      kept.subscriptionProxy = { ...proxy, enabled: true };
+    }
+    this.storedSettings = kept;
+  }
   /** What the app last said of itself (`client.preferences`); the fake core has one app. */
   clientPreferences: ClientPreferences | null = null;
   /** Each app's last report by its id, as the core's book keeps them. */
@@ -286,6 +319,8 @@ export class FakeContext {
   readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;
+  /** `threads.listChanges`: a run of its own, like each start of a real core. */
+  readonly threadChanges = new ChangeLog(`run_fake_${Math.random().toString(36).slice(2, 10)}`);
   /** One phone already paired, so the devices list has a row to revoke. */
   sessions: PairedSession[] = [
     { id: 'ses-phone', client: { name: 'pwa', version: '2.0.0-beta.1' }, role: 'device', createdAt: T0, lastSeenAt: T0 + 600_000, current: false },
@@ -440,7 +475,7 @@ export class FakeContext {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1 },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1, listChanges: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -457,6 +492,8 @@ export class FakeContext {
       running: [],
       queued: []
     };
+    this.policy = options.policy ?? policyFixture(typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('policy'));
+    applyPolicy(this);
   }
 
   // -------------------------------------------------------------------------
@@ -494,6 +531,9 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    // The core counts what its clients hear of a summary (`threads/list-changes.ts`).
+    if (event === 'thread.created' || event === 'thread.updated') this.threadChanges.note((payload as RpcEvents['thread.updated']).id);
+    if (event === 'thread.removed') this.threadChanges.note((payload as RpcEvents['thread.removed']).threadId);
     this.composer.observe(this, event, payload);
     if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
     if (event === 'thread.updated') {

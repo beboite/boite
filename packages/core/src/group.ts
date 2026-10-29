@@ -760,7 +760,7 @@ export class GroupStore {
    * answer worth reading, and nothing is computed for one that names none.
    */
   async http(request: Request): Promise<Response> {
-    if (this.closed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
+    if (this.closed || this.core.policy.networkOff('groups') || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
     if (this.roster === null) return new Response('this machine belongs to no group', { status: 404 });
     const from = request.headers.get('x-boite-peer') ?? '';
     const named = request.headers.get('x-boite-invite') ?? '';
@@ -776,6 +776,7 @@ export class GroupStore {
     try {
       const raw = await boundedBody(request.body, JOIN_BODY_MAX);
       // The body may have taken its time: asked again before anything is opened or counted.
+      if (this.core.policy.networkOff('groups')) return new Response('forbidden', { status: 403 });
       if (spent()) return unknown();
       // A request recorded on the path and sent again, respaced or not, is refused before anything is
       // computed for it: its sender holds no invitation, and what it replays must not spend the allowance below.

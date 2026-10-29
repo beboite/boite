@@ -1,4 +1,4 @@
-import { ATTACHMENTS_PER_TURN, type Attachment, type ImageAttachment, type Message, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, decodedBytes, type Attachment, type ImageAttachment, type Message, type MessagePart, type ProviderDescriptor } from '@boite/contracts';
 import type { Journal } from './journal.ts';
 import { refused } from './errors.ts';
 
@@ -39,7 +39,10 @@ export interface PartPlace { messageId: string; partIndex: number }
  * first pass reads the stored parts without their large values (`part_blobs`)
  * to count the messages in between, find the move notes and place the
  * historical images; a forward walk then builds the opening and a backward
- * walk the recent end. Only the kept images are read. `fileReference` must
+ * walk the recent end. Only the kept images are read: the newest ones, as
+ * many as the current attachments leave of `ATTACHMENTS_PER_TURN` and of
+ * `ATTACHMENTS_TOTAL_MAX_BYTES`, so the request stays within what one turn
+ * may carry. `fileReference` must
  * return a non-empty line: the first pass counts every file part as text.
  */
 export function continuationInput(
@@ -101,10 +104,15 @@ export function continuationInput(
     throw refused(`${provider.name} cannot continue this conversation with its historical images; choose an image-capable model`, { threadId });
   }
   if (first.length === 0 && recent.length === 0) return input;
-  const images: ImageAttachment[] = kept.map(({ messageId, partIndex }) => {
+  // Newest first within what the current attachments leave of the turn's byte total, then oldest to newest.
+  const images: ImageAttachment[] = [];
+  let room = ATTACHMENTS_TOTAL_MAX_BYTES - input.attachments.reduce((sum, attachment) => sum + decodedBytes(attachment.data), 0);
+  for (const { messageId, partIndex } of kept.toReversed()) {
     const part = journal.messagePart(messageId, partIndex)?.part as Extract<MessagePart, { type: 'image' }>;
-    return { kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt };
-  });
+    room -= decodedBytes(part.data);
+    if (room < 0) break;
+    images.unshift({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
+  }
   const gap = omitted ? `\n[${omitted} older messages omitted between the opening and recent exchanges.]\n` : '\n';
   const imageNote = imageCount > 0
     ? `\n${images.length} of ${imageCount} historical images follow, oldest to newest, then the current prompt's attachments. Other image placeholders are references only.\n`

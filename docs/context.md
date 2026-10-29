@@ -84,6 +84,20 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 | ACP | `/compact` only when the session advertised that command |
 | echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
+Claude summary instructions are optional in Settings, Advanced, Compaction.
+The common value applies to conversations, subagents and bots; a customized
+category can keep its own instructions or leave them empty for the native
+summary prompt. Existing customized categories without this field also keep
+the native prompt. Token limits and idle moments are unchanged.
+
+The `PreCompact` callback reads the current policy even in a warm session.
+Explicit instructions in `/compact <text>` take precedence: the callback adds
+nothing in that case. An empty common value installs no summary policy and
+imposes no word count. The setting is `compactionSummary`, also available inside
+`compactionByType`. Other drivers keep their own summary prompt. The offline
+control test (`BOITE_TEST_CLAUDE_CONTROLS=1`) checks that configured guidance
+reaches Claude's summary request.
+
 The control is disabled while a turn runs, before a native session exists, or
 when the driver cannot compact. ACP must advertise the command. Compaction can make a provider
 call and incur usage. The driver does not invent a post-compaction token count.
@@ -311,7 +325,8 @@ started. An existing native session receives stopped user messages and accepted
 follow-ups in order, until a user turn completes. This survives a core restart
 without adding messages to the timeline or starting work by itself. Native
 commands and automatic turns do not consume this context. Historical images
-beyond the native attachment limit remain available as local files. A fresh
+beyond what the current request leaves of one turn's 50 images and 10 MB
+remain available as local files, oldest first. A fresh
 native session receives the conversation's journal history instead.
 
 Edits and forks with live follow-ups use the fresh-session transfer rules below.

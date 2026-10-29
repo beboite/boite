@@ -154,6 +154,8 @@ test('releasing a completed claim preserves history and fences a follow-up alrea
     expect(a.h.core.sharedCompute.journal.get(job.id, 'source')!.job.result).toEqual(completed.result);
     expect(await thrown(a.client.call('sharedCompute.send', {...scope, jobId: job.id, text: 'Still closed', requestId: 'closed-source'}))).toThrow('claim');
     await b.h.stop();
+    // Observe the old link closing so the next wait cannot accept its stale route.
+    await waitFor(() => !a.h.core.contacts.linked(b.coreId));
     const restarted = await startTestCore({dataDir: b.h.dataDir, port: Number(new URL(b.h.url).port)}); cores.push(restarted);
     await waitFor(() => a.h.core.contacts.linked(b.coreId), 10000);
     expect(await thrown(request(...captured))).toThrow('claim');

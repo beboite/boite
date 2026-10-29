@@ -54,6 +54,7 @@ export const strings = {
       browserOrigins: 'Allowed browser origins',
       warmProcessMinutes: 'Keep an agent warm after its turn',
       autoCompact: 'Automatic compaction',
+      compactionSummary: 'Claude summary instructions',
       compactionByType: 'Compaction by agent type',
       autoResumeLimitedThreads: 'Resume threads after a usage limit',
       deviceStream: 'Live device stream',

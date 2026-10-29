@@ -51,6 +51,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'speech.cancel',
   // Loads the owner's configured model a dictation is about to use: nothing a device could transcribe anyway.
   'speech.warm',
+  // The admin policy draws a phone's locked controls as on the desktop; only the machine's policy file changes it.
+  'policy.get',
   // Paired phones stream their microphone to the owner's configured local engine.
   'speech.streamStart',
   'speech.streamChunk',
@@ -89,6 +91,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'accounts.list',
   // The threads themselves.
   'threads.list',
+  'threads.listChanges', // The same list after a reconnect, only the rows changed since: what a phone on a poor link reads.
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
@@ -240,6 +243,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  'policy.changed', // What policy.get answers the device.
   // Experiment ids of the desktop app, as client.preferences already answers the device.
   'client.desktopExperiments',
   'group.updated', // Invalidation only; group.get applies the device read policy.

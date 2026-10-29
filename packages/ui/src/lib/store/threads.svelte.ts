@@ -308,9 +308,12 @@ export class Threads {
    * screen and the subscription, and an older one writes nothing, not even
    * `subscribedThreadId`. The order is subscribe then unsubscribe, so a
    * refused subscribe leaves the thread on screen with the socket it had
-   * rather than with none at all.
+   * rather than with none at all. A `listed` open is a load's: the read of
+   * that load's thread list began just before (its call leaves after this
+   * open's `threads.get`) and covers this row too, so the open's read does
+   * not protect the row from it.
    */
-  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean } = {}): Promise<void> {
+  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean; liveCreation?: boolean; listed?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
     const { delegation } = this.ctx;
     const client = this.ctx.client;
@@ -340,7 +343,7 @@ export class Threads {
     this.loadingThreadId = held ? null : threadId;
     const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
     let loaded = false;
-    const summaryRead = preloaded?.summaryRead ?? this.ctx.threadReads.begin(threadId);
+    const summaryRead = preloaded?.summaryRead ?? this.ctx.threadReads.begin(threadId, !options.listed);
     let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
     let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
     let secretRead: ReturnType<StoreContext['requests']['secretRead']> | undefined;

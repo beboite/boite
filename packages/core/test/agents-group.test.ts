@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { AgentProfile, AgentSettingAsk, CoordinationPeer } from '@boite/contracts';
+import type { AgentProfile, AgentSettingAsk, AgentSpawn, CoordinationPeer } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -298,6 +298,196 @@ test('the machine holding the projects decides: its own switch, members of its g
   const offered = await host.handle(peer, 'bot.lease', { v: lease.v + 1, leases: [lease] }) as { projects: { name: string }[] };
   expect(offered.projects.map(project => project.name)).toContain('Notes');
   expect(offered.projects.map(project => project.name)).not.toContain('Accounts');
+}, 30_000);
+
+test('a bot starts a thread in a project another machine entrusted to it, and hears its first answer once, on its desk', async () => {
+  const prompts = answering();
+  const { desk, pc, pcOwner, pcId, deskId, notes, self, cli, facts, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  const started = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1']);
+  expect([started.code, started.err]).toEqual([0, '']);
+  const id = /^thread: (\S+)$/m.exec(started.out)![1]!;
+  const ref = `${machine}/${id}`;
+  expect(started.out).toContain(`machine: ${machine}`);
+  expect(started.out).toContain(`It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${ref} <text> steers it.`);
+
+  // The machine of the project holds it, marked as the bot's.
+  expect(pc.core.threads.require(id)).toMatchObject({ projectId: notes.id, title: 'Sort', providerId: 'echo' });
+  expect(desk.core.journal.getThread(id)).toBeNull();
+  const deskName = desk.core.coordination.identity().name;
+  const first = pc.core.journal.listMessages(id).find(m => m.role === 'user')!;
+  expect(first.parts[0]).toMatchObject({ displayText: 'Sort the letters', startedBy: { threadId: self, title: agent().name, projectId: notes.id, project: 'Notes', machine: deskName } });
+  // The start answer comes once the first message is saved; the driver gets its prompt a moment later.
+  await waitFor(() => prompts.has(id));
+  expect(prompts.get(id)?.[0]).toContain(`This thread was started by ${agent().name}, a bot of the user's on ${deskName}`);
+  const line = desk.core.journal.listMessages(self).find(m => m.role === 'system' && m.parts.some(p => p.type === 'text' && p.started));
+  expect(line?.parts[0]).toMatchObject({ started: { threadId: id, project: 'Notes', machine: pc.core.coordination.identity().name } });
+
+  // It is on the bot's desk at once, on both machines.
+  expect(desk.core.workforce.group.desk(agent())).toMatchObject([{ threadId: id, coreId: pcId, machine, origin: 'started' }]);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.watched).toContain(id);
+
+  // Its first answer reaches the bot once, as an event of its desk, never as a letter.
+  const answered = () => facts().filter(fact => fact.text.includes(`Turn done in thread ${ref} on ${pc.core.info().hostname}, titled "Sort"`));
+  await waitFor(() => answered().length === 1);
+  await waitFor(() => pc.core.workforce.groupHost.outbox(deskId).length === 0);
+  expect(answered()[0]!.text).toContain('Done in notes');
+  expect(desk.core.coordination.get(self).messages.filter(m => m.from.threadId === id)).toEqual([]);
+
+  // A retry answers the same thread: the bot's machine keeps what it started, and the other one what it was asked.
+  const again = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1', '--json']);
+  expect((JSON.parse(again.out) as AgentSpawn).thread.id).toBe(id);
+  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
+  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
+  const ask = { lease, project: notes.id, prompt: 'File them', title: 'File', worktree: false, requestId: 'file-1', agent: { providerId: 'echo', model: null, effort: null, speed: null, permissionMode: 'default' } };
+  const once = await pc.core.workforce.groupHost.handle(peer, 'bot.start', ask) as AgentSpawn;
+  expect((await pc.core.workforce.groupHost.handle(peer, 'bot.start', ask) as AgentSpawn).thread.id).toBe(once.thread.id);
+  expect(pc.core.journal.listThreads().filter(t => t.projectId === notes.id).map(t => t.title).sort()).toEqual(['File', 'Letter', 'Sort']);
+  expect(answered()).toHaveLength(1);
+}, 30_000);
+
+test('a bot starts no thread on a machine whose groupBots is off, nor in a project of it not entrusted to the bot', async () => {
+  answering();
+  const { desk, pc, pcOwner, deskId, notes, accounts, cli, agent, machine } = await setup();
+  const off = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--request-id', 'sort-1']);
+  expect(off.code).not.toBe(0);
+  expect(off.err).toContain('does not let the bots of the other machines of its group look after its projects');
+  expect(off.err).toContain(`boite settings request groupBots true --machine ${machine} --why`);
+  expect(pc.core.journal.listThreads().filter(t => t.projectId === notes.id).map(t => t.title)).toEqual(['Letter']);
+
+  await pcOwner.call('settings.set', { groupBots: true });
+  // A project of that machine not entrusted to it: the refusal names the ones it may use there.
+  const outside = await cli(['thread', 'new', 'Accounts', 'Pay the bills', '--machine', machine]);
+  expect(outside.code).not.toBe(0);
+  expect(outside.err).toContain(`Accounts is not a project of ${pc.core.info().hostname} entrusted to ${agent().name}; there it may start threads in ${machine}/Notes, and here in any project`);
+  // That machine checks on its own too, whatever the bot's machine sent.
+  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
+  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
+  expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.start', { lease, project: accounts.id, prompt: 'Pay the bills', title: 'Pay', worktree: false, requestId: 'pay-1', agent: { providerId: 'echo', permissionMode: 'default' } })))
+    .toThrow(`bot.start.project: ${accounts.id} is not a project entrusted to ${agent().name} here; its projects here are Notes`);
+  expect(pc.core.journal.listThreads().filter(t => t.projectId === accounts.id).map(t => t.title)).toEqual(['Ledger']);
+
+  // --machine with the project's name there starts it.
+  const started = await cli(['thread', 'new', 'notes', 'Sort the letters', '--machine', machine, '--json']);
+  expect(started.err).toBe('');
+  const spawned = JSON.parse(started.out) as AgentSpawn;
+  expect(spawned).toMatchObject({ project: 'Notes', machine, address: { coreId: pc.core.coordination.card().coreId } });
+  expect(desk.core.workforce.group.desk(agent()).map(watch => watch.threadId)).toEqual([spawned.thread.id]);
+}, 30_000);
+
+test('a bot refuses ambiguous remote project names on both machines and accepts an explicit project id', async () => {
+  answering();
+  const { desk, pc, owner, pcOwner, pcId, deskId, notes, accounts, cli, agent, machine } = await setup();
+  await pcOwner.call('projects.rename', { projectId: accounts.id, name: 'nOtEs' });
+  await pcOwner.call('settings.set', { groupBots: true });
+  const current = agent();
+  await owner.call('agents.profile.save', { id: current.id, expectedRevision: current.revision, value: { ...current, projectIds: [`${pcId}/${notes.id}`, `${pcId}/${accounts.id}`] } });
+  await desk.core.workforce.group.sync(pcId);
+  const before = pc.core.journal.listThreads().map(thread => thread.id).sort();
+
+  // The caller must not replace an ambiguous name with the first project's id.
+  const ambiguous = await cli(['thread', 'new', `${machine}/noTES`, 'File them', '--request-id', 'ambiguous-cli']);
+  expect(ambiguous.code).not.toBe(0);
+  expect(ambiguous.err).toContain('2 projects are named noTES');
+  expect(ambiguous.err).toContain(notes.id);
+  expect(ambiguous.err).toContain(accounts.id);
+
+  // The host decides independently, including a name sent by an older caller.
+  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
+  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
+  const ask = { lease, project: ' noTES ', prompt: 'File them', title: 'File', worktree: false, requestId: 'ambiguous-host', agent: { providerId: 'echo', permissionMode: 'default' } };
+  expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.start', ask)))
+    .toThrow(`bot.start.project: 2 projects are named noTES here; name one by id: ${notes.id}, ${accounts.id}`);
+  expect(pc.core.journal.listThreads().map(thread => thread.id).sort()).toEqual(before);
+
+  // An id disambiguates at either end; surrounding whitespace is ignored.
+  const named = await cli(['thread', 'new', `${machine}/${notes.id}`, 'File notes', '--request-id', 'notes-id', '--json']);
+  expect([named.code, named.err]).toEqual([0, '']);
+  expect((JSON.parse(named.out) as AgentSpawn).thread.projectId).toBe(notes.id);
+  const explicit = await pc.core.workforce.groupHost.handle(peer, 'bot.start', { ...ask, project: ` ${accounts.id} `, requestId: 'accounts-id' }) as AgentSpawn;
+  expect(explicit.thread.projectId).toBe(accounts.id);
+}, 30_000);
+
+test('a bot\'s thread on a machine that does not answer is refused, naming it', async () => {
+  answering();
+  const { desk, pc, pcOwner, cli, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await waitFor(() => desk.core.workforce.group.choices().some(choice => choice.label === `${machine}/Notes`));
+  await pc.stop();
+  const away = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--request-id', 'sort-1']);
+  expect(away.code).not.toBe(0);
+  expect(away.err).toContain(`${machine} is unreachable (`);
+  expect(away.err).toContain('the same --request-id later answers the thread if it started there');
+}, 30_000);
+
+test('a thread a bot started on another machine whose answer was lost comes back on its desk, and its first answer reaches the bot once', async () => {
+  let finish!: () => void;
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  answering(ctx => ctx.prompt.includes('Sort the letters') ? held : Promise.resolve());
+  const { desk, pc, pcOwner, pcId, deskId, cli, facts, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  // That machine starts the thread, then its answer is lost on the way back.
+  const request = desk.core.coordination.request.bind(desk.core.coordination);
+  desk.core.coordination.request = async (peer, op, payload) => {
+    const result = await request(peer, op, payload);
+    if (op === 'bot.start') throw new Error('connection reset');
+    return result;
+  };
+  const lost = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1']);
+  expect(lost.code).not.toBe(0);
+  desk.core.coordination.request = request;
+  const id = pc.core.journal.listThreads().find(t => t.title === 'Sort')!.id;
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+
+  // A lease sync that does not list it keeps it watched there, and the desk takes it back.
+  await desk.core.workforce.group.sync(pcId);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.watched).toContain(id);
+  expect(desk.core.workforce.group.desk(agent())).toMatchObject([{ threadId: id, coreId: pcId, origin: 'started' }]);
+
+  finish();
+  const answered = () => facts().filter(fact => fact.text.includes(`Turn done in thread ${machine}/${id}`));
+  await waitFor(() => answered().length === 1);
+  const again = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1', '--json']);
+  expect((JSON.parse(again.out) as AgentSpawn).thread.id).toBe(id);
+  await desk.core.workforce.group.sync(pcId);
+  await waitFor(() => pc.core.workforce.groupHost.outbox(deskId).length === 0);
+  expect(answered()).toHaveLength(1);
+  // The bot's lease lists it now: that machine holds it as any thread the bot follows.
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [id] });
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.started).toBeUndefined();
+}, 30_000);
+
+test('a thread a bot started on another machine and took off its desk before any lease sync stays off it', async () => {
+  answering();
+  const { desk, pc, pcOwner, pcId, deskId, cli, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  const started = await cli(['thread', 'new', `${machine}/Notes`, 'Sort the letters', '--title', 'Sort', '--request-id', 'sort-1']);
+  const ref = `${machine}/${/^thread: (\S+)$/m.exec(started.out)![1]!}`;
+  const id = ref.slice(machine.length + 1);
+  expect((await cli(['bot', 'unwatch', ref])).code).toBe(0);
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+  // The lease that tells that machine so lets the start go there, and nothing puts it back.
+  await desk.core.workforce.group.sync(pcId);
+  expect(desk.core.workforce.group.desk(agent())).toEqual([]);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [] });
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]!.started).toBeUndefined();
+  // Watching it again is the owner's or the bot's call, as for any thread there.
+  expect((await cli(['bot', 'watch', ref])).code).toBe(0);
+  await desk.core.workforce.group.sync(pcId);
+  expect(desk.core.workforce.group.desk(agent()).map(watch => watch.threadId)).toEqual([id]);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [id] });
+}, 30_000);
+
+test('a thread id of another machine too long for the bot\'s lease is refused, and the next lease sync still goes', async () => {
+  answering();
+  const { desk, pc, pcOwner, pcId, deskId, owner, self, agent, machine } = await setup();
+  await pcOwner.call('settings.set', { groupBots: true });
+  await desk.core.workforce.group.sync(pcId);
+  expect(await thrown(owner.call('agents.watch', { threadId: self, machine, watchThreadId: 'x'.repeat(129), watched: false }))).toThrow('watchThreadId: expected 1 to 128 characters');
+  await desk.core.workforce.group.sync(pcId);
+  expect(pc.core.workforce.groupHost.leases(deskId)[agent().id]).toMatchObject({ watched: [] });
 }, 30_000);
 
 test('a full outbox goes in requests a member accepts, oldest first, none left behind', () => {

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
+import { crc32, deflateSync } from 'node:zlib';
 import { readFileSync, statSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
 import type { Attachment, FileAttachment } from '@boite/contracts';
-import { ATTACHMENT_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { checkAttachments } from '../src/threads/inputs.ts';
 import { FileReferences, fileReference, prepareAttachments } from '../src/attachments.ts';
@@ -35,6 +36,58 @@ test('files reach the driver as persistent host paths and remain in history', as
   expect(continued.prompt).toContain(JSON.stringify(reference.path));
   expect(continued.attachments).toEqual([]);
 });
+
+/** A JPEG of noise, as heavy as a fitted screenshot: Bun encodes it from a PNG written by hand. */
+async function noisyJpeg(width: number, height: number, seed: number): Promise<string> {
+  const chunk = (type: string, body: Buffer): Buffer => {
+    const typed = Buffer.concat([Buffer.from(type, 'ascii'), body]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc32(typed));
+    return Buffer.concat([length, typed, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  let state = seed;
+  for (let at = 0; at < rows.length; at += 1) {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    rows[at] = at % (width * 3 + 1) === 0 ? 0 : state >> 23;
+  }
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.from(await new Bun.Image(png).jpeg({ quality: 60 }).bytes()).toString('base64');
+}
+
+test('a turn of fifty screenshots is accepted, journalled and read back, whole or compacted', async () => {
+  expect(ATTACHMENTS_PER_TURN).toBe(50);
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const images: Attachment[] = [];
+  for (let at = 0; at < ATTACHMENTS_PER_TURN; at++) images.push({ kind: 'image', mimeType: 'image/jpeg', name: `shot-${at}.jpg`, data: await noisyJpeg(380, 800, at + 1) });
+  const total = images.reduce((sum, image) => sum + Buffer.from(image.data, 'base64').length, 0);
+  expect(total).toBeGreaterThan(ATTACHMENTS_TOTAL_MAX_BYTES * 0.6);
+  expect(total).toBeLessThanOrEqual(ATTACHMENTS_TOTAL_MAX_BYTES);
+
+  const turn = await client.call('turns.start', { threadId, prompt: 'Fifty problems, one screenshot each', attachments: images });
+  await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done', 20_000);
+  const sent = images.map(image => ({ type: 'image', mimeType: image.mimeType, data: image.data }));
+
+  const whole = (await client.call('threads.get', { threadId })).messages.find(message => message.turnId === turn.id && message.role === 'user')!;
+  const wholeImages = whole.parts.filter(part => part.type === 'image');
+  expect(wholeImages).toHaveLength(ATTACHMENTS_PER_TURN);
+  expect(wholeImages).toMatchObject(sent);
+
+  const light = (await client.call('threads.get', { threadId, compactImages: true })).messages.find(message => message.turnId === turn.id && message.role === 'user')!;
+  const lightImages = light.parts.flatMap((part, partIndex) => part.type === 'image' ? [{ part, partIndex }] : []);
+  expect(lightImages).toHaveLength(ATTACHMENTS_PER_TURN);
+  expect(lightImages.every(({ part }) => part.type === 'image' && part.data === '' && part.dataDeferred === true)).toBe(true);
+  const last = lightImages.at(-1)!;
+  expect((await client.call('messages.attachment', { threadId, messageId: light.id, partIndex: last.partIndex })).data).toBe(images.at(-1)!.data);
+}, 60_000);
 
 test('file names cannot escape storage or use Windows device names; empty files work', () => {
   for (const name of ['../../outside.txt', 'C:\\outside.txt', 'CON', 'evil:stream', 'file\nname', '..']) {
