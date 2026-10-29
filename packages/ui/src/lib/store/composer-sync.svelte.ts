@@ -661,7 +661,8 @@ export class ComposerSync {
         // Past what one message may carry, no retry can fit: the box stays on this device, and the next edit tries again.
         // An edit made while this put was on its way found the key busy: that edit is the next try.
         const message = fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
-        this.ctx.store.error = message;
+        // A background put never covers what the user's own action just said, such as Send refused over the same total.
+        this.ctx.store.error ??= message;
         this.#overLimit = { key, message };
         failed = this.#parts(this.#shape(this.#localOf(this.#source(key)))).hash === this.#parts(value).hash;
         return;

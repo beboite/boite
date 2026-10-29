@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ImageAttachment, MessagePart, QuestionAnswer, RpcEvents, ToolDocument } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, type ImageAttachment, type MessagePart, type QuestionAnswer, type RpcEvents, type ToolDocument } from '@boite/contracts';
 import { echoThread, scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { connect } from '../src/client.ts';
@@ -304,7 +304,7 @@ describe('echo driver', () => {
     expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ mimeType: 'image/bmp' })] }))).toThrow('pixel.png: image/bmp is not an image format an agent reads');
     expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'data:image/png;base64,abcd' })] }))).toThrow('pixel.png: the attachment data is not base64');
     expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }))).toThrow('attachment 1: 5.3 MB is over the 5 MB a file may weigh');
-    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 21 }, () => image({})) }))).toThrow('a turn carries at most 20 attachments, this one has 21');
+    expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, () => image({})) }))).toThrow(`a turn carries at most ${ATTACHMENTS_PER_TURN} attachments, this one has ${ATTACHMENTS_PER_TURN + 1}`);
     // Three phone photos under the per-file cap still make a frame the socket would not carry.
     const photo = 'A'.repeat(4_893_356);
     expect(await thrown(client.call('turns.start', { threadId, prompt: 'x', attachments: [1, 2, 3].map((at) => image({ data: photo, name: `photo-${at}.jpg` })) }))).toThrow('the attachments weigh 10.5 MB together, over the 10 MB one turn may carry');
@@ -434,8 +434,8 @@ describe('echo driver', () => {
       threadId, questionId: question.id, optionIds: [], attachments: [{ ...shot, data: 'data:image/png;base64,abcd' }],
     }))).toThrow('screen.png: the attachment data is not base64');
     expect(await thrown(client.call('questions.answer', {
-      threadId, questionId: question.id, optionIds: [], attachments: Array.from({ length: 21 }, () => shot),
-    }))).toThrow('at most 20 attachments');
+      threadId, questionId: question.id, optionIds: [], attachments: Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, () => shot),
+    }))).toThrow(`at most ${ATTACHMENTS_PER_TURN} attachments`);
 
     const answered = client.next('question.answered', (event) => event.questionId === question.id, 10000);
     // A file alone answers: the screenshot is the answer.

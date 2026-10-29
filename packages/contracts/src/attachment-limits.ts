@@ -14,15 +14,22 @@ export const IMAGE_MAX_EDGE = 2000;
  * (`IMAGE_MAX_EDGE` on its long edge, JPEG at 0.85: about 0.3 to 1.5 MB).
  */
 export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
-/** Maximum attachments carried by one turn: a series of phone screenshots fits. */
-export const ATTACHMENTS_PER_TURN = 20;
+/**
+ * Maximum attachments carried by one turn: a long bug report with a screenshot
+ * per problem fits. The count is not what weighs on a request: the byte total
+ * below is, and the composer re-encodes a turn's images smaller so that fifty
+ * of them stay inside it (`lib/turn-fit.ts` in the UI).
+ */
+export const ATTACHMENTS_PER_TURN = 50;
 /**
  * Maximum decoded bytes of all the attachments of one turn together. They
  * travel inside the `turns.start` frame as base64, a third larger, so 10 MB
  * becomes about 13.3 MB on the wire and leaves 2.7 MB of `RPC_MAX_FRAME_BYTES`
  * for the prompt and the envelope. The user message keeps them inline in the
  * journal as well, and `threads.get` cannot page a message heavier than that
- * frame, so this total cannot grow without a separate upload channel.
+ * frame, so this total cannot grow without a separate upload channel. It also
+ * keeps a Claude request under the API's 32 MB body limit: one turn's images
+ * and the history images a fresh session carries share this one budget.
  */
 export const ATTACHMENTS_TOTAL_MAX_BYTES = 10 * 1024 * 1024;
 /**

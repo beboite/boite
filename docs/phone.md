@@ -461,7 +461,7 @@ once the browser is back online.
 ## Pictures and videos
 
 Screenshots and photos shrink before they leave the phone: 2000 px on the long
-edge, JPEG or PNG, HEIC converted to JPEG by Safari. A turn takes twenty
+edge, JPEG or PNG, HEIC converted to JPEG by Safari. A turn takes fifty
 files ([development.md](development.md#file-attachments)). While a question
 waits, the composer's paperclip attaches them to the answer.
 
