@@ -147,6 +147,7 @@ export class OpenCodeConnection {
     } finally {
       this.#commitInput?.(); this.#commitInput = null; this.#inputCommitted = null;
     }
+    this.#current()?.ctx.inputReady?.();
   }
 
   #send(prompt: ContentBlock[]): Promise<unknown> {

@@ -306,6 +306,7 @@ export class PiSession {
           message: prompt,
           ...(attachments.length === 0 ? {} : { images: imagesOf(attachments) }),
         });
+        turn.ctx.inputReady?.();
         if (turn.isStopped) this.#abort(turn, peer);
         else await this.#settleIfIdle(turn, peer);
       }

@@ -304,6 +304,8 @@ when another conversation is open. A driver that declines it retains input
 for the next turn. Enter again in the emptied composer (not where the primary
 pointer is coarse), or Send now under the bubbles, submits it immediately without stopping the agent when the driver accepts it.
 Permissions and blocking questions hold it until answered.
+Send now also works during agent startup: the core retains the request and
+delivers it when the native turn accepts input, without waiting for tool output.
 Answers to asynchronous questions and bot setting cards share the running
 turn's steering channel. Answers received while another message or memory
 notice is being delivered resume when that delivery finishes, in order. Each

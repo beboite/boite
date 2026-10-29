@@ -438,6 +438,7 @@ export class AcpSession {
         sessionId,
         prompt: [{ type: 'text', text: prompt }, ...imageBlocksOf(attachments)],
       });
+      turn.ctx.inputReady?.();
       if (turn.isStopped) this.#cancel();
       // The agent is up and holds the prompt. Until its first update the wait
       // is the model's: OpenCode retries a refused provider for a minute and

@@ -183,6 +183,47 @@ test('steering waits for a tool boundary, locks only the captured item and prese
   a.close();
 });
 
+test.each(['preparing', 'native'] as const)('Send now during %s startup reaches the running turn without a tool boundary', async phase => {
+  h = await startTestCore();
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const inputs: string[] = [];
+  let ready = false, attempts = 0;
+  const driver = scripted(async text => { attempts++; if (!ready) return false; inputs.push(text); return true; });
+  const execution = h.core.sharedAccess.execution, prepare = execution.prepare;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let calls = 0;
+  execution.prepare = function(id) {
+    if (phase === 'preparing' && id === threadId && ++calls === 2) { entered.resolve(); return release.promise; }
+    return prepare.call(this, id);
+  };
+  try {
+    const turn = await owner.call('turns.start', { threadId, prompt: 'keep working' });
+    if (phase === 'preparing') await entered.promise;
+    else await waitFor(() => h.core.threads.runner.handles.has(threadId));
+    expect(h.core.threads.progress.get(threadId)?.phase).toBe('starting');
+    await owner.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, sendNow: true,
+      value: { input: { ...value('').input, queued: [{ id: 'startup-followup', text: 'also check the bots', attachments: [] }] } } });
+    if (phase === 'native') await waitFor(() => attempts > 0);
+    expect(inputs).toEqual([]);
+    ready = true;
+    release.resolve();
+    await waitFor(() => h.core.threads.runner.handles.has(threadId));
+    // The native turn can accept input before it emits any model output.
+    if (phase === 'native') driver.context().inputReady?.();
+    await waitFor(() => inputs.length > 0);
+    expect(inputs).toEqual(['also check the bots']);
+    await waitFor(() => h.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+    expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+    expect(h.core.journal.listMessages(threadId).filter(message => message.role === 'user')).toHaveLength(2);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('running');
+    driver.context().emit.part(driver.context().emit.startMessage('assistant'), 0, { type: 'text', text: 'Checking both.' });
+    await Bun.sleep(20);
+    expect(inputs).toEqual(['also check the bots']);
+    driver.finish();
+  } finally { release.resolve(); execution.prepare = prepare; }
+});
+
 test('a queued prompt steers after the running turn accepts a live permission mode change', async () => {
   h = await startTestCore();
   const owner = await h.connect();

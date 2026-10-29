@@ -210,6 +210,7 @@ export const calls: { options: Options; prompts: string[]; ids: (string | undefi
 export function scripted(
   script: (fake: FakeQuery, options: Options) => void,
   reply?: (fake: FakeQuery, prompt: string, index: number) => void,
+  sdkReady?: Promise<void>,
 ): void {
   queries.length = 0;
   calls.length = 0;
@@ -223,7 +224,7 @@ export function scripted(
     fake.launchCompaction(options.settings);
     return fake as unknown as Query;
   };
-  restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: () => Promise.resolve(query) }));
+  restore = setDriver('claude-sdk', createClaudeDriver({ loadQuery: async () => { await sdkReady; return query; } }));
 }
 
 /** The CLI exits when its input closes, so the fake ends with the prompt stream. */

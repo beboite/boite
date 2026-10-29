@@ -45,6 +45,25 @@ test('native collaboration is journalled and appears in Team without using Boite
   ]);
 });
 
+test('Send now during Codex startup reaches its native turn once without a tool call', async () => {
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  process.env['CODEX_FAKE_SLOW_START'] = '250';
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow] Keep working' });
+  await waitFor(() => harness!.core.threads.runner.handles.has(threadId));
+  expect(harness!.core.threads.progress.get(threadId)?.phase).toBe('starting');
+  await client.call('composer.put', { section: 'inputs', id: threadId, expectedRevision: 0, sendNow: true,
+    value: { input: { text: 'still typing', attachments: [], paused: false,
+      queued: [{ id: 'codex-startup-followup', text: 'also check the bots', attachments: [] }] } } });
+  await waitFor(() => fakeLog().includes('turn/steer codex-fake-turn-1 also check the bots'));
+  await waitFor(() => harness!.core.composer.storage.get('inputs', threadId).value?.input.queued.length === 0);
+  expect(countLogLines(fakeLog(), 'turn/steer codex-fake-turn-1 also check the bots')).toBe(1);
+  expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(harness!.core.journal.getTurn(turn.id)?.status).toBe('running');
+  expect(harness!.core.composer.storage.get('inputs', threadId).value?.input.text).toBe('still typing');
+  await client.call('turns.stop', { threadId });
+});
+
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
   const threadId = await codexThread(client);

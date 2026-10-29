@@ -301,6 +301,7 @@ export class MuseSession {
           ...(effort === null ? {} : { reasoningEffort: effort }),
         });
         if (typeof started.turnId === 'string' && started.turnId.length > 0) turn.turnId = started.turnId;
+        ctx.inputReady?.();
         if (turn.isStopped) this.#interrupt(turn);
       }
     } catch (error) {

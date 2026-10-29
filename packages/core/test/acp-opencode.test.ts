@@ -9,6 +9,31 @@ import { startTestCore, waitFor, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 
+test('Send now during OpenCode startup reaches the admitted input before a tool boundary', async () => {
+  harness = await startTestCore();
+  const owner = await harness.connect();
+  process.env['OPENCODE_FIXTURE_TOOL_GATE'] = join(harness.dataDir, 'blocked-tools');
+  try {
+    const profile = { executable: [{ kind: 'file' as const, value: process.execPath }], detect: {}, isolation: {}, launch: { args: [join(import.meta.dir, 'fixtures/opencode2-server.ts'), 'acp'] } };
+    Object.assign(harness.core.providers.require('opencode-v2'), { auth: { kind: 'none' }, env: {}, profiles: { windows: profile, linux: profile, macos: profile } });
+    await owner.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
+    const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Fixture' });
+    const project = await owner.call('projects.add', { path: harness.dataDir, name: 'Fixture' });
+    const thread = await owner.call('threads.create', { projectId: project.id, accountId: account.id, providerId: 'opencode-v2' });
+    const turn = await owner.call('turns.start', { threadId: thread.id, prompt: '[slow]' });
+    await waitFor(() => harness!.core.threads.runner.handles.has(thread.id));
+    await owner.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, sendNow: true,
+      value: { input: { text: '', attachments: [], paused: false, queued: [{ id: 'opencode-startup-followup', text: 'Also check the bots', attachments: [] }] } } });
+    await waitFor(() => harness!.core.composer.storage.get('inputs', thread.id).value?.input.queued.length === 0, 20000);
+    const current = await owner.call('threads.get', { threadId: thread.id });
+    expect(current.turns).toHaveLength(1);
+    expect(current.turns[0]?.id).toBe(turn.id);
+    expect(current.status).toBe('running');
+    expect(current.messages.filter(message => message.role === 'user')).toHaveLength(2);
+    expect(current.messages.flatMap(message => message.parts).some(part => part.type === 'tool')).toBe(false);
+  } finally { delete process.env['OPENCODE_FIXTURE_TOOL_GATE']; }
+}, 30000);
+
 test('OpenCode 2 accepts both tool-boundary and immediate messages in the same turn', async () => {
   harness = await startTestCore();
   const owner = await harness.connect();

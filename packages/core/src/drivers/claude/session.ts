@@ -200,7 +200,7 @@ export class ClaudeSession {
         this.#receive(message, true);
       }
       if (adopted) {
-        this.#steerable.add(turn);
+        this.#steerable.add(turn); turn.ctx.inputReady?.();
         return;
       }
       // The CLI's own run is still going: its result is not this turn's.
@@ -363,7 +363,7 @@ export class ClaudeSession {
     if (turn.isStopped || this.#closing || this.#ended) return;
     this.#send(turn, turn.promptText(), turn.ctx.attachments);
     this.#forgetPrompt(turn);
-    this.#steerable.add(turn);
+    this.#steerable.add(turn); turn.ctx.inputReady?.();
   }
 
   /**
@@ -515,7 +515,7 @@ export class ClaudeSession {
         this.#query = opened.query;
         this.#prompts = opened.prompts;
         // The next turn's setters have something to talk to from here on.
-        this.#markReady();
+        this.#markReady(); this.#head()?.ctx.inputReady?.();
         // Not awaited: an older CLI that has no answer for this is one warning,
         // never a reason to hold up the turn's own messages.
         void this.#query
