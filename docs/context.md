@@ -423,8 +423,7 @@ changes its preferences.
 A restored ordinary queue whose previous acceptance cannot be proved stays
 paused until explicitly resumed.
 Input written while the core is unreachable stays on the device until a client
-reconnects and synchronizes it. Incognito input stays in client memory and uses
-the client delivery path; older cores retain device-local persistence.
+reconnects and synchronizes it.
 
 Undoable deletion retains core input. Permanent deletion erases reply records
 and linked delivery receipts, and reconnecting clients discard their stale

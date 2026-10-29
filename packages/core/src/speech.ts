@@ -37,86 +37,92 @@ function customTarget(record: CustomRecord): SpeechTarget {
 }
 
 export class SpeechStore {
-  private revision = crypto.randomUUID();
-  private removing = false;
+  readonly #core: Core;
+
+  #revision = crypto.randomUUID();
+  #removing = false;
   readonly local: SpeechLocal;
-  private config: SpeechConfig = { ...DEFAULT_SPEECH };
-  private keys: Credentials = { groqKey: '', openrouterKey: '' };
-  private loadError: string | null = null;
-  private readonly running = new Map<string, SpeechJob>();
+  #config: SpeechConfig = { ...DEFAULT_SPEECH };
+  #keys: Credentials = { groqKey: '', openrouterKey: '' };
+  #loadError: string | null = null;
+  readonly #running = new Map<string, SpeechJob>();
   readonly streams: SpeechStreams;
-  private readonly file: string;
-  constructor(private readonly core: Core) {
+  readonly #file: string;
+  constructor(core: Core) {
+    this.#core = core;
     this.local = new SpeechLocal(core);
-    this.streams = new SpeechStreams(this.local, this.running, () => this.get(), () => this.status(), decodeSpeechAudio);
-    this.file = join(core.dataDir, 'speech.json');
-    if (existsSync(this.file)) {
+    this.streams = new SpeechStreams(this.local, this.#running, () => this.get(), () => this.status(), decodeSpeechAudio);
+    this.#file = join(core.dataDir, 'speech.json');
+    if (existsSync(this.#file)) {
       try {
-        const saved = JSON.parse(readFileSync(this.file, 'utf8'));
-        this.validate(saved);
+        const saved = JSON.parse(readFileSync(this.#file, 'utf8'));
+        this.#validate(saved);
         // A speech.json from before the model choice holds Whisper Small, the one model it could have.
-        this.config = this.publicConfig({ ...saved, model: saved.model ?? 'small-q5_1' });
-        this.keys = { groqKey: saved.groqKey ?? '', openrouterKey: saved.openrouterKey ?? '' };
+        this.#config = this.#publicConfig({ ...saved, model: saved.model ?? 'small-q5_1' });
+        this.#keys = { groqKey: saved.groqKey ?? '', openrouterKey: saved.openrouterKey ?? '' };
       } catch {
-        this.config = { ...DEFAULT_SPEECH };
-        this.keys = { groqKey: '', openrouterKey: '' };
-        this.loadError = 'speech.json: invalid voice configuration; choose an engine and save Voice settings to repair it';
+        this.#config = { ...DEFAULT_SPEECH };
+        this.#keys = { groqKey: '', openrouterKey: '' };
+        this.#loadError = 'speech.json: invalid voice configuration; choose an engine and save Voice settings to repair it';
       }
     }
   }
-  get(): SpeechConfig { return { ...this.config }; }
+  get(): SpeechConfig { return { ...this.#config }; }
   status(): SpeechStatus {
-    const backend = this.config.modelPath ? undefined : catalogueEntry(this.config.model)?.backend;
-    const localReady = this.local.ready(this.config.executable, this.local.modelFile(this.config), this.config.modelPath ? undefined : this.config.model);
-    const groqKeySet = this.keys.groqKey.length > 0;
-    const openrouterKeySet = this.keys.openrouterKey.length > 0;
+    const backend = this.#config.modelPath ? undefined : catalogueEntry(this.#config.model)?.backend;
+    const localReady = this.local.ready(this.#config.executable, this.local.modelFile(this.#config), this.#config.modelPath ? undefined : this.#config.model);
+    const groqKeySet = this.#keys.groqKey.length > 0;
+    const openrouterKeySet = this.#keys.openrouterKey.length > 0;
     return {
-      revision: this.revision, engine: this.config.engine,
+      revision: this.#revision, engine: this.#config.engine,
       // Another model may download while this one dictates; only a runtime being replaced stops it.
-      ready: this.loadError === null && (this.config.engine === 'local' ? localReady && !this.removing && !this.local.updatingRuntimeFor(this.config.modelPath ? undefined : this.config.model) :this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet),
+      ready: this.#loadError === null && (this.#config.engine === 'local' ? localReady && !this.#removing && !this.local.updatingRuntimeFor(this.#config.modelPath ? undefined : this.#config.model) :this.#config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet),
       localReady, groqKeySet, openrouterKeySet,
       installing: this.local.installing, downloadedBytes: this.local.downloadedBytes, totalBytes: this.local.totalBytes,
-      error: this.loadError ?? this.local.error, canInstallRuntime: this.local.canInstallModel(this.config.model),
+      error: this.#loadError ?? this.local.error, canInstallRuntime: this.local.canInstallModel(this.#config.model),
       models: this.local.models.list(), downloading: this.local.downloading, runtimeOutdated: !backend && this.local.runtimeOutdated(),
-      streaming: this.config.engine === 'local' && backend === 'nemotron',
-      previewIntervalMs: this.config.engine === 'api' ? 2500 : backend === 'whistle' ? 1000 : 1500,
+      streaming: this.#config.engine === 'local' && backend === 'nemotron',
+      previewIntervalMs: this.#config.engine === 'api' ? 2500 : backend === 'whistle' ? 1000 : 1500,
     };
   }
-  private publicConfig(p: SpeechConfig): SpeechConfig { return { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath, model: p.model }; }
-  private validate(p: Omit<SpeechConfig, 'model'> & { model?: string } & Partial<Credentials>): void {
+  #publicConfig(p: SpeechConfig): SpeechConfig { return { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath, model: p.model }; }
+  #validate(p: Omit<SpeechConfig, 'model'> & { model?: string } & Partial<Credentials>): void {
     if (!p || !['local', 'api'].includes(p.engine) || !['groq', 'openrouter'].includes(p.apiProvider) || typeof p.fallback !== 'boolean') throw invalidParams('speech: expected engine local/api, provider groq/openrouter and boolean fallback');
     if (typeof p.language !== 'string' || !/^([a-z]{2})?$/.test(p.language)) throw invalidParams('speech.language must be empty for detection or a two-letter language code');
     for (const field of ['executable', 'modelPath'] as const) if (typeof p[field] !== 'string' || p[field].length > 4096 || (p[field] && !isAbsolute(p[field]))) throw invalidParams(`speech.${field} must be empty or an absolute path on this core`);
     for (const field of ['groqKey', 'openrouterKey'] as const) if (p[field] !== undefined && (typeof p[field] !== 'string' || p[field]!.length > 512 || /\s/.test(p[field]!))) throw invalidParams(`speech.${field} must be a key without whitespace, or empty to remove it`);
-    if (p.model !== undefined && !isSpeechModelId(p.model)) throw invalidParams(`speech.model must be one of ${this.catalogueIds()} or custom-<12 hex>`);
+    if (p.model !== undefined && !isSpeechModelId(p.model)) throw invalidParams(`speech.model must be one of ${this.#catalogueIds()} or custom-<12 hex>`);
   }
-  private catalogueIds(): string { return this.local.models.list().filter(model => model.kind === 'catalogue').map(model => model.id).join(', '); }
+  #catalogueIds(): string { return this.local.models.list().filter(model => model.kind === 'catalogue').map(model => model.id).join(', '); }
   configure(p: Omit<SpeechConfig, 'model'> & { model?: string } & Partial<Credentials>): SpeechStatus {
-    this.validate(p);
-    const model = p?.model ?? this.config.model;
-    if (model !== this.config.model && !catalogueEntry(model) && !this.local.models.custom(model)) throw invalidParams(`speech.model: ${model} is not a model on this core; add it from a link first`);
-    return this.save({ ...this.publicConfig({ ...p, model }) }, { groqKey: p.groqKey ?? this.keys.groqKey, openrouterKey: p.openrouterKey ?? this.keys.openrouterKey });
+    this.#validate(p);
+    const dictation = this.#core.policy.dictation();
+    this.#core.policy.assert(dictation === 'off', 'dictation');
+    this.#core.policy.assert(dictation === 'local' && p.engine === 'api', 'dictation', 'cloud engines; only local is allowed');
+    const model = p?.model ?? this.#config.model;
+    if (model !== this.#config.model && !catalogueEntry(model) && !this.local.models.custom(model)) throw invalidParams(`speech.model: ${model} is not a model on this core; add it from a link first`);
+    return this.#save({ ...this.#publicConfig({ ...p, model }) }, { groqKey: p.groqKey ?? this.#keys.groqKey, openrouterKey: p.openrouterKey ?? this.#keys.openrouterKey });
   }
-  private save(config: SpeechConfig, keys: Credentials): SpeechStatus {
-    writeFileSync(`${this.file}.tmp`, JSON.stringify({ ...config, ...keys }), { mode: 0o600 });
-    renameSync(`${this.file}.tmp`, this.file);
-    const before = this.config;
+  #save(config: SpeechConfig, keys: Credentials): SpeechStatus {
+    writeFileSync(`${this.#file}.tmp`, JSON.stringify({ ...config, ...keys }), { mode: 0o600 });
+    renameSync(`${this.#file}.tmp`, this.#file);
+    const before = this.#config;
     // A recording made under other settings is refused; the loaded model follows the choice.
-    this.revision = crypto.randomUUID();
-    for (const job of this.running.values()) job.controller.abort();
+    this.#revision = crypto.randomUUID();
+    for (const job of this.#running.values()) job.controller.abort();
     if (before.engine !== config.engine || before.model !== config.model || before.modelPath !== config.modelPath || before.executable !== config.executable) void this.local.server.stop();
     if (before.engine !== config.engine || before.model !== config.model || before.modelPath !== config.modelPath) void this.local.native.stop();
-    this.config = config;
-    this.keys = keys;
-    this.loadError = null;
+    this.#config = config;
+    this.#keys = keys;
+    this.#loadError = null;
     return this.status();
   }
   /** A finished download becomes the model in use; a path set by hand gives way to it. */
-  private activate(id: string): void {
-    this.save({ ...this.config, model: id, modelPath: '' }, { ...this.keys });
+  #activate(id: string): void {
+    this.#save({ ...this.#config, model: id, modelPath: '' }, { ...this.#keys });
   }
   install(p: { model?: string; url?: string } = {}): SpeechStatus {
-    if (this.running.size || this.removing) throw refused('speech: wait for the current operation to finish before installing');
+    if (this.#running.size || this.#removing) throw refused('speech: wait for the current operation to finish before installing');
     if (!p || typeof p !== 'object') throw invalidParams('speech.install takes { model } or { url }');
     if (p.model !== undefined && p.url !== undefined) throw invalidParams('speech.install takes either model or url, not both');
     let target: SpeechTarget;
@@ -127,77 +133,78 @@ export class SpeechStore {
       const id = customId(p.url);
       target = customTarget(this.local.models.custom(id) ?? { id, url: p.url, name: customName(url), host: url.hostname, bytes: 0 });
     } else {
-      const id = p.model ?? this.config.model;
-      if (!isSpeechModelId(id)) throw invalidParams(`speech.model must be one of ${this.catalogueIds()} or custom-<12 hex>`);
+      const id = p.model ?? this.#config.model;
+      if (!isSpeechModelId(id)) throw invalidParams(`speech.model must be one of ${this.#catalogueIds()} or custom-<12 hex>`);
       const entry = catalogueEntry(id);
       const custom = entry ? null : this.local.models.custom(id);
       if (entry) target = { id, spec: catalogueSpec(entry) };
       else if (custom) target = customTarget(custom);
       else throw invalidParams(`speech.model: ${id} is not a model on this core; add it from a link first`);
     }
-    if (!this.local.start(target, id => this.activate(id))) this.activate(target.id);
+    if (!this.local.start(target, id => this.#activate(id))) this.#activate(target.id);
     return this.status();
   }
   async uninstall(p: { model?: string } = {}): Promise<SpeechStatus> {
-    if (this.running.size || this.removing) throw refused('speech: wait for the current operation to finish before removing the model');
+    if (this.#running.size || this.#removing) throw refused('speech: wait for the current operation to finish before removing the model');
     const model = p?.model;
-    if (model !== undefined && !isSpeechModelId(model)) throw invalidParams(`speech.model must be one of ${this.catalogueIds()} or custom-<12 hex>`);
-    this.removing = true;
+    if (model !== undefined && !isSpeechModelId(model)) throw invalidParams(`speech.model must be one of ${this.#catalogueIds()} or custom-<12 hex>`);
+    this.#removing = true;
     try {
       await this.local.remove(model);
       // The model in use went away: another one already here takes over, else a link's row falls back to the default.
-      if (model !== undefined && model === this.config.model) {
+      if (model !== undefined && model === this.#config.model) {
         const next = this.local.models.list().find(entry => entry.installed)?.id ?? (catalogueEntry(model) ? model : SPEECH_DEFAULT_MODEL);
-        if (next !== model) this.save({ ...this.config, model: next }, { ...this.keys });
+        if (next !== model) this.#save({ ...this.#config, model: next }, { ...this.#keys });
       }
       return this.status();
-    } finally { this.removing = false; }
+    } finally { this.#removing = false; }
   }
   /** Loads the configured model in the background; a failure is for the request that follows to report. */
   warm(): { ok: true } {
-    if (this.config.engine !== 'local' || this.removing || this.local.installing || !this.status().ready) return { ok: true };
-    const backend = this.config.modelPath ? undefined : catalogueEntry(this.config.model)?.backend;
+    if (this.#config.engine !== 'local' || this.#removing || this.local.installing || !this.status().ready) return { ok: true };
+    const backend = this.#config.modelPath ? undefined : catalogueEntry(this.#config.model)?.backend;
     if (backend === 'nemotron') {
-      void this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(this.config))).catch(() => {});
+      void this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(this.#config))).catch(() => {});
       return { ok: true };
     }
     if (backend === 'whistle') return { ok: true };
-    const command = this.local.serverCommand(this.config.executable);
-    if (command) void this.local.server.ensure(command, this.local.modelFile(this.config)).catch(() => {});
+    const command = this.local.serverCommand(this.#config.executable);
+    if (command) void this.local.server.ensure(command, this.local.modelFile(this.#config)).catch(() => {});
     return { ok: true };
   }
   cancel(connection: string, id?: string): void {
-    const job = this.running.get(connection);
+    const job = this.#running.get(connection);
     if (job && (id === undefined || job.id === id)) job.controller.abort();
   }
   async close(): Promise<void> {
-    for (const job of this.running.values()) job.controller.abort();
+    for (const job of this.#running.values()) job.controller.abort();
     await this.local.cancel();
     await this.local.server.stop();
     await this.local.native.stop();
   }
   async transcribe(connection: string, p: TranscribeParams): Promise<{ text: string; language?: string }> {
+    this.#core.policy.assert(this.#core.policy.dictation() === 'off', 'dictation');
     if (!p || typeof p.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(p.requestId)) throw invalidParams('speech.requestId must be 1 to 64 letters, digits or hyphens');
     if (p.preview !== undefined && typeof p.preview !== 'boolean') throw invalidParams('speech.preview must be a boolean');
     if (p.language !== undefined && (typeof p.language !== 'string' || p.language.length > 24 || !/^[a-z]+( [a-z]+)*$/.test(p.language))) throw invalidParams('speech.language must be the language a preview returned, in lowercase letters');
-    if (this.running.has(connection) || this.running.size >= 2 || (this.config.engine === 'local' && this.running.size > 0)) throw refused('speech: another transcription is running; try again shortly');
-    if (this.removing || !this.status().ready) throw refused('speech: configure the selected engine in Voice settings first');
-    if (p.revision !== this.revision) throw refused('speech: voice settings changed during recording; record again with the selected engine');
+    if (this.#running.has(connection) || this.#running.size >= 2 || (this.#config.engine === 'local' && this.#running.size > 0)) throw refused('speech: another transcription is running; try again shortly');
+    if (this.#removing || !this.status().ready) throw refused('speech: configure the selected engine in Voice settings first');
+    if (p.revision !== this.#revision) throw refused('speech: voice settings changed during recording; record again with the selected engine');
     const audio = decodeSpeechAudio(p.audio);
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]);
-    this.running.set(connection, { id: p.requestId, controller });
-    const config = this.get(), keys = { ...this.keys };
+    this.#running.set(connection, { id: p.requestId, controller });
+    const config = this.get(), keys = { ...this.#keys };
     try {
       let result: { text: string; language?: string };
       const backend = config.modelPath ? undefined : catalogueEntry(config.model)?.backend;
       if (config.engine === 'local' && backend === 'whistle') {
-        result = await transcribeWhistle(this.core, this.local, audio, config.language || p.language || '', signal);
+        result = await transcribeWhistle(this.#core, this.local, audio, config.language || p.language || '', signal);
       } else if (config.engine === 'local' && backend === 'nemotron') {
         const engine = await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), signal);
         result = await this.local.native.request('transcribe', { audio: p.audio, language: config.language }, signal, engine);
       } else if (config.engine === 'local') {
-        result = await transcribeLocal(this.core, this.local, audio, {
+        result = await transcribeLocal(this.#core, this.local, audio, {
           executable: config.executable,
           model: this.local.modelFile(config),
           // A configured language wins; else what a preview of this recording heard, else detection.
@@ -206,12 +213,12 @@ export class SpeechStore {
         }, signal);
       } else {
         let text: string;
-        try { text = await this.api(config.apiProvider, audio, config, keys, signal); }
+        try { text = await this.#api(config.apiProvider, audio, config, keys, signal); }
         catch (error) {
           signal.throwIfAborted();
           const second = config.apiProvider === 'groq' ? 'openrouter' : 'groq';
           if (!config.fallback || !keys[second === 'groq' ? 'groqKey' : 'openrouterKey']) throw error;
-          text = await this.api(second, audio, config, keys, signal);
+          text = await this.#api(second, audio, config, keys, signal);
         }
         result = { text };
       }
@@ -221,9 +228,11 @@ export class SpeechStore {
     } catch (error) {
       if (signal.aborted) throw refused(controller.signal.aborted ? 'speech: transcription cancelled' : 'speech: transcription timed out');
       throw error;
-    } finally { this.running.delete(connection); }
+    } finally { this.#running.delete(connection); }
   }
-  private async api(provider: 'groq' | 'openrouter', audio: Uint8Array, config: SpeechConfig, keys: Credentials, signal: AbortSignal): Promise<string> {
+  async #api(provider: 'groq' | 'openrouter', audio: Uint8Array, config: SpeechConfig, keys: Credentials, signal: AbortSignal): Promise<string> {
+    // The only call that sends audio off the machine; a saved cloud engine stops here too.
+    this.#core.policy.assert(this.#core.policy.dictation() !== null, 'dictation', `the ${provider} cloud engine; only local is allowed`);
     const target = ENDPOINTS[provider];
     const headers: Record<string, string> = { Authorization: `Bearer ${provider === 'groq' ? keys.groqKey : keys.openrouterKey}` };
     let body: FormData | string;

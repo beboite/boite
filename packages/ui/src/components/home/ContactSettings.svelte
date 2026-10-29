@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../../lib/policy';
   import { onDestroy } from 'svelte';
   import { Check, ChevronDown, Copy, ExternalLink } from '@lucide/svelte';
   import type { ModelTier } from '@boite/contracts';
@@ -63,7 +64,7 @@
       </span>
       <form class="key-form" onsubmit={event => { event.preventDefault(); void save(); }}>
         <input type="password" bind:value={key} placeholder={labels.keyPlaceholder} aria-labelledby="{uid}-key" autocomplete="off" spellcheck="false" data-testid="contact-key-input" />
-        <button type="submit" disabled={!key.trim() || view.isBusy('tailscale-key')} data-testid="contact-key-save">{labels.save}</button>
+        <button type="submit" disabled={!key.trim() || view.isBusy('tailscale-key') || lockedBy(view.store.policy, 'network.contacts') !== null} data-testid="contact-key-save">{labels.save}</button>
         {#if tailscale.apiKey}<button type="button" class="ghost" disabled={view.isBusy('tailscale-key')} onclick={() => void view.tailscaleKey(null)} data-testid="contact-key-clear">{labels.clear}</button>{/if}
       </form>
     </div>

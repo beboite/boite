@@ -44,8 +44,8 @@ export function checkInstall(value: unknown, file: string, field: string): Provi
     reject(file, `${field}.arch`, 'x64 or arm64', `${field}.arch must be x64 or arm64`);
   }
   const format = obj['format'];
-  if (format !== undefined && format !== 'zip' && format !== 'binary') {
-    reject(file, `${field}.format`, 'zip or binary', `${field}.format must be zip or binary`);
+  if (format !== undefined && format !== 'zip' && format !== 'binary' && format !== 'tgz') {
+    reject(file, `${field}.format`, 'zip, binary or tgz', `${field}.format must be zip, binary or tgz`);
   }
 
   const url = asString(obj['url'], file, `${field}.url`);
@@ -96,7 +96,7 @@ export function checkInstall(value: unknown, file: string, field: string): Provi
   }
   return { version, url, sha256, archiveBytes, files,
     ...(arch === undefined ? {} : { arch: arch as 'x64' | 'arm64' }),
-    ...(format === 'zip' || format === 'binary' ? { format } : {}),
+    ...(format === 'zip' || format === 'binary' || format === 'tgz' ? { format } : {}),
     ...(latest === undefined ? {} : { latest }) };
 }
 

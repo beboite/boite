@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
 
@@ -90,7 +91,7 @@
     {/if}
     {#if canRestart && phase !== 'restarting' && loopback}
       <div class="actions">
-        <button type="button" class="primary" data-testid="lan-reach-button" disabled={store.connection !== 'ready'} onclick={() => void reach()}>
+        <button type="button" class="primary" data-testid="lan-reach-button" disabled={store.connection !== 'ready' || lockedBy(store.policy, 'network.lan') !== null} onclick={() => void reach()}>
           <span class="ui-label">{text.button}</span>
         </button>
       </div>

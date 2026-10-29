@@ -34,7 +34,7 @@ afterAll(async () => {
 });
 
 describe('the releases the shipped descriptors pin', () => {
-  for (const providerId of ['opencode', 'codex']) {
+  for (const providerId of ['opencode', 'opencode-v2', 'codex']) {
     run(
       `${providerId} installs from its release, matches its sha256 and answers --version`,
       async () => {

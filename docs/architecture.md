@@ -88,7 +88,8 @@ Removing references collects unused assets; live records and pending uploads
 retain their bytes without loading attachment bodies during text saves.
 The core is the sole queue runner, including for incognito input. Private
 records and assets stay in memory, restricted to their originating connection.
-Delivery receipts also stay in memory to protect reconnects.
+Private delivery receipts stay in memory to protect reconnects; durable receipts
+are stored in the journal.
 Batching, activity command parsing and permission auto-decisions live in contracts
 and are shared with the render fixture. The core drains accepted durable queues
 even when every client is closed, waking only

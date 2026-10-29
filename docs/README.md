@@ -24,6 +24,7 @@
 - [Windows](windows.md): desktop-window captures and the Window panel, with the owner's consent.
 - [Chat files and previews](chat-files.md): attachments, file links, inline previews and pages drawn in an answer.
 - [Diagrams and formulas](diagrams-and-formulas.md): Mermaid and LaTeX in messages.
+- [Experimental view kit](view-kit.md): an opt-in composition prototype and remaining authoring, runtime and publication improvements.
 - [The thread terminal](terminal.md): shells under the chat and interactive sign-ins.
 - [Reviewed goals](goals.md): `/goal2`, its fresh reviewer and the checklist of the user's requests.
 - [The project board](board.md): todo columns and reviewed `/goal2` work.
@@ -66,6 +67,8 @@
 - [Project icons](project-icons.md): image discovery, bounds and delivery to clients.
 - [Language](language.md): translation catalogs and adding a language.
 - [Analytics](analytics.md): telemetry consent, collected fields and data controls.
+- [Admin policy](enterprise.md): the machine-wide file that locks updates, providers, analytics and network features.
+- [Network flows](network.md): every outbound connection, what it sends and the policy key that blocks it.
 - [CI](ci.md): checks, caches, nightly builds and image publication.
 - [Releasing](releasing.md): artifacts, signing, channels and versioning.
 - [Release reports](releases/2.0.0-beta.1.md): the first beta's historical scope and measurements.

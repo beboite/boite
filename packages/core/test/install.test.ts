@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
+import { tarball } from './fixtures/tarball.ts';
 import type { HarnessUpdate, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
@@ -22,6 +23,16 @@ const EXE_V2 = new Uint8Array(6144).fill(0x43);
 const RELEASE = zipSync({ [EXE_PATH]: EXE, [NOTE_PATH]: NOTE });
 const RELEASE_V2 = zipSync({ [EXE_PATH]: EXE_V2, [NOTE_PATH]: NOTE });
 const ESCAPING = zipSync({ '../evil.txt': NOTE, [EXE_PATH]: EXE });
+
+/** A member path longer than the tar name field, so only its pax header names it. */
+const LONG_NOTE_PATH = `share/${'n'.repeat(120)}/note.txt`;
+const TARBALL = tarball([
+  { name: 'bin/', type: '5' },
+  { name: 'package.json', bytes: new TextEncoder().encode('{}') },
+  { name: EXE_PATH, bytes: EXE },
+  { name: LONG_NOTE_PATH, bytes: NOTE },
+]);
+const ESCAPING_TARBALL = tarball([{ name: '../evil.txt', bytes: NOTE }, { name: EXE_PATH, bytes: EXE }]);
 
 function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
@@ -206,6 +217,8 @@ beforeEach(async () => {
       }
       if (path === '/release-2.zip') return new Response(RELEASE_V2);
       if (path === '/escaping.zip') return new Response(ESCAPING);
+      if (path === '/release.tgz') return new Response(TARBALL);
+      if (path === '/escaping.tgz') return new Response(ESCAPING_TARBALL);
       if (path === '/tampered.zip') return new Response(tampered());
       // Two bytes short of what the descriptor promises.
       if (path === '/short.zip') return new Response(RELEASE.slice(0, RELEASE.byteLength - 2));
@@ -342,6 +355,38 @@ describe('managed installs', () => {
     expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
     await client.call('providers.uninstall', { providerId: 'managed' });
     expect(existsSync(agentDir('current', EXE_PATH))).toBe(false);
+  });
+
+  test('a gzipped tar installs its listed members, a pax long name included, and nothing else', async () => {
+    await loadDescriptor({ version: '1.0.0', format: 'tgz', url: url('/release.tgz'),
+      sha256: sha256(TARBALL), archiveBytes: TARBALL.byteLength,
+      files: [{ path: EXE_PATH, bytes: EXE.byteLength }, { path: LONG_NOTE_PATH, bytes: NOTE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'installed' || state.state === 'failed'));
+    expect(seen.at(-1)?.state).toBe('installed');
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(EXE);
+    expect(readFileSync(agentDir('current', LONG_NOTE_PATH), 'utf8')).toBe(new TextDecoder().decode(NOTE));
+    expect(existsSync(agentDir('current', 'package.json'))).toBe(false);
+    expect((await client.call('providers.list', {})).loaded.find(provider => provider.id === 'managed')?.available).toBe(true);
+  });
+
+  test('a tar entry that climbs out of the release directory is refused', async () => {
+    await loadDescriptor({ version: '1.0.0', format: 'tgz', url: url('/escaping.tgz'),
+      sha256: sha256(ESCAPING_TARBALL), archiveBytes: ESCAPING_TARBALL.byteLength,
+      files: [{ path: EXE_PATH, bytes: EXE.byteLength }] });
+    const client = await harness.connect();
+    const seen: ProviderInstallState[] = [];
+    client.on('providers.installProgress', state => { seen.push(state); });
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => seen.some(state => state.state === 'failed'));
+    const failed = seen.find(state => state.state === 'failed');
+    if (failed?.state !== 'failed') throw new Error('no failure was reported');
+    expect(failed.message).toContain('evil.txt');
+    expect(existsSync(join(harness.dataDir, 'agents', 'managed', 'releases', 'evil.txt'))).toBe(false);
+    expect(existsSync(agentDir('current'))).toBe(false);
   });
 
   test('a corrupt completion record stays visible as a failed install', async () => {

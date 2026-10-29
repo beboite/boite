@@ -236,9 +236,76 @@ pub fn app_update_status(webview: Webview, state: State<'_, AppUpdater>) -> Resu
     Ok(state.snapshot.lock().unwrap().clone())
 }
 
+/// A policy is a few hundred bytes; past the core's limit a file is not one.
+const MAX_POLICY_BYTES: u64 = 256 * 1024;
+
+/// The machine's admin policy file (docs/enterprise.md), as the core finds it:
+/// the platform's location, else `BOITE_POLICY_FILE` when that one is absent.
+fn policy_file() -> PathBuf {
+    let machines = if cfg!(windows) {
+        let at = |root: PathBuf| root.join("Boite").join("policy.json");
+        let named = at(PathBuf::from(std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into())));
+        // `ProgramData` is the user's environment too: the default location, when it holds a file, wins over it.
+        let default = at(PathBuf::from("C:\\ProgramData"));
+        if named == default { vec![named] } else { vec![default, named] }
+    } else if cfg!(target_os = "macos") {
+        vec![PathBuf::from("/Library/Application Support/Boite/policy.json")]
+    } else {
+        vec![PathBuf::from("/etc/boite/policy.json")]
+    };
+    first_present(&machines).unwrap_or_else(|| match std::env::var_os("BOITE_POLICY_FILE") {
+        Some(named) if !named.is_empty() => PathBuf::from(named),
+        _ => machines[0].clone(),
+    })
+}
+
+/// The first location holding a file. One that cannot be checked counts as
+/// there, so reading it fails closed instead of falling back.
+fn first_present(paths: &[PathBuf]) -> Option<PathBuf> {
+    paths.iter().find(|path| !matches!(path.try_exists(), Ok(false))).cloned()
+}
+
+/// The policy's text: none when the file is absent, and an empty text, which
+/// fails closed, when it cannot be read or is larger than the core accepts.
+fn read_policy(file: &std::path::Path) -> Option<String> {
+    use std::io::Read as _;
+    let opened = match std::fs::File::open(file) {
+        Ok(opened) => opened,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some(String::new()),
+    };
+    let mut text = String::new();
+    match opened.take(MAX_POLICY_BYTES + 1).read_to_string(&mut text) {
+        Ok(read) if read as u64 <= MAX_POLICY_BYTES => Some(text),
+        _ => Some(String::new()),
+    }
+}
+
+/// The refusal the policy's `updates.app` gives the app's updater, if any. A file
+/// that does not parse, or a value that is not off, check or auto, is the
+/// strictest value: off. The core enforces the same key for everything else.
+fn app_updates_refusal(text: Option<&str>, file: &str) -> Option<String> {
+    let text = text?;
+    let refusal = || Some(format!("Desktop app updates: blocked by your organization's policy, key updates.app in {file}"));
+    let Ok(policy) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) else { return refusal() };
+    let Some(policy) = policy.as_object() else { return refusal() };
+    let Some(updates) = policy.get("updates")?.as_object() else { return refusal() };
+    match updates.get("app").map(|value| value.as_str()) {
+        None | Some(Some("check")) | Some(Some("auto")) => None,
+        _ => refusal(),
+    }
+}
+
+fn app_updates_blocked() -> Result<(), String> {
+    let file = policy_file();
+    let text = read_policy(&file);
+    match app_updates_refusal(text.as_deref(), &file.display().to_string()) { Some(message) => Err(message), None => Ok(()) }
+}
+
 #[tauri::command]
 pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>, channel: Track) -> Result<Snapshot, String> {
     crate::browser::only_main(&webview)?;
+    app_updates_blocked()?;
     let _operation = state.begin()?;
     state.pending.lock().unwrap().take();
     state.change(&app, |s| { s.phase = "checking".into(); s.channel = channel; s.error = None;
@@ -269,6 +336,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
 #[tauri::command]
 pub async fn app_update_download(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>) -> Result<Snapshot, String> {
     crate::browser::only_main(&webview)?;
+    app_updates_blocked()?;
     let _operation = state.begin()?;
     if state.snapshot.lock().unwrap().phase != "available" { return Err("Check for an available update before downloading".into()); }
     let update = state.pending.lock().unwrap().as_ref().ok_or("No update to download")?.update.clone();
@@ -399,6 +467,34 @@ async fn install(app: AppHandle, state: State<'_, AppUpdater>, quiet: bool) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn admin_policy_turns_app_updates_off_and_fails_closed() {
+        assert_eq!(app_updates_refusal(None, "p.json"), None);
+        assert_eq!(app_updates_refusal(Some("{}"), "p.json"), None);
+        assert_eq!(app_updates_refusal(Some(r#"{"updates":{"app":"check"}}"#), "p.json"), None);
+        assert!(app_updates_refusal(Some(r#"{"updates":{"app":"off"}}"#), "p.json").unwrap().contains("updates.app in p.json"));
+        assert!(app_updates_refusal(Some(r#"{"updates":{"app":"never"}}"#), "p.json").is_some());
+        assert!(app_updates_refusal(Some("{not json"), "p.json").is_some());
+    }
+    #[test]
+    fn policy_read_is_bounded_and_the_first_present_location_wins() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("boite-updater-policy-{}-{nanos}", std::process::id()));
+        // Created here or the test fails: the cleanup below removes only what this run made.
+        std::fs::create_dir(&dir).unwrap();
+        let small = dir.join("small.json");
+        std::fs::write(&small, r#"{"updates":{"app":"check"}}"#).unwrap();
+        assert_eq!(read_policy(&small).as_deref(), Some(r#"{"updates":{"app":"check"}}"#));
+        assert_eq!(read_policy(&dir.join("missing.json")), None);
+        // Past the core's limit a file that parses still fails closed.
+        let large = dir.join("large.json");
+        std::fs::write(&large, format!("{{\"pad\":\"{}\"}}", "x".repeat(MAX_POLICY_BYTES as usize))).unwrap();
+        assert_eq!(read_policy(&large).as_deref(), Some(""));
+        assert!(app_updates_refusal(read_policy(&large).as_deref(), "p.json").is_some());
+        assert_eq!(first_present(&[dir.join("missing.json"), small.clone()]), Some(small));
+        assert_eq!(first_present(&[dir.join("missing.json")]), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     fn release(tag: &str, draft: bool, signed: bool) -> Release {
         Release { tag_name: tag.into(), draft, published_at: None, body: None,
             assets: if signed { vec![Asset { name: "latest.json".into(), browser_download_url: format!("{}{tag}/latest.json", DOWNLOADS[0]) }] } else { vec![] } }

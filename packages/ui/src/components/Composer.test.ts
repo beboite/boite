@@ -2010,7 +2010,8 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
     .openThread!.messages.filter((message) => message.role === 'user')
     .filter(message => message.parts.some(part => part.type === 'text' && /^P[123]/.test(part.text)))
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
-  expect(sent.join('\n\n')).toBe('P1\n\nP2\n\nP3');
+  // P1 keeps its refused request id; unsent P2 and P3 share the next turn.
+  expect(sent).toEqual(['P1', 'P2\n\nP3']);
 });
 
 test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ queueApp: _app }) => {

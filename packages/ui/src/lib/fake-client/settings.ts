@@ -6,6 +6,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { gatewayQuotas } from './accounts';
 import { fakeCore } from './coordination';
 import { settleMachineSetting, settleSettings } from './requests';
+import { applyPolicy, checkPolicySettings } from './policy';
 
 export function settingsMethods(ctx: FakeContext) {
   const methods = {
@@ -44,11 +45,13 @@ export function settingsMethods(ctx: FakeContext) {
       return structuredClone(ctx.scheduler);
     },
     'telemetry.state': async () => ({ ...ctx.telemetry }),
+    'policy.get': async () => structuredClone(ctx.policy),
     'telemetry.configure': async ({ mode, countChoice }) => {
       if (!['off', 'basic', 'enhanced'].includes(mode)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'mode: expected off, basic or enhanced' });
       if (countChoice !== undefined && typeof countChoice !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'countChoice: expected a boolean' });
-      if (ctx.telemetry.mode === 'enhanced' && mode !== 'enhanced') ctx.telemetry.pendingDeletion = true;
-      ctx.telemetry.mode = mode;
+      if (ctx.telemetryMode === 'enhanced' && mode !== 'enhanced') ctx.telemetry.pendingDeletion = true;
+      ctx.telemetryMode = mode;
+      applyPolicy(ctx);
       return { ...ctx.telemetry };
     },
     'telemetry.retryForget': async () => {
@@ -105,6 +108,7 @@ export function settingsMethods(ctx: FakeContext) {
       if (tracker && !ctx.providers.some(p => p.id === tracker.providerId)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `goalTracker names ${tracker.providerId}, which is not a loaded provider`, data: { field: 'goalTracker' } });
       }
+      checkPolicySettings(ctx, checked.patch);
       const before = Object.fromEntries(MACHINE_SETTINGS.map(key => [key, ctx.settings[key] === true]));
       ctx.settings = { ...ctx.settings, ...keepLaterFavorites(ctx.settings, checked.patch) };
       // As the core's `setting.changed`: the other members' cards about this machine settle.

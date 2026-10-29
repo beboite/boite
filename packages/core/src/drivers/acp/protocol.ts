@@ -21,6 +21,11 @@ export function isGrok(provider: ProviderDescriptor): boolean {
   return provider.quirks?.includes('grok') === true;
 }
 
+/** Hermes Agent's dialect: a `session/load` of an id it does not have answers an empty result. */
+export function isHermes(provider: ProviderDescriptor): boolean {
+  return provider.quirks?.includes('hermes') === true;
+}
+
 /** The whole SDK, loaded on the first ACP turn: nothing heavy loads at core start. */
 export type AcpSdk = typeof import('@agentclientprotocol/sdk');
 

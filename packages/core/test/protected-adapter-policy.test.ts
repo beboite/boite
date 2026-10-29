@@ -124,7 +124,7 @@ test('protected ACP rejects absent, refused and falsely acknowledged native mode
     return {type: 'select', id: 'mode', name: 'Mode', category: 'mode', currentValue, options: [{value: 'build', name: 'Build'}, {value: 'plan', name: 'Plan'}]};
   }
   expect(await thrown(controls.applyMode(ctx))).toThrow('offers no exact mode');
-  controls.noteSession(null, [option('build')], {}); refused = true;
+  controls.noteSession(null, [option('build')], {}, true); refused = true;
   expect(await thrown(controls.applyMode(ctx))).toThrow('native agent refused');
   refused = false;
   expect(await thrown(controls.applyMode(ctx))).toThrow('did not confirm plan');
@@ -141,7 +141,7 @@ test('protected ACP confirms the selected model before fresh and warm prompts', 
     return answer;
   }} as unknown as ClientContext}));
   expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
-  controls.noteSession(null, [option('fixture/default')], {});
+  controls.noteSession(null, [option('fixture/default')], {}, true);
   controls.noteOwnModel([option('fixture/default')]);
   ctx.thread.model = 'fixture/missing';
   expect(await thrown(controls.applyConfig(ctx))).toThrow('execution.acp.model');
@@ -172,7 +172,7 @@ test('Grok refusing the selected model fails admission, while a refused effort a
   ctx.thread.model = 'grok-next'; ctx.thread.effort = null;
   expect(await thrown(controls.applyModel(ctx))).toThrow('thread.model: Grok refused the model grok-next: model unavailable');
   ctx.thread.model = 'default'; ctx.thread.effort = 'high';
-  controls.noteSession(null, null, {models: {currentModelId: 'grok-4.5', availableModels: [{modelId: 'grok-4.5', name: 'Grok 4.5'}]}});
+  controls.noteSession(null, null, {models: {currentModelId: 'grok-4.5', availableModels: [{modelId: 'grok-4.5', name: 'Grok 4.5'}]}}, true);
   await controls.applyModel(ctx);
   expect(logs).toEqual(['acp: the agent refused the effort high on grok-4.5: model unavailable']);
 });
@@ -210,7 +210,7 @@ test('native-default selection stays explicit and an ordinary ACP model the agen
   await controls.applyConfig(ctx);
   ctx.protectedExecution = undefined; ctx.thread.model = 'fixture/unavailable';
   controls.noteSession(null, [{type: 'select', id: 'model', name: 'Model', category: 'model', currentValue: 'fixture/default',
-    options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {});
+    options: [{value: 'fixture/unavailable', name: 'Unavailable'}]}], {}, true);
   // Outside protected execution too: the prompt must not run on fixture/default.
   expect(await thrown(controls.applyConfig(ctx))).toThrow(/^thread\.model: .* refused the model fixture\/unavailable: native default must not select a model$/);
 });

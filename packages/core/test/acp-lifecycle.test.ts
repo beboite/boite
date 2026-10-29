@@ -25,7 +25,7 @@ test('ACP configuration fails when its target disappears during an injected-mode
     id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'default',
     options: [{ value: 'default', name: 'Default' }],
   };
-  controls.noteSession(null, [option], {});
+  controls.noteSession(null, [option], {}, true);
   const ctx = {
     provider: { name: 'Fixture' }, thread: { model: 'gateway/model', effort: null },
     accountEnv: { BOITE_SUBSCRIPTION_PROXY_PREFIX: 'gateway/' }, log() {},

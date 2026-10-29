@@ -120,13 +120,13 @@ its hello is not sealed either, so it keeps to the same addresses. A link that
 adds a device follows the same rule.
 
 The core reads its tailnet address off Tailscale's own network interface
-(`tailscale0`, `Tailscale`, or on macOS a `utun` that also carries a Tailscale
-IPv6 address) and its MagicDNS name from the PTR record Tailscale's resolver
-at 100.100.100.100 answers. It runs no Tailscale command. An address in
-100.64.0.0/10 on any other interface is not taken for a tailnet: a carrier or
-another VPN hands out the same range, and nothing is opened there. A machine
-with no tailnet gives its LAN address, and two machines on one LAN group the
-same way once both listen on the network.
+(`tailscale0`, `Tailscale`, or a `utun` on macOS or `tun` on Android that also
+carries a Tailscale IPv6 address) and its MagicDNS name from the PTR record
+Tailscale's resolver at 100.100.100.100 answers. It runs no Tailscale command.
+An address in 100.64.0.0/10 on any other interface is not taken for a tailnet:
+a carrier or another VPN hands out the same range, and nothing is opened there.
+A machine with no tailnet gives its LAN address, and two machines on one LAN
+group the same way once both listen on the network.
 
 Joining or creating a group makes the core listen on the tailnet address too,
 on the same port, beside the address it was started on. It stops when the

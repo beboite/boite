@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { errorText } from '../lib/errors';
   import { onDestroy } from 'svelte';
   import type { AccountQuota, QuotaResetOutcome } from '@boite/contracts';
@@ -70,7 +71,7 @@
   {#snippet resetAction()}
     {#if available}
       <button type="button" class="ghost small" data-testid="quota-use-reset" data-account-id={row.accountId}
-        disabled={disabled || busy || !store.owner || store.connection !== 'ready'} aria-busy={sending} onclick={() => void reset()}>
+        disabled={disabled || busy || !store.owner || store.connection !== 'ready' || lockedBy(store.policy, 'quotaReads') !== null} aria-busy={sending} onclick={() => void reset()}>
         <span class="ui-label">{sending ? strings.quotas.resetUsing : strings.quotas.useReset}</span>
       </button>
     {/if}

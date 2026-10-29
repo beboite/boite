@@ -347,6 +347,8 @@ export class Store {
   loadBrainCommands() { return this.#ctx.settings.loadBrainCommands(); }
   get settings() { return this.#ctx.settings.settings; }
   set settings(value) { this.#ctx.settings.settings = value; }
+  get policy() { return this.#ctx.settings.policy; }
+  set policy(value) { this.#ctx.settings.policy = value; }
   get keybindings() { return this.#ctx.settings.keybindings; }
   set keybindings(value) { this.#ctx.settings.keybindings = value; }
   get bindings() { return this.#ctx.settings.bindings; }

@@ -20,6 +20,7 @@ import {
   type ExperimentId,
   type HookRun,
   type MemoryEvent,
+  type PolicyState,
   type ProcessRecord,
   type Principal,
   type RpcEventName,
@@ -82,6 +83,7 @@ import { holdAfterRestart } from './fake-client/recovery';
 import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
 import { startLoad } from './fake-client/load';
+import { applyPolicy, policyGate } from './fake-client/policy';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -156,6 +158,8 @@ export class FakeClient implements ObservableClient {
       ctx.usageSeeded = false;
       ctx.scheduler = { ...ctx.scheduler, running: [], queued: [] };
     }
+    // Again once the seeds and a first launch have set the providers the policy marks.
+    applyPolicy(ctx);
     if (options.load) this.#stopLoad = startLoad(ctx, options.load, options.loadTickMs);
     // After a first launch has cleared the threads, so no record names one that is gone.
     seedDiagnostics(ctx);
@@ -352,6 +356,8 @@ export class FakeClient implements ObservableClient {
     const checked = checkRpcParams(method, params);
     if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
     params = checked.params as RpcParams<M>;
+    // The admin policy's gate runs before the method, as the core's router does.
+    policyGate(this.#ctx, method, params);
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     if (this.#ctx.rttMs > 0) {
       // An answer still on its way back when the socket changed never arrives.
@@ -403,6 +409,15 @@ export class FakeClient implements ObservableClient {
   reportDesktopExperiments(experiments: ExperimentId[]): void {
     this.#ctx.desktopExperiments = [...experiments];
     this.#ctx.emit('client.desktopExperiments', { experiments: [...experiments] });
+  }
+
+  /** The policy file edited on the fake machine, as the core's watcher rereads it and announces the change. */
+  changePolicy(policy: PolicyState): void {
+    this.#ctx.policy = structuredClone(policy);
+    applyPolicy(this.#ctx);
+    this.#ctx.emit('policy.changed', structuredClone(policy));
+    this.#ctx.emit('settings.updated', { ...this.#ctx.settings });
+    this.#ctx.emit('providers.updated', { loaded: structuredClone(this.#ctx.providers), rejected: [] });
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */

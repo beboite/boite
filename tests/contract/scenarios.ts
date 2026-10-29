@@ -156,6 +156,11 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
   ...COMPOSER_SCENARIOS,
+  'policy.get reports no restrictions when no admin policy file exists': async (env) => {
+    const policy = await env.call('policy.get', {});
+    same([policy.present, policy.values, policy.locked, policy.problems, policy.failedClosed],
+      [false, {}, [], [], false], 'a missing policy leaves user preferences unlocked');
+  },
   'providers.addLocal writes an ACP provider with a default account, providers.removeLocal takes it away, each refusal names its field': async (env) => {
     const heard = record(env, ['providers.updated']);
     const added = await env.call('providers.addLocal', { name: 'Contract Local', command: 'bun', args: ['acp', 'two words'], env: { CONTRACT_LOCAL: '1' } });
