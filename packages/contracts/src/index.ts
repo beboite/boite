@@ -54,6 +54,7 @@ import type { UsageRpcMethods } from './usage';
 import type { PolicyRpcEvents, PolicyRpcMethods } from './policy';
 export * from './ids';
 export * from './providers';
+export * from './local-acp';
 export * from './accounts';
 export * from './plugins';
 export * from './projects';

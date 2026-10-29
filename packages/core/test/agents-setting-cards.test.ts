@@ -18,9 +18,9 @@ test('the native bot eventWakes boolean card reads, validates, applies and rever
   const { h, owner, agent, worker, run, profile, cards } = await setup();
   await owner.call('turns.start', { threadId: worker, prompt: 'Configure the bot.' });
   await waitFor(() => settled(h, worker));
-  expect((await run(['settings', 'bot', 'eventWakes', '--bot', 'Ada'], worker)).out).toContain('eventWakes true');
+  expect((await run(['settings', 'bot', 'eventWakes', '--bot', 'Ada'], worker)).out).toContain('eventWakes false');
   expect((await run(['settings', 'bot', 'request', 'eventWakes', 'sometimes', '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).not.toBe(0);
-  for (const enabled of [false, true]) {
+  for (const enabled of [true, false]) {
     expect((await run(['settings', 'bot', 'request', 'eventWakes', String(enabled), '--bot', 'Ada', '--why', 'Batch project news.'], worker)).code).toBe(0);
     const card = cards(worker).find(q => q.agentSetting?.key === 'eventWakes')!;
     expect(card.agentSetting?.previous).toBe(!enabled);

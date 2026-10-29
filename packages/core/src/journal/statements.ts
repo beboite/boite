@@ -10,6 +10,22 @@ import { Database, type Changes, type SQLQueryBindings } from 'bun:sqlite';
 Database.MAX_QUERY_CACHE_SIZE = 128;
 
 /**
+ * SQLite's default 2 MiB of cached pages is less than one thread list on a
+ * journal of a few thousand threads, so each list read the file again. Under
+ * memory pressure the kernel drops those file pages within seconds and the read
+ * waited on the disk with the event loop stopped
+ * (`bench/results/2026-10-28-journal-cache.md`). Pages cached here stay in the
+ * core's memory across the connection's own writes and the Worker's passive
+ * checkpoints; 64 MiB is four times what the core read from a 4 GiB journal in
+ * three minutes on a loaded machine. A sort keeps up to that much in memory
+ * before it spills to a temporary file, where it spilled past about 2 MiB.
+ */
+export function cachePages(db: Database): Database {
+  db.exec(`PRAGMA cache_size = -${64 * 1024}`);
+  return db;
+}
+
+/**
  * Over this many characters, a bound value runs on a statement of its own.
  * A statement from `db.query` is cached and keeps the values of its last run
  * alive until it runs again: after binding a 20 MB string and dropping it, RSS

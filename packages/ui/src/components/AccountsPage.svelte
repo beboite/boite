@@ -3,6 +3,7 @@
   import PolicyLock from './PolicyLock.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import LocalAcpCard from './LocalAcpCard.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -116,6 +117,7 @@
     return store.accountsOf(provider.id).length > 0
       || store.installOf(provider.id)?.state === 'installed'
       || provider.executable !== null
+      || (provider.source === 'user' && store.owner)
       || (provider.available && (provider.login !== false || !provider.alwaysIsolated));
   }
 
@@ -209,6 +211,18 @@
       danger: true
     });
     if (ok) await store.uninstallProvider(provider.id);
+  }
+
+  /** A provider added on this machine leaves with its file; its accounts and conversations stay. */
+  async function removeLocal(provider: ProviderSummary) {
+    const ok = await confirm.ask({
+      title: fill(strings.localAcp.removeTitle, { provider: provider.name }),
+      body: strings.localAcp.removeBody,
+      confirmLabel: strings.localAcp.remove,
+      cancelLabel: strings.install.removeCancel,
+      danger: true
+    });
+    if (ok) await store.removeLocalProvider(provider.id);
   }
 
   /** Something the user installed or signed into outside Boite: look again. */
@@ -530,7 +544,7 @@
     </div>
   {/if}
 
-  {#if install?.state === 'installed' || provider.executable}
+  {#if install?.state === 'installed' || provider.executable || (provider.source === 'user' && store.owner)}
     <div class="section-head"><span class="section-label"><span class="ui-label">{strings.providerSettings.installation}</span></span></div>
     <dl class="facts">
       {#if install?.state === 'installed'}
@@ -546,6 +560,14 @@
         <div class="fact">
           <dt>{strings.providerSettings.executable}</dt>
           <dd><code>{provider.executable}</code></dd>
+        </div>
+      {/if}
+      {#if provider.source === 'user' && store.owner}
+        <div class="fact">
+          <dt>{strings.localAcp.source}</dt>
+          <dd class="managed">
+            <button class="quiet small" data-testid="local-acp-remove" onclick={() => void removeLocal(provider)}><span class="ui-label">{strings.localAcp.remove}</span></button>
+          </dd>
         </div>
       {/if}
     </dl>
@@ -686,6 +708,7 @@
       {#each groups.off as row (row.id)}{@render providerRow(row, true)}{/each}
     </div>
   {/if}
+  {#if store.owner}<LocalAcpCard {store} />{/if}
   {#if store.owner}<HarnessUpdatesCard {store} />{/if}
   {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>

@@ -728,9 +728,9 @@ test('contacts boundary: a directory assembled before a reload is absent from th
   const projectId = host.harness.core.threads.require(threadId).projectId!;
   await host.client.call('contacts.grant', { coreId: guestId, projectId });
   const asked = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<never[]>();
+  const release = Promise.withResolvers<Awaited<ReturnType<typeof host.harness.core.contacts.members.directory>>>();
   const directory = spyOn(host.harness.core.contacts.members, 'directory').mockImplementation(() => { asked.resolve(); return release.promise; });
-  cleanups.push(() => { release.resolve([]); directory.mockRestore(); });
+  cleanups.push(() => { release.resolve({ entries: [], unavailable: 0 }); directory.mockRestore(); });
   const body = JSON.stringify({ from: guestId, to: hostId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
   const signature = guest.harness.core.coordination.signature(Buffer.from(body)).toString('base64');
   const sealed = guest.harness.core.contacts.sealFor(hostId, pack(body, signature))!;
@@ -740,7 +740,7 @@ test('contacts boundary: a directory assembled before a reload is absent from th
   await asked.promise;
   host.policy.write({ network: { contacts: false } });
   await host.client.call('policy.get', {});
-  release.resolve([]);
+  release.resolve({ entries: [], unavailable: 0 });
   const response = await pending;
   const answer = JSON.parse(unpack(openResponse(await response.text(), sealed.responseKey, sealed.context)).body);
   expect(response.status).toBe(400);

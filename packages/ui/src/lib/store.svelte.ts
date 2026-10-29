@@ -495,6 +495,8 @@ export class Store {
   installProvider(...args: Parameters<Accounts['installProvider']>) { return this.#ctx.accounts.installProvider(...args); }
   cancelInstall(...args: Parameters<Accounts['cancelInstall']>) { return this.#ctx.accounts.cancelInstall(...args); }
   uninstallProvider(...args: Parameters<Accounts['uninstallProvider']>) { return this.#ctx.accounts.uninstallProvider(...args); }
+  addLocalProvider(...args: Parameters<Accounts['addLocalProvider']>) { return this.#ctx.accounts.addLocalProvider(...args); }
+  removeLocalProvider(...args: Parameters<Accounts['removeLocalProvider']>) { return this.#ctx.accounts.removeLocalProvider(...args); }
 
   // -------------------------------------------------------------------------
   // Projects and the draft: store/projects.svelte.ts

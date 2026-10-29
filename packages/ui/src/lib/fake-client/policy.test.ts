@@ -30,6 +30,18 @@ test('a first launch lists the denied provider off, and dictation refuses as the
   await expect(closed.client.call('speech.transcribe', { requestId: 'r1', revision: 0, audio: '' } as never)).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { policy: 'dictation' } });
 });
 
+test('adding a local ACP provider applies policy before returning, notifying or creating its default account', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0, policy: fakePolicy({ providers: { allow: [] } }) });
+  const updated = vi.fn();
+  client.on('providers.updated', updated);
+  const result = await client.call('providers.addLocal', { name: 'Policy ACP', command: 'policy-agent', args: [], env: {} });
+  const blocked = { id: result.providerId, enabled: false, policy: { policy: 'providers.allow', file: '/etc/boite/policy.json' } };
+  expect(result.loaded.find(provider => provider.id === result.providerId)).toMatchObject(blocked);
+  expect(updated).toHaveBeenCalledExactlyOnceWith({ loaded: expect.arrayContaining([expect.objectContaining(blocked)]), rejected: [] });
+  expect((await client.call('accounts.list', {})).filter(account => account.providerId === result.providerId)).toEqual([]);
+  expect((await client.call('providers.list', {})).loaded).toEqual(result.loaded);
+});
+
 test('the address bar searches where the policy says, the default otherwise', () => {
   const search = policySearch(policyFixture('managed'));
   expect(search).toBe('https://search.example.com/?q={query}');

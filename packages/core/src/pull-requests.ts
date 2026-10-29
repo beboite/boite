@@ -52,12 +52,10 @@ export function parsePullRequests(text: string): PullRequest {
 }
 
 type PullRequestList = {
-  /** The newest pull request of each head branch, as gh lists them newest first. */
-  byHead: Map<string, NonNullable<PullRequest>>;
   /** Every pull request gh returned for each head branch, as gh wrote them: merge proofs read them. */
   heads: Map<string, unknown[]>;
   /** Each pull request as gh wrote it, by lowercase URL. */
-  urls: Map<string, unknown>;
+  urls: Map<string, Record<string, unknown>>;
   /** How many pull requests gh returned, before two of one branch collapse into one entry. */
   count: number;
 };
@@ -65,19 +63,42 @@ type PullRequestList = {
 /** A repository's pull requests by head branch, and how many gh returned. */
 export function parsePullRequestList(text: string): PullRequestList {
   const values = pullRequestArray(text);
-  const byHead = new Map<string, NonNullable<PullRequest>>();
   const heads = new Map<string, unknown[]>();
-  const urls = new Map<string, unknown>();
+  const urls = new Map<string, Record<string, unknown>>();
   for (const value of values) {
     const head = (value as { headRefName?: unknown } | null)?.headRefName;
     if (typeof head !== 'string' || head.length === 0) throw new Error('gh output must name each pull request\'s headRefName');
     const pr = toPullRequest(value);
-    if (!byHead.has(head)) byHead.set(head, pr);
     const all = heads.get(head);
     if (all) all.push(value); else heads.set(head, [value]);
-    urls.set(pr.url.toLowerCase(), value);
+    urls.set(pr.url.toLowerCase(), value as Record<string, unknown>);
   }
-  return { byHead, heads, urls, count: values.length };
+  return { heads, urls, count: values.length };
+}
+
+/** When GitHub last changed a pull request, NaN when gh did not say. */
+function updatedAt(value: unknown): number {
+  const at = (value as { updatedAt?: unknown } | null)?.updatedAt;
+  return typeof at === 'string' ? Date.parse(at) : NaN;
+}
+
+/**
+ * What a repository's pages have taught since its last gap. A page lists the
+ * pull requests GitHub changed last; when it reaches back past the newest
+ * change the previous page held, every change since then is in it, so an
+ * answer read before still holds unless the page replaced it.
+ */
+interface RepositoryIndex {
+  /** Counts gaps: an answer read before one is not recorded after it. */
+  epoch: number;
+  /** The newest change the pages held, null before a dated page. */
+  newest: number | null;
+  /** The epoch began with a page that held every pull request. */
+  whole: boolean;
+  /** Each pull request as last read, by lowercase URL. */
+  values: Map<string, Record<string, unknown>>;
+  /** Branches read on their own in this epoch: the pages carry every later change to them. */
+  branches: Set<string>;
 }
 
 /**
@@ -150,20 +171,37 @@ export interface MergedPrProof {
   mergedAt: string;
 }
 
+/** A remote URL's `host` and `owner/name`, HTTPS or SCP-style; null when it names neither. */
+function remoteIdentity(raw: string): { host: string; path: string } | null {
+  let hostname = '', path = '';
+  try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
+  catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
+  if (!hostname) return null;
+  return { host: hostname.toLowerCase(), path: path.replace(/^\//, '').replace(/\/+$/, '').replace(/\.git$/, '').replace(/\/+$/, '') };
+}
+
 export function githubRepository(remotes: string, host = process.env.GH_HOST ?? 'github.com'): string | null {
   const identities = new Set<string>();
   for (const line of remotes.split('\n')) {
     const raw = line.trim().split(/\s+/)[1];
-    if (!raw) continue;
-    let hostname = '', path = '';
-    try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
-    catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
-    if (hostname.toLowerCase() !== host.toLowerCase()) continue;
-    path = path.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '');
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(path)) return null;
-    identities.add(`${hostname.toLowerCase()}/${path.toLowerCase()}`);
+    const remote = raw ? remoteIdentity(raw) : null;
+    if (remote === null || remote.host !== host.toLowerCase()) continue;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(remote.path)) return null;
+    identities.add(`${remote.host}/${remote.path.toLowerCase()}`);
   }
   return identities.size === 1 ? [...identities][0]! : null;
+}
+
+/** Every repository `git remote -v` fetches from, as `host/owner/name` in lowercase, whatever the host. */
+export function fetchedRepositories(remotes: string): Set<string> {
+  const repositories = new Set<string>();
+  for (const line of remotes.split('\n')) {
+    if (!/\(fetch\)\s*$/.test(line)) continue;
+    const raw = line.trim().split(/\s+/)[1];
+    const remote = raw ? remoteIdentity(raw) : null;
+    if (remote !== null && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(remote.path)) repositories.add(`${remote.host}/${remote.path}`.toLowerCase());
+  }
+  return repositories;
 }
 
 /**
@@ -187,14 +225,22 @@ export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, '
   return { ...expected, number: pr.number, url: pr.url, mergedAt: item.mergedAt };
 }
 
-/** Pull requests one `gh pr list` call brings back for a repository. */
-export const LIST_LIMIT = 200;
+/** Pull requests one page brings back: GitHub's GraphQL maximum, for one rate-limit point. */
+export const LIST_LIMIT = 100;
+/** Pull requests one branch's own `gh pr list --head` brings back. */
+const HEAD_LIMIT = 200;
+/** GitHub may show a change a little after its updatedAt: a page must reach this far before the previous page's newest change. */
+const PAGE_OVERLAP_MS = 5 * 60_000;
+/** Past this many pull requests learned since the last gap, the index starts over. */
+const INDEX_LIMIT = 5_000;
 const LIST_TTL_MS = 15_000;
 /** A failed read is kept this long, whatever the success TTL of its cache. */
 const FAILURE_TTL_MS = LIST_TTL_MS;
 const PROOF_TTL_MS = 60_000;
 const PROOF_FIELDS = 'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt';
-const DETAIL_FIELDS = `${PROOF_FIELDS},title,isDraft,baseRefName`;
+const DETAIL_FIELDS = `${PROOF_FIELDS},title,isDraft,baseRefName,updatedAt`;
+/** The repository's pull requests changed last, with every field a badge, a link or a proof reads. */
+const PAGE_QUERY = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { pullRequests(first: ${LIST_LIMIT}, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { number url state updatedAt title isDraft baseRefName headRefName headRefOid isCrossRepository mergedAt headRepository { name } headRepositoryOwner { login } } } } }`;
 /** A repository's remotes rarely change: they are read once per five minutes. */
 const REMOTES_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
@@ -218,20 +264,25 @@ function unavailable(error: unknown): boolean {
 }
 
 /**
- * The pull request of each thread's branch, answered from one `gh pr list` per
- * repository: forty threads in one checkout, or in forty worktrees of it,
- * make one gh call, not forty. Every process runs two at a time at most, and
- * stops after ten seconds. Results and failures are kept fifteen seconds; `refresh`
- * drops what is kept for that repository, tries a missing gh again and
- * reports why gh cannot answer.
+ * The pull request of each thread's branch and of each link, answered from one
+ * page per repository: the pull requests GitHub changed last. Forty threads in
+ * one checkout, or in forty worktrees of it, make one gh call a round, not
+ * forty. A branch or a link the pages never showed is read once on its own;
+ * after that the pages carry its changes, until a page no longer reaches back
+ * to the previous one. Every process runs two at a time at most, and stops
+ * after ten seconds. Pages and failures are kept fifteen seconds; `refresh`
+ * reads the page and the branch again, tries a missing gh again and reports
+ * why gh cannot answer.
  */
 export class PullRequests {
   #proofs = new Map<string, Shared<MergedPrProof | null>>();
   readonly reviews = new PullRequestReviews((threadId, args) => { const thread = this.core.threads.require(threadId); return this.#run(thread, thread.cwd, 'gh', args); });
   /** `git remote -v` as git wrote it, per repository: badges and merge proofs both read it. */
   #remotes = new Map<string, Shared<string>>();
-  #lists = new Map<string, Shared<PullRequestList>>();
-  #branches = new Map<string, Shared<PullRequest>>();
+  /** The newest page per GitHub repository (`host/owner/name`), and what it read. */
+  #pages = new Map<string, Shared<{ index: RepositoryIndex; page: PullRequestList }>>();
+  #indexes = new Map<string, RepositoryIndex>();
+  #branches = new Map<string, Shared<unknown[]>>();
   #details = new Map<string, Shared<Record<string, unknown>>>();
   /** Automatic discovery pauses for a minute after gh is missing or signed out. */
   #ghUnavailableUntil = 0;
@@ -259,7 +310,7 @@ export class PullRequests {
     const address = pullRequestAddress(input);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
     if (address.host !== host) throw refused(`pull request host must be ${host}`);
-    const value = await this.#detail(this.core.threads.require(threadId), address.url, refresh);
+    const value = await this.#linked(this.core.threads.require(threadId), address, refresh);
     const basic = toPullRequest(value);
     if (pullRequestAddress(basic.url).url.toLowerCase() !== address.url.toLowerCase()) throw refused('gh returned a different pull request URL');
     if (typeof value.title !== 'string' || typeof value.headRefName !== 'string' || typeof value.baseRefName !== 'string') throw refused('gh returned incomplete pull request metadata');
@@ -268,6 +319,24 @@ export class PullRequests {
     return { ...address, title: value.title.slice(0, 500), state: basic.state, draft: value.isDraft === true,
       head: value.headRefName.slice(0, 500), base: value.baseRefName.slice(0, 500),
       headRepository: owner?.login && repository?.name ? `${owner.login}/${repository.name}` : '', checkedAt: Date.now() };
+  }
+
+  /**
+   * A linked pull request as the repository's page last showed it. One the
+   * pages never showed, or a refresh, is read on its own and remembered.
+   */
+  async #linked(thread: Pick<ThreadSummary, 'id' | 'cwd'>, address: ReturnType<typeof pullRequestAddress>, refresh: boolean): Promise<Record<string, unknown>> {
+    const target = `${address.host}/${address.repository}`.toLowerCase();
+    if (!refresh) {
+      try {
+        const known = (await this.#page(thread, existsSync(thread.cwd) ? thread.cwd : this.core.dataDir, target)).index.values.get(address.url.toLowerCase());
+        if (known) return known;
+      } catch { /* The page is a shortcut: the pull request's own read still answers. */ }
+    }
+    const epoch = this.#indexes.get(target)?.epoch;
+    const value = await this.#detail(thread, address.url, refresh);
+    if (epoch !== undefined) this.#record(target, epoch, [value]);
+    return value;
   }
 
   #detail(thread: Pick<ThreadSummary, 'id' | 'cwd'>, url: string, refresh = false, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -315,7 +384,7 @@ export class PullRequests {
 
   /**
    * The cheapest evidence comes first. The repository's remotes and its one
-   * pull request list are shared with the sidebar's badges, so a thread whose
+   * page are shared with the sidebar's badges, so a thread whose
    * branch has no merged pull request costs no process of its own. The
    * checkout's status walk runs only when a merged pull request could match.
    */
@@ -356,8 +425,8 @@ export class PullRequests {
       }
     }
     if (!head) return linkedProof;
-    const list = await this.#gh(false, () => this.#list(thread, thread.cwd, checkoutRepository, repository, signal));
-    if (list === null) return null;
+    const list = (await this.#gh(false, () => this.#page(thread, thread.cwd, repository, false, signal)))?.page;
+    if (!list) return null;
     const complete = list.count < LIST_LIMIT;
     const listed = localCandidates(list.heads.get(head) ?? []);
     // A reused checkout can have new work even when its last linked PR merged.
@@ -374,9 +443,9 @@ export class PullRequests {
     // A full page may hold only the newest pull request of a reused branch.
     const branch = clean.branch;
     return this.#gh(false, () => this.#shared(this.#proofs, `${checkoutRepository}\n${repository}\n${branch}\n${clean.sha}\n${linkedProof?.url ?? ''}`, PROOF_TTL_MS, async ownerSignal => {
-      const values = pullRequestArray(await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal));
+      const values = pullRequestArray(await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', String(HEAD_LIMIT), '--json', PROOF_FIELDS], ownerSignal));
       // Filtering foreign forks cannot turn a truncated page into complete evidence.
-      if (values.length >= LIST_LIMIT) return null;
+      if (values.length >= HEAD_LIMIT) return null;
       const local = localCandidates(values);
       if (local.some(value => toPullRequest(value).state === 'OPEN')) return null;
       return linkedProof ?? parseMergedPrProof(JSON.stringify(local), expected);
@@ -388,14 +457,73 @@ export class PullRequests {
     return this.#shared(this.#remotes, repository, REMOTES_TTL_MS, ownerSignal => this.#run(thread, cwd, 'git', ['remote', '-v'], ownerSignal), signal);
   }
 
-  /** The repository's newest pull requests, read once per fifteen seconds for badges and merge proofs alike. */
-  #list(thread: Pick<ThreadSummary, 'id'>, cwd: string, repository: string, target: string, signal?: AbortSignal): Promise<PullRequestList> {
-    return this.#shared(this.#lists, `${repository}\n${target}`, LIST_TTL_MS, async ownerSignal => {
-      const list = parsePullRequestList(await this.#run(thread, cwd, 'gh', ['pr', 'list', '--repo', target, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal));
+  /**
+   * The repository's pull requests GitHub changed last, read once per fifteen
+   * seconds for badges, links and merge proofs alike, and learned into its index.
+   * `page` is this read alone: merge proofs take nothing older as evidence.
+   */
+  #page(thread: Pick<ThreadSummary, 'id'>, cwd: string, target: string, refresh = false, signal?: AbortSignal): Promise<{ index: RepositoryIndex; page: PullRequestList }> {
+    if (refresh) this.#pages.delete(target);
+    return this.#shared(this.#pages, target, LIST_TTL_MS, async ownerSignal => {
+      const [host, owner, name] = target.split('/');
+      const raw = await this.#run(thread, cwd, 'gh', ['api', 'graphql', '--hostname', host!, '-f', `query=${PAGE_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '--jq', '.data.repository.pullRequests.nodes'], ownerSignal);
+      const page = parsePullRequestList(raw);
       const prefix = `https://${target}/pull/`;
-      if (![...list.urls.keys()].every(url => url.startsWith(prefix))) throw refused(`gh pull request URLs must belong to ${target}`);
-      return list;
+      if (![...page.urls.keys()].every(url => url.startsWith(prefix))) throw refused(`gh pull request URLs must belong to ${target}`);
+      return { index: this.#learn(target, page), page };
     }, signal);
+  }
+
+  /** A page joins the index when it reaches back past the previous page's newest change; otherwise the index starts over. */
+  #learn(target: string, page: PullRequestList): RepositoryIndex {
+    let index = this.#indexes.get(target);
+    if (!index) {
+      index = { epoch: 0, newest: null, whole: false, values: new Map(), branches: new Set() };
+      this.#indexes.set(target, index);
+      if (this.#indexes.size > 500) this.#indexes.delete(this.#indexes.keys().next().value!);
+    }
+    const values = [...page.urls.values()];
+    const times = values.map(updatedAt);
+    const dated = times.every(Number.isFinite);
+    const complete = page.count < LIST_LIMIT;
+    const joined = complete || (dated && index.newest !== null && Math.min(...times) < index.newest - PAGE_OVERLAP_MS);
+    if (!joined || index.values.size + values.length > INDEX_LIMIT) {
+      index.epoch++;
+      index.values.clear();
+      index.branches.clear();
+      for (const key of this.#branches.keys()) if (key.startsWith(`${target}\n`)) this.#branches.delete(key);
+      index.whole = false;
+      index.newest = null;
+    }
+    index.whole ||= complete;
+    if (dated && values.length) index.newest = Math.max(index.newest ?? -Infinity, ...times);
+    else if (!dated) index.newest = null;
+    this.#merge(index, values);
+    return index;
+  }
+
+  /** A pull request read on its own, and the branch it answered for, belong to the epoch that was current when the read began. */
+  #record(target: string, epoch: number, values: unknown[], branch?: string): void {
+    const index = this.#indexes.get(target);
+    if (!index || index.epoch !== epoch) return;
+    this.#merge(index, values);
+    if (branch !== undefined) index.branches.add(branch);
+  }
+
+  /** The newer of two reads of one pull request wins; an undated one replaces nothing dated. */
+  #merge(index: RepositoryIndex, values: unknown[]): void {
+    for (const value of values) {
+      const key = toPullRequest(value).url.toLowerCase();
+      const held = index.values.get(key);
+      const heldAt = held === undefined ? NaN : updatedAt(held);
+      if (Number.isFinite(heldAt) && !(updatedAt(value) >= heldAt)) continue;
+      index.values.set(key, value as Record<string, unknown>);
+    }
+  }
+
+  /** The index's pull requests of one branch, newest first. */
+  #onBranch(index: RepositoryIndex, branch: string): unknown[] {
+    return [...index.values.values()].filter(value => value.headRefName === branch).sort((a, b) => Number(b.number) - Number(a.number));
   }
 
   async #read(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
@@ -442,24 +570,29 @@ export class PullRequests {
     if (refresh) {
       this.#ghUnavailableUntil = 0;
       this.#remotes.delete(repository);
-      for (const key of this.#lists.keys()) if (key.startsWith(`${repository}\n`)) this.#lists.delete(key);
-      for (const key of this.#branches.keys()) if (key.startsWith(`${repository}\n`)) this.#branches.delete(key);
     }
     // Forgejo, GitLab and local repositories have no GitHub PR to query.
     const target = discoveryRepository(await this.#remote(thread, root, repository));
     if (!target || Date.now() < this.#ghUnavailableUntil) return null;
-    const list = await this.#gh(refresh, () => this.#list(thread, root, repository, target));
-    if (list === null) return null;
-    const found = displayCandidate(list.heads.get(branch) ?? []);
-    // A full page may have left an older pull request out: that branch alone is asked for.
-    if (found || list.count < LIST_LIMIT) return found;
-    return this.#gh(refresh, () => this.#shared(this.#branches, `${repository}\n${target}\n${branch}`, LIST_TTL_MS, async ownerSignal => {
-      const raw = await this.#run(thread, root, 'gh', ['pr', 'list', '--repo', target, '--head', branch, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', PROOF_FIELDS], ownerSignal);
+    const read = await this.#gh(refresh, () => this.#page(thread, root, target, refresh));
+    if (read === null) return null;
+    const { index } = read;
+    const found = displayCandidate(this.#onBranch(index, branch));
+    // The pages hold every change to a branch read on its own since the last gap,
+    // and every pull request when one page held them all. A branch the pages
+    // show answers from them; any other, and a refresh, is asked for alone.
+    if (index.whole || (!refresh && (found || index.branches.has(branch)))) return found;
+    const key = `${target}\n${branch}`;
+    if (refresh) this.#branches.delete(key);
+    const epoch = index.epoch;
+    const values = await this.#gh(refresh, () => this.#shared(this.#branches, key, LIST_TTL_MS, async ownerSignal => {
+      const raw = await this.#run(thread, root, 'gh', ['pr', 'list', '--repo', target, '--head', branch, '--state', 'all', '--limit', String(HEAD_LIMIT), '--json', DETAIL_FIELDS], ownerSignal);
       const values = pullRequestArray(raw);
-      const found = displayCandidate(values);
-      if (found && !found.url.toLowerCase().startsWith(`https://${target}/pull/`)) throw refused(`gh pull request URLs must belong to ${target}`);
-      return found;
+      if (!values.every(value => toPullRequest(value).url.toLowerCase().startsWith(`https://${target}/pull/`))) throw refused(`gh pull request URLs must belong to ${target}`);
+      this.#record(target, epoch, values, values.length < HEAD_LIMIT ? branch : undefined);
+      return values;
     }));
+    return values === null ? null : displayCandidate(values);
   }
 
   /**
