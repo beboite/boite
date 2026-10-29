@@ -1,16 +1,19 @@
 import { untrack } from 'svelte';
-import { APP_LANGUAGES, EXPERIMENT_IDS, previewReferencesError, type Attachment, type PreviewReference, type SentFrom } from '@boite/contracts';
+import { APP_LANGUAGES, ATTACHMENTS_TOTAL_MAX_BYTES, EXPERIMENT_IDS, previewReferencesError, type Attachment, type PreviewReference, type SentFrom } from '@boite/contracts';
 import type { Choice, Draft } from '../store.svelte';
 import type { Composer, OutboxRequest } from './composer.svelte';
 import { DRAFT_STASH_KEY } from '../prefs';
 import type { StoreContext } from './context';
-import { strings } from '../strings';
+import { fill, strings } from '../strings';
+import { bytes } from '../format';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
 import { followRead, isLoading, loadedFrom, readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { keepSource } from '../attachments';
 import { settleIn } from '../composer-images';
 import { replaceInHistory } from '../composer-history';
 import { secureId } from '../secure-id';
+import { fitHeld } from '../turn-fit';
+import { attachedBytes } from '../attachments';
 
 export type Input = Composer['composerStates'][string];
 /**
@@ -348,6 +351,8 @@ export class Drafts {
    * after what it holds, so nothing typed is lost. A start already on its way,
    * or asked once (`start`), is not taken back: sent again under a new id, the
    * same words could make a second conversation beside one the core made.
+   * Their pictures together can pass the turn's byte total: they are fitted
+   * to it (`lib/turn-fit.ts`).
    */
   unqueue(id: string): void {
     const s = this.ctx.store;
@@ -360,6 +365,12 @@ export class Drafts {
     if (references.length) input.previewReferences = references;
     input.paused = false;
     this.persist();
+    if (attachedBytes(input.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return;
+    // Past the floor, or failed, the box says so like a paste does (`lib/composer-editing.ts`); either way it is saved.
+    void fitHeld(input).catch(() => false).then((fits) => {
+      this.persist();
+      if (!fits) s.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    });
   }
 
   /**
