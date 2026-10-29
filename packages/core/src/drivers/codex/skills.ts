@@ -68,21 +68,23 @@ type Input = ReturnType<typeof promptInput>;
  */
 export class CodexSkillCommands {
   private paths: ReadonlyMap<string, string> = new Map();
-  private first: Promise<void> = Promise.resolve();
+  /** The newest list asked for: an older answer arriving after it is dropped. */
+  private latest: Promise<void> = Promise.resolve();
+  private generation = 0;
 
   /** `rpc` is the process the answer must still belong to when it arrives. */
   constructor(private readonly current: () => CodexRpc | null) { }
 
-  opened(rpc: CodexRpc, ctx: SessionContext): void { this.first = this.list(rpc, ctx, false); }
+  opened(rpc: CodexRpc, ctx: SessionContext): void { this.latest = this.list(rpc, ctx, false); }
 
   changed(ctx: SessionContext | null): void {
     const rpc = this.current();
-    if (rpc !== null && ctx !== null) void this.list(rpc, ctx, true);
+    if (rpc !== null && ctx !== null) this.latest = this.list(rpc, ctx, true);
   }
 
-  /** A turn's input: a prompt that opens on `/name` waits for the first list. */
+  /** A turn's input: a prompt that opens on `/name` waits for the newest list. */
   async turn(prompt: string): Promise<Input> {
-    if (LEADING.test(prompt)) await this.first;
+    if (LEADING.test(prompt)) await this.latest;
     return promptInput(prompt, this.paths);
   }
 
@@ -90,9 +92,10 @@ export class CodexSkillCommands {
   steer(prompt: string): Input { return promptInput(prompt, this.paths); }
 
   private async list(rpc: CodexRpc, ctx: SessionContext, forceReload: boolean): Promise<void> {
+    const generation = ++this.generation;
     try {
       const listed = await rpc.request<CodexSkillsListed>('skills/list', { cwds: [ctx.thread.cwd], ...(forceReload ? { forceReload } : {}) }, { timeoutMs: LIST_MS });
-      if (this.current() !== rpc) return;
+      if (this.current() !== rpc || generation !== this.generation) return;
       const { commands, paths } = skillsOf(listed);
       this.paths = paths;
       ctx.commands(commands);

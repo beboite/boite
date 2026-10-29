@@ -410,10 +410,11 @@ once per process, right after it comes up, with the `get_commands` RPC
 command. Codex has no command listing, so its skills stand in for one: the
 driver asks `skills/list` for the thread's folder once per process and again
 on `skills/changed`, and lists the enabled skills whose name is one command
-token, the first of a name winning. A prompt that opens on `/name` of a listed
-skill waits up to 5 s for that first list, then goes to `turn/start` (or
-`turn/steer`) the way Codex's own composer sends a skill: the text with
-`$name` in place of `/name`, plus a `{ type: 'skill', name, path }` item. A
+token, the first of a name winning; an answer older than the newest request is
+dropped. A turn that opens on `/name` waits up to 5 s for the newest list; a
+steer goes out at once with the skills known by then. Either way a listed
+skill goes the way Codex's own composer sends one: the text with `$name` in
+place of `/name`, plus a `{ type: 'skill', name, path }` item. A
 Codex without `skills/list` is one log line and an empty menu. `muse.ts`
 reads no commands from Muse's session protocol.
 
