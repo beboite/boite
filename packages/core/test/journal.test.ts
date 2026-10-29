@@ -569,8 +569,9 @@ test('single-turn reads and the session sum pick what a scan of every turn picke
       scanned.costUsd += turn.usage.costUsdEquivalent ?? 0;
       scanned.tokens += turn.usage.inputTokens + turn.usage.outputTokens + turn.usage.cacheReadTokens + turn.usage.cacheWriteTokens;
     }
-    const summed = journal.sessionUsage('thr_many', generation, except);
-    expect(summed.tokens).toBe(scanned.tokens);
-    expect(summed.costUsd).toBeCloseTo(scanned.costUsd, 12);
+    const { reported, groups } = journal.sessionUsage('thr_many', generation, except);
+    expect(reported).toBeNull();
+    expect(groups.reduce((sum, group) => sum + group.input_tokens + group.output_tokens + group.cache_read_tokens + group.cache_write_tokens, 0)).toBe(scanned.tokens);
+    expect(groups.reduce((sum, group) => sum + (group.cost ?? 0), 0)).toBeCloseTo(scanned.costUsd, 12);
   }
 });

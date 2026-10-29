@@ -1,5 +1,5 @@
 import type { Message, MessagePart, Thread, ToolDocument } from '@boite/contracts';
-import { whenIdle } from './prefetch';
+import { whenIdle } from './idle';
 
 /** At most this many bytes of text and image data per kept timeline, counted as UTF-16. */
 export const READING_CACHE_BYTES = 4 * 1024 * 1024;

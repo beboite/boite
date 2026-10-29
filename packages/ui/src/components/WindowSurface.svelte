@@ -7,6 +7,7 @@
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, frameQuality, nextPollDelay, type PollState } from '../lib/remote-browser-view';
   import { liveViews, machineName } from '../lib/live-view.svelte';
+  import { SnapshotFeed } from '../lib/snapshot-feed';
   /**
    * The desktop window an agent opened in this conversation with
    * `boite window watch` (docs/windows.md), read-only. Like the Device panel,
@@ -70,17 +71,17 @@
 
   onMount(() => {
     const client = store.client;
-    const off = client?.on('windows.changed', event => {
-      if (event.threadId !== threadId) return;
-      watch = event.watch; loaded = true;
-    });
-    void client?.call('windows.list', { threadId }).then(result => { if (!loaded) watch = result.watch; loaded = true; }, cause => { error = errorText(cause); loaded = true; });
+    // A change that lands while the list is out is applied after it, never under it.
+    const changes = new SnapshotFeed<WindowWatch | null>(next => { watch = next; loaded = true; });
+    const off = client?.on('windows.changed', event => { if (event.threadId === threadId) changes.push(event.watch); });
+    if (client) void changes.read(() => client.call('windows.list', { threadId }), result => { watch = result.watch; loaded = true; })
+      .catch(cause => { error = errorText(cause); loaded = true; });
     const visibility = () => { if (document.hidden) stop(); else resume(); };
     const back = () => { if (!document.hidden && !pending) resume(); };
     document.addEventListener('visibilitychange', visibility);
     for (const name of ['pageshow', 'online', 'focus'] as const) window.addEventListener(name, back);
     return () => {
-      alive = false; stop(); off?.();
+      alive = false; stop(); off?.(); changes.dispose();
       document.removeEventListener('visibilitychange', visibility);
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };

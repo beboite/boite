@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -109,6 +109,26 @@ test.each(['search', 'read'] as const)('%s withholds a deferred reply from a rev
     expect(outcome.value).toBeNull();
     expect(outcome.error?.message).toContain('machine permission revoked');
   }
+});
+
+test('directory withholds a peer that answered and was revoked while the routed lookup was pending', async () => {
+  const source = await startTestCore(); cores.push(source);
+  const { threadId } = await echoThread(source, await source.connect());
+  const peer = deferredPeer('remote'); useDeferredPeers(source, [peer]);
+  peer.released.resolve();
+  const routed = Promise.withResolvers<void>(), asked = Promise.withResolvers<void>();
+  const mailboxes = spyOn(source.core.coordination.mailboxes, 'directory').mockImplementation(async () => {
+    asked.resolve();
+    await routed.promise;
+    return { entries: [], unavailable: [] };
+  });
+  try {
+    const pending = source.core.coordination.directory(threadId);
+    await asked.promise;
+    source.core.coordination.untrust(peer.card.coreId);
+    routed.resolve();
+    expect(await pending).toEqual({ agents: [], unavailable: [peer.card.name] });
+  } finally { mailboxes.mockRestore(); }
 });
 
 test('pausing delivery and editing resources preserves pending lookups that remain authorized', async () => {

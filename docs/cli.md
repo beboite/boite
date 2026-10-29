@@ -6,6 +6,18 @@ RPC result for scripts. The command loads on demand and works with every driver,
 including providers without an MCP client. The CLI also exposes a bounded set of thread-scoped tools through
 `boite mcp` for providers with an MCP client.
 
+The global flags (`--json`, `--thread`, `--data-dir`, `--core`, `--channel`)
+are read anywhere until a command's own text begins. The table `OWNED` in
+`packages/core/src/cli-args.ts` names the commands that parse their own flags
+and where their text starts: after `boite browser fill <target>`,
+`browser run <script>` (`-` for stdin), `browser recipe run <name>`,
+`browser recipe save <name> <file|->`, `browser eval` or `secret ... --`,
+every word is the command's, so `boite browser fill '#q' --json` types
+`--json`. Before that text, `--` ends Boite's flags and hands every later word
+to the command: `boite task add -- --json` adds the task `--json`, and
+`boite browser run -- batch.js --core x` passes `--core x` to the script.
+`secret run|pipe` reads its own `--`, before the child command.
+
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
 add their commands and current limits; workflow syntax is loaded on demand
@@ -341,7 +353,7 @@ three variables and one PATH entry, put there by
 | `PATH`             | the directory holding `boite` and `boite.cmd` (and `boite.exe` in an installed Windows app), first |
 
 The CLI says hello with that token and becomes the `agent` principal of that
-one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
+one thread. `AGENT_METHODS` in `packages/contracts/src/access.ts` lists its allowed
 calls and reasons. Each call is bound to that authenticated thread; delegation
 and coordination additionally check relationships and authorized contacts.
 An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused;
@@ -457,6 +469,7 @@ boite bot routines
 boite bot schedule <json>
 boite bot unschedule <routine-id>
 boite bot watch|unwatch <thread-id>
+boite bot event <bot> [--key <key>] <text>
 boite delegate models|profiles|list
 boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [context flags]
 boite delegate send <thread-id> <text>
@@ -759,12 +772,16 @@ MCP tools `boite_settings` and `boite_settings_request` do the same.
 `autoMemory` (the memory pass), `eventWakes` (automatic project and desk wakes),
 `subagents` and `dailyBudget` (dollars a day,
 or `null` for none). It prints the bot's name, each value and, for status,
-projects, models and efforts, the choices; the listing cuts long instructions
-to their start, one key or `--json` prints them whole. `--bot <name or id>`
+projects, models and efforts, the choices; a model reads `<provider>/<model>`,
+and its choices span every provider signed in on the machine. The listing cuts
+long instructions and choice lists to their start, one key or `--json` prints
+them whole. `--bot <name or id>`
 names the bot; in a bot's own conversation it defaults to that bot.
-`eventWakes` defaults to `true`. Setting it to `false` keeps the bot active for
-user messages and routines while project and desk facts wait durably for the
-next admitted routine. Permission checks run again before delivery. Facts are
+`eventWakes` defaults to `false`: a bot wakes at once only for threads it
+started, was entrusted or watches, and for outside events, while the other
+project and desk facts wait durably for the next admitted routine. Setting it
+to `true` wakes the bot for every fact. User messages and routines run either
+way. Permission checks run again before delivery. Facts are
 journaled with that routine once, including after a restart; failed admission
 keeps them queued. Creation and instruction-change wakes keep their behavior.
 
@@ -775,9 +792,12 @@ reads a file; `projects` takes `+name -name` edits or a whole list
 (`Notes,Other`, or JSON), resolved by name or id and stored as ids; a project
 of another machine of the group is `<machine>/<name>` (`+skoll/Hearthfall`),
 offered once that machine lets bots in (`groupBots`) and stored as
-`<core-id>/<project-id>`; the other
+`<core-id>/<project-id>`; `model` takes `<provider>/<model>`
+(`codex/gpt-6.1-sol`), or a model id of the bot's own provider; the other
 keys read their value as `settings request` does. The refusals are the same, plus an unknown or ambiguous bot
-(the refusal lists them) and a model the bot's policy does not allow.
+(the refusal lists them) and a model on an account the owner granted only to
+other bots. A model outside the bot's allowed routes joins them when the card
+is applied ([bots](bots.md#asking-to-change-a-bots-settings)).
 
 The card names the bot and the change; for projects, each project added or
 removed has a tick the owner can clear before Apply. Apply calls
@@ -817,8 +837,17 @@ MEMORY.md and its path; `bot remember <fact>` adds a dated line to it. `bot
 routines` lists its routines, `bot schedule <json>` saves one (`name`,
 `prompt`, `schedule`, with `id` to edit one and `enabled`), `bot unschedule
 <routine-id>` removes one. `bot watch|unwatch <thread-id>` puts a thread of
-its projects on its desk or takes one off. Use `--json` to
+its projects on its desk or takes one off; a watched thread wakes the bot at
+once, one it only wrote to waits for its routines. Use `--json` to
 preserve the structured result.
+
+`bot event <bot> [--key <key>] <text>` is the exception: it is for a service
+outside Boite, never a bot's thread, and wakes the named bot (id or name) with
+an outside event ([bots](bots.md#outside-events)). On the host it reads the
+owner token from `core.json`; from another host it takes `--core <url>` with a
+paired device's session token in `BOITE_TOKEN`. A second event with the same
+key replaces one the bot has not read yet. Pair one device per service, so
+the bot's prompt names it and revoking it cuts that service alone.
 Pass `--request-id <stable-id>` when retrying a send after a lost response. The
 flag covers `threads send`, `threads reply`, `delegate spawn` and `delegate
 send`: a retry with the id of a call that already landed returns that letter

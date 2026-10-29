@@ -1,6 +1,8 @@
-import type { Attachment } from '@boite/contracts';
+import type { Attachment, PreviewReference } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import type { ComposerState } from './composer-queue';
+import { tileKey } from './draft-attachments';
+import { editPreviewMentions } from './preview-mentions';
 import { fill, strings } from './strings';
 
 const pendingImageSends = new WeakMap<ComposerState, { text: string; inserted: boolean; edited: boolean }>();
@@ -39,7 +41,7 @@ export function imageTextParts(text: string, attachments: Attachment[]) {
   return parts;
 }
 
-/** Insert only after the file was accepted, into the draft that received it. */
+/** At the caret of the draft that took the picture, as it is taken: its tile loads while the typing goes on. */
 export function insertImageReference(store: Store, key: string) {
   const state = store.composerStates[key];
   if (!state) return;
@@ -68,7 +70,64 @@ export function removeImageReferences(store: Store, key: string, at: number) {
     const end = match.index + match[0].length;
     const replacement = index === number ? '' : imageLabel(index - 1);
     store.editComposerText(key, state.text.slice(0, match.index) + replacement + state.text.slice(end), false, { start: match.index, end });
+    // The caret keeps its place in the words around it, while the user may still be typing.
+    const shift = (at: number) => at >= end ? at + replacement.length - (end - match.index) : Math.min(at, match.index + replacement.length);
+    if (state.selection) state.selection = { start: shift(state.selection.start), end: shift(state.selection.end) };
   }
+  if (state.selection) state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
+}
+
+/**
+ * What a Send waiting on a file read was pressed on: its words without their
+ * `[Image N]`, and each file as the tile it showed. A file that lands keeps
+ * its tile, even a picture that went as a file and took its reference with
+ * it; a sync that swaps the box brings other words or other files.
+ */
+export interface SendShape { words: string; tiles: Attachment[] }
+
+export function sendShape(text: string, attachments: Attachment[]): SendShape {
+  return { words: text.replace(/\[Image [1-9]\d*\]/g, ''), tiles: attachments.map(tileKey) };
+}
+
+export function sameSend(pressed: SendShape, now: SendShape): boolean {
+  return pressed.words === now.words && pressed.tiles.length === now.tiles.length && pressed.tiles.every((tile, at) => tile === now.tiles[at]);
+}
+
+/** A box nobody types in: a step of the undo history, or a draft set aside. */
+export interface QuietBox {
+  text: string;
+  attachments: Attachment[];
+  previewReferences?: PreviewReference[];
+  selection?: { start: number; end: number };
+}
+
+/**
+ * A file still being read settled while `box` held its placeholder: `ready`
+ * takes its place, or nothing does. A picture that did not stay one leaves
+ * the text the way `removeImageReferences` leaves the live box, its
+ * reference gone, those above it renumbered, mentions and caret on their
+ * words. The index it was at, or -1 when `box` never held it.
+ */
+export function settleIn(box: QuietBox, placeholder: Attachment, ready: Attachment | null): number {
+  const at = box.attachments.indexOf(placeholder);
+  if (at < 0) return -1;
+  if (placeholder.kind === 'image' && ready?.kind !== 'image') {
+    const images = box.attachments.filter(item => item.kind === 'image');
+    const number = images.indexOf(placeholder) + 1;
+    for (const match of [...box.text.matchAll(/\[Image ([1-9]\d*)\]/g)].reverse()) {
+      const index = Number(match[1]);
+      if (index < number || index > images.length) continue;
+      const start = match.index, end = start + match[0].length;
+      const replacement = index === number ? '' : imageLabel(index - 1);
+      const text = box.text.slice(0, start) + replacement + box.text.slice(end);
+      if (box.previewReferences) box.previewReferences = editPreviewMentions(box.text, text, box.previewReferences, { start, end });
+      const shift = (at: number) => at >= end ? at + replacement.length - (end - start) : Math.min(at, start + replacement.length);
+      if (box.selection) box.selection = { start: shift(box.selection.start), end: shift(box.selection.end) };
+      box.text = text;
+    }
+  }
+  box.attachments = ready ? box.attachments.map((item, index) => index === at ? ready : item) : box.attachments.filter((_, index) => index !== at);
+  return at;
 }
 
 /** True when `edit` (a range of `text`) reaches into an image reference: removing it is a step of its own. */

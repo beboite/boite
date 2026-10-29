@@ -3,9 +3,9 @@ import type { ThreadId, TokenRates, Usage, UsageHistory, UsageHistoryRow, UsageH
 /**
  * The ledger `?fake=1` answers `usage.history` from: about a hundred days of
  * several providers, with a weekday rhythm, derived from the calendar day so a
- * reload draws the same page. It follows the core's contract: input excludes
- * the cache reads, a model with public rates is priced at them, and a model
- * without rates or a reported cost has a null cost.
+ * reload draws the same page. It follows the core's contract: the four token
+ * buckets are disjoint, a model with public rates is priced at them, and a
+ * model without rates or a reported cost has a null cost.
  */
 
 /** A turn the fake itself finished during this session. */
@@ -37,6 +37,8 @@ interface Profile {
   idle: number;
   /** Tokens per turn: input without cache, output, cache read, cache write. */
   tokens: [number, number, number, number];
+  /** Its turns write the one-hour cache, as Claude Code does. */
+  hourCache?: boolean;
   /** The threads its turns land in, most recent first. */
   threads: { id: ThreadId; title: string }[];
 }
@@ -53,6 +55,7 @@ const PROFILES: Profile[] = [
     ],
     perDay: 42, since: 104, idle: 0.03,
     tokens: [2_600, 1_800, 61_000, 7_200],
+    hourCache: true,
     threads: [
       { id: 't-trace', title: 'Finish the trace tab' },
       { id: 'u-claude-panel', title: 'Right panel with changes and files' },
@@ -146,6 +149,8 @@ function addUsage(into: Usage, from: Usage): void {
   into.outputTokens += from.outputTokens;
   into.cacheReadTokens += from.cacheReadTokens;
   into.cacheWriteTokens += from.cacheWriteTokens;
+  const hour = (into.cacheWriteHourTokens ?? 0) + (from.cacheWriteHourTokens ?? 0);
+  if (hour > 0) into.cacheWriteHourTokens = hour;
   if (from.costUsdEquivalent !== null) into.costUsdEquivalent = (into.costUsdEquivalent ?? 0) + from.costUsdEquivalent;
 }
 
@@ -193,6 +198,7 @@ function seededDay(day: Date, today: Date, now: number): Group[] {
         outputTokens: output,
         cacheReadTokens: cacheRead,
         cacheWriteTokens: cacheWrite,
+        ...(profile.hourCache && cacheWrite > 0 ? { cacheWriteHourTokens: cacheWrite } : {}),
         costUsdEquivalent: rates === null ? null : (input * rates.input + output * rates.output + cacheRead * rates.cacheRead + cacheWrite * rates.cacheWrite) / 1_000_000,
       };
       groups.push({

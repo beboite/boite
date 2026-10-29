@@ -95,7 +95,9 @@ export class SharedAccess {
     if (record) this.live(record);
     const thread = this.core.threads.require(threadId);
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || !this.execution.support(protocol, thread.providerId, thread.permissionMode).supported) this.denyTool(threadId);
+    // Mail outside a shared project holds a native turn even beside a binding,
+    // until the owner trusts that history (`threads.trustContactHistory`).
+    if (protocol === 'echo' ? thread.permissionMode !== 'default' : !record || letterScope(this.core, threadId).legacy || !this.execution.support(protocol, thread.providerId, thread.permissionMode).supported) this.denyTool(threadId);
   }
   contextThread(thread: ThreadSummary): ThreadSummary { return this.protected(thread.id) ? {...thread, contextMode: {...TOOL_FREE_CONTEXT}} : thread; }
   assertScope(threadId: string, sharedProjectId: string): void {

@@ -59,7 +59,7 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
-  /** Antigravity's `start_subagent`, or an MCP tool of that title, once an update said which. */
+  /** Antigravity's `invoke_subagent`, or an MCP tool of that title, once an update said which. */
   subagent: 'subagent' | 'mcp' | null;
 }
 

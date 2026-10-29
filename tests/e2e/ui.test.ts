@@ -404,7 +404,7 @@ test(
         }, 'image/png'));
       })()`,
     );
-    await page.waitFor(`document.querySelectorAll('${testid('composer-attachment')}').length === 1`, 10_000);
+    await page.waitFor(`document.querySelectorAll('${testid('composer-attachment')}:not([data-loading])').length === 1`, 10_000);
     await page.screenshot(ATTACHMENT_SCREENSHOT);
 
     await page.type(testid('composer-input'), 'what is this square');

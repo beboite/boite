@@ -11,6 +11,7 @@
 import type { FirewallStatus, NetworkCategory } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { processPlatform } from './platform/index.ts';
+import { runCommand } from './run-command.ts';
 import { FIREWALL_PROMPT_REFUSED } from './platform/types.ts';
 
 const QUERY_TIMEOUT_MS = 15_000;
@@ -129,23 +130,8 @@ export class FirewallAccess {
 
   private async run(command: string[], timeoutMs: number): Promise<{ code: number | null; stdout: string; timedOut: boolean }> {
     const [cmd, ...args] = command;
-    let child: ReturnType<Core['procs']['spawn']>;
-    try {
-      child = this.core.procs.spawn('system:firewall', cmd!, args, { agentRoot: false });
-    } catch {
-      return { code: null, stdout: '', timedOut: false };
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.proc.kill();
-    }, timeoutMs);
-    try {
-      const [stdout, , code] = await Promise.all([new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text(), child.exited]);
-      return { code, stdout, timedOut };
-    } finally {
-      clearTimeout(timer);
-    }
+    const run = await runCommand(this.core.procs, 'system:firewall', cmd!, args, timeoutMs);
+    return { code: run.code, stdout: new TextDecoder().decode(run.stdout), timedOut: run.timedOut };
   }
 }
 

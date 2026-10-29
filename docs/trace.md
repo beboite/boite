@@ -71,7 +71,9 @@ a job that still reports members remains held. A pid that could not join its
 job, or any pid of a thread with no job, is stopped by `taskkill /T /F` started
 asynchronously, so the core keeps serving while it starts. The child's own kill
 runs once taskkill ends, since `/T` needs the root alive to find the tree, and
-`killAll` at shutdown waits for both.
+`killAll` at shutdown waits for both. Taskkill gets only a pid the core
+spawned and has not seen exit, held as described under managed stops below; a
+process the core did not spawn or saw exit gets only its own kill.
 
 Independent cores in one process share the native drain, with an opaque job
 scope per registry and thread. Starts, exits, guards and controls use that same
@@ -559,7 +561,22 @@ required. The notice follows `memoryProtection` and stops nothing.
 Registered POSIX children start detached in their own process group.
 `resources.killTree` sends group SIGTERM, probes every 100 ms and sends SIGKILL
 two seconds later only if the group remains. It can reach members after the
-leader exits. A child that starts its own session escapes that group. Normal
+leader exits. A child that starts its own session escapes that group.
+Each spawn also returns its own `stop`, bound to that process: it stops the
+process and, on Linux and macOS, its group, even after the process exited and
+left the registry, and resolves once the stop ended and the process exited.
+It never reaches the scope's other processes. A short system command
+(`tailscale`, the firewall, device SDK tools) runs through `runCommand`
+(`packages/core/src/run-command.ts`): at its deadline it is stopped that way
+and its pipes are given half a second to close, so a helper holding them
+cannot hold the caller. On Windows the stop goes through `taskkill /T` only
+while the root has not exited: until Bun reports the exit it holds the
+process's handle, so the pid is still the root's. In that same tick the
+backend opens a handle of its own on the root and keeps it until taskkill
+ended (`platform/windows/tree-kill.ts`), so a root that exits meanwhile keeps
+its pid. After the exit, the pid may be another process's, and only the
+root's own kill runs. A helper of a root that
+already exited is not reached there. Normal
 shutdown waits for escalation; a hard shell kill does not guarantee core exit
 on Linux/macOS. `TraceCapability` exposes OS, mode (`events`, `poll`, `none`) and
 failure notes; clients must read it before promising native capabilities.

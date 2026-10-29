@@ -47,7 +47,7 @@ export function sharedState(ctx: FakeContext): State {
   states.set(ctx, state);
   connected.add(ctx);
   ctx.bus.onState(s => { if (s !== 'ready') state.subscriptions.clear(); if (s === 'closed') connected.delete(ctx); });
-  for (const event of ['contacts.updated', 'group.updated', 'project.updated', 'project.removed', 'thread.updated', 'thread.removed', 'delegation.changed'] as const) ctx.bus.on(event, () => reconcileShared(ctx));
+  for (const event of ['contacts.updated', 'group.updated', 'project.updated', 'project.removed', 'thread.updated', 'thread.removed', 'delegation.changed'] as const) ctx.bus.observe(event, () => reconcileShared(ctx));
   return state;
 }
 export function onceShared<T>(ctx: FakeContext, key: string, input: unknown, run: () => T, contentRefusal = false): T {

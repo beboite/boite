@@ -25,6 +25,7 @@ import type { PiTurn } from './turn.ts';
 import { answerText } from '../../attachments.ts';
 import { noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { endOnClose, releaseChild } from '../session-close.ts';
 import {protectedPi} from './protected.ts';
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -586,29 +587,15 @@ export class PiSession {
     this.clearIdle();
     const turn = this.current;
     this.current = null;
-    // A turn the user already stopped stays stopped, as Muse's does.
-    if (turn?.isStopped === true) turn.settleRun();
-    else turn?.fail('the pi session was closed');
+    endOnClose(turn, 'the pi session was closed');
     this.peer?.fail('the pi session was closed');
     this.peer = null;
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        // The bash tool's children (a dev server started with `&`) are not
-        // pi's to reap once bash exits; the thread's tree is. On Linux and
-        // macOS the tree is the direct children only, which is `kill()`.
-        if (this.killTree !== null) this.killTree();
-        else child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    // The bash tool's children (a dev server started with `&`) are not pi's to
+    // reap once bash exits; the thread's tree is. On Linux and macOS the tree
+    // is the direct children only, which is `kill()`.
+    releaseChild(child, this.killTree);
     this.onEnded(this);
   }
 

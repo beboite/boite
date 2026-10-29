@@ -3,10 +3,11 @@ import { test } from '../test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Account, ProviderSummary } from '@boite/contracts';
 import AccountsPage from './AccountsPage.svelte';
+import { confirm } from '../lib/confirm.svelte';
 import { nextAccountLabel, setupStep } from '../lib/provider-setup';
 
 let mounted: ReturnType<typeof mount> | undefined;
-afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
+afterEach(async () => { confirm.answer(false); if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
 
 const row = (id: string) => document.querySelector(`[data-testid="provider-settings"][data-provider-id="${id}"]`);
 
@@ -190,3 +191,68 @@ test('an experimental provider is off until turned on and says so in both places
   expect(row('opencode-v2')?.querySelector('[data-testid="provider-experimental"]')).not.toBeNull();
 });
 
+
+test('a local ACP command is added from its form, a refused field is marked, and the provider leaves from its details', async ({ ready }) => {
+  const { store, client } = await ready();
+  const call = vi.spyOn(client, 'call');
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  const field = <T extends HTMLElement>(id: string) => document.querySelector<T>(`[data-testid="${id}"]`)!;
+  const type = (input: HTMLInputElement, value: string) => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); };
+
+  field('local-acp-open').click();
+  flushSync();
+  expect(field<HTMLButtonElement>('local-acp-save').disabled).toBe(true);
+  type(field('local-acp-name'), 'Echo');
+  type(field('local-acp-command'), 'my-agent');
+  field('local-acp-add-arg').click();
+  flushSync();
+  type(field('local-acp-arg'), '--profile');
+  field('local-acp-add-arg').click();
+  flushSync();
+  type(document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-arg"]')[1]!, 'two words');
+  field('local-acp-add-env').click();
+  flushSync();
+  type(field('local-acp-env-key'), 'AGENT_MODE');
+  type(field('local-acp-env-value'), 'acp');
+
+  // A name another provider uses: the core names the field and the form keeps what was typed.
+  field('local-acp-save').click();
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="local-acp-error"]')).not.toBeNull());
+  expect(field('local-acp-name').getAttribute('aria-invalid')).toBe('true');
+  expect(field('local-acp-command').getAttribute('aria-invalid')).toBe('false');
+  expect(field<HTMLInputElement>('local-acp-command').value).toBe('my-agent');
+
+  // A value typed without its name reaches the core, which marks that row, rather than vanishing from the request.
+  type(field('local-acp-name'), 'My Agent');
+  field('local-acp-add-env').click();
+  flushSync();
+  const unnamed = () => document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-env-key"]')[1]!;
+  type(document.querySelectorAll<HTMLInputElement>('[data-testid="local-acp-env-value"]')[1]!, 'orphan');
+  field('local-acp-save').click();
+  await vi.waitFor(() => expect(unnamed().getAttribute('aria-invalid')).toBe('true'));
+  // The marked input points at the refusal, so a screen reader reads why when the row is focused again.
+  expect(unnamed().getAttribute('aria-describedby')).toBe(field('local-acp-error').id);
+  expect(field('local-acp-env-key').getAttribute('aria-invalid')).toBe('false');
+  expect(field('local-acp-env-key').hasAttribute('aria-describedby')).toBe(false);
+  expect(row('my-agent')).toBeNull();
+
+  type(unnamed(), 'EXTRA');
+  field('local-acp-save').click();
+  await vi.waitFor(() => expect(row('my-agent')).not.toBeNull());
+  expect(call).toHaveBeenCalledWith('providers.addLocal', {
+    name: 'My Agent', command: 'my-agent', args: ['--profile', 'two words'], env: { AGENT_MODE: 'acp', EXTRA: 'orphan' }
+  });
+  await vi.waitFor(() => expect(field('local-acp-added').textContent).toBe('My Agent added'));
+  expect(document.querySelector('[data-testid="local-acp-name"]')).toBeNull();
+
+  row('my-agent')!.querySelector<HTMLButtonElement>('[data-testid="provider-details-toggle"]')!.click();
+  flushSync();
+  row('my-agent')!.querySelector<HTMLButtonElement>('[data-testid="local-acp-remove"]')!.click();
+  await vi.waitFor(() => expect(confirm.current?.title).toBe('Remove My Agent?'));
+  confirm.answer(true);
+  await vi.waitFor(() => expect(row('my-agent')).toBeNull());
+  expect(call).toHaveBeenCalledWith('providers.removeLocal', { providerId: 'my-agent' });
+  // A provider that ships with Boite has nothing to remove.
+  expect(row('claude')?.querySelector('[data-testid="local-acp-remove"]')).toBeNull();
+});

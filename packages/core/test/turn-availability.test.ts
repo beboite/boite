@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Message, ThreadRetry } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext } from '../src/drivers/types.ts';
 import { CAPACITY_CONTINUE_PROMPT, CAPACITY_RETRY } from '../src/threads/turn-attempts.ts';
 import { LIMIT_RESUME, LIMIT_RESUME_LABEL } from '../src/threads/limit-resume.ts';
-import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, removeDir, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const delays = [...CAPACITY_RETRY.delaysMs];
 const limits = { ...LIMIT_RESUME };
@@ -165,6 +168,21 @@ test('a thread stopped by a usage limit resumes once at the reset, never for a w
   } finally { await h.stop(); }
 });
 
+test('a cache ping neither cancels a planned usage limit resume nor stands for the turn it resumes', async () => {
+  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const limited = await client.call('turns.start', { threadId, prompt: '[usage-limit:500]' });
+    await waitFor(() => retryOf(h, threadId)?.turnId === limited.id);
+    const ping = h.core.threads.startTurn(threadId, 'ping', { kind: 'keepalive' });
+    await waitFor(() => h.core.journal.getTurn(ping.id)?.status === 'done');
+    expect(retryOf(h, threadId)).toMatchObject({ kind: 'usage-limit', turnId: limited.id });
+    await waitFor(() => h.core.journal.listTurns(threadId).length === 3);
+    expect(h.core.journal.listTurns(threadId)[2]!.execution?.operation).toBe('resume');
+  } finally { await h.stop(); }
+});
+
 test('a planned resume is cancelled by a new message, by Stop and by Cancel', async () => {
   const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
   try {
@@ -207,6 +225,41 @@ test('a resume refuses a thread whose model changed since the limit', async () =
     const cancelled = (await h.core.logs.query({ limit: 500 })).filter(record => record.threadId === threadId && record.event === 'limit-resume.cancelled');
     expect(cancelled[0]?.message).toContain('model changed');
   } finally { await h.stop(); }
+});
+
+test('an archive that rolls back keeps the planned resume, which still fires', async () => {
+  const h = await startTestCore({ settings: { autoResumeLimitedThreads: true } });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const turn = await client.call('turns.start', { threadId, prompt: '[usage-limit:800]' });
+    await waitFor(() => retryOf(h, threadId)?.turnId === turn.id);
+    rolledBackArchive(h, threadId);
+    expect([h.core.threads.require(threadId).archived, retryOf(h, threadId)?.turnId]).toEqual([false, turn.id]);
+    await waitFor(() => h.core.journal.listTurns(threadId)[1]?.execution?.operation === 'resume', 5000);
+  } finally { await h.stop(); }
+});
+
+test('an archived thread keeps the usage window it resumed after across a restart', async () => {
+  // The test owns the directory, so it outlives the first core's stop.
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-resume-archived-'));
+  let h: TestCore | undefined, next: Core | undefined;
+  try {
+    h = await startTestCore({ dataDir, settings: { autoResumeLimitedThreads: true } });
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.archive', { threadId });
+    // Unarchived later, a failure in the same window must not resume a second time.
+    h.core.journal.setSetting('resumes', { [threadId]: { handled: 'trn_old', resumedWindow: 1_234 } });
+    await h.stop();
+
+    next = new Core({ dataDir, token: h.token });
+    expect((next.journal.getSetting('resumes') as Record<string, unknown>)[threadId]).toEqual({ resumedWindow: 1_234 });
+  } finally {
+    await next?.close();
+    await h?.stop();
+    await removeDir(dataDir);
+  }
 });
 
 test('a planned resume survives a core restart and fires on the next core', async () => {

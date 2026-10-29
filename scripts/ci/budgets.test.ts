@@ -60,6 +60,24 @@ test('the ceiling is the published build plus 2 %, and a reason does not lift it
   ]);
 });
 
+test('a pull request over a main already above the ceiling fails only for the growth it adds', () => {
+  const limit = { sizes: ceiling(base), source: 'v2.0.0-nightly.20261018.2 at `0011aabb`' };
+  // Main grew past the published ceiling after the last nightly; the pull request changes nothing it measures.
+  const indebted = { sizes: { ...base, uiDist: 5_100_300 }, source: '`c3d4e5f6` (main bundle-sizes artifact)' };
+  for (const head of [indebted.sizes, { ...indebted.sizes, uiDist: 5_100_200 }]) {
+    const verdict = judge(head, indebted, limit, undefined);
+    expect(verdict.errors).toEqual([]);
+    expect(verdict.report).toContain(`uiDist: ${(head.uiDist).toLocaleString('en-US')} bytes, ${(head.uiDist - 5_100_000).toLocaleString('en-US')} above the 5,100,000-byte ceiling, carried from \`c3d4e5f6\` (main bundle-sizes artifact)`);
+  }
+  expect(judge({ ...indebted.sizes, uiDist: 5_100_301 }, indebted, limit, 'reason').errors).toEqual([
+    'uiDist: 5,100,301 bytes, 1 more than `c3d4e5f6` (main bundle-sizes artifact), which is already above its 5,100,000-byte ceiling (v2.0.0-nightly.20261018.2 at `0011aabb` plus 2 %). Shrink the change; the ceiling rises only when a nightly or a release is published.',
+  ]);
+  // Main's own check has no base: the whole debt fails there.
+  expect(judge(indebted.sizes, undefined, limit, undefined).errors).toEqual([
+    'uiDist: 5,100,300 bytes, above its 5,100,000-byte ceiling (v2.0.0-nightly.20261018.2 at `0011aabb` plus 2 %). Shrink the change; the ceiling rises only when a nightly or a release is published.',
+  ]);
+});
+
 test('reads the reason under a Bundle size heading, ignoring comments and empty sections', () => {
   expect(bodyReason('## What changed\n\nx\n\n## Bundle size\n\nThe new card adds 3 KB to the settings chunk.\n\n## Verification\n\nok')).toBe('The new card adds 3 KB to the settings chunk.');
   expect(bodyReason('### bundle size\r\nlazy chunk only')).toBe('lazy chunk only');

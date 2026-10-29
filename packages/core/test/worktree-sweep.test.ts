@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
-import { parseWorktreeList } from '../src/worktree-sweep.ts';
+import { realKey as removalKey } from '../src/checkout-removal.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
+import { parseWorktreeList, WorktreeSweep } from '../src/worktree-sweep.ts';
 import { worktreeRoot } from '../src/worktree.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
 import { rejection, thrown } from './settle.ts';
@@ -270,6 +273,269 @@ describe('worktrees.remove', () => {
     expect(listed).not.toContain('boite/target');
     expect(listed).not.toContain('boite/old');
     expect(listed).toContain('boite/fresh');
+  });
+
+  test('an archived thread holds its worktree while it runs, a process or a shell lives, or a restore lands during the checks', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Finishing in Done', worktree: {} });
+    const journal = harness.core.journal;
+    const put = (patch: Partial<ReturnType<typeof journal.getThread> & object>): void => journal.putThread({ ...journal.getThread(thread.id)!, ...patch });
+    const held = async (): Promise<void> => {
+      expect((await rejection(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd, force: true }))).reason).toMatchObject({
+        rpc: { data: expect.objectContaining({ threadId: thread.id, expected: 'a worktree no live thread uses' }) },
+      });
+      expect(existsSync(thread.cwd)).toBe(true);
+    };
+    // Automatic Done moves a merged conversation away while its prompt finishes, with no tracked process.
+    put({ archived: true, archivedAt: 1, doneAt: 1, status: 'running' });
+    await held();
+    put({ status: 'idle' });
+    const procs = harness.core.procs, liveCount = procs.liveCount.bind(procs);
+    const live = spyOn(procs, 'liveCount').mockImplementation((id) => (id === thread.id ? 1 : liveCount(id)));
+    try { await held(); } finally { live.mockRestore(); }
+    const shells = spyOn(harness.core.terminals, 'threadProcesses').mockImplementation((id) => (id === thread.id ? 1 : 0));
+    try { await held(); } finally { shells.mockRestore(); }
+    // Restored while git status reads the worktree: the removal checks again before it deletes.
+    const spawn = procs.spawn.bind(procs);
+    const restoring = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command === 'git' && args.includes('status')) put({ archived: false });
+      return spawn(scope, command, args, options);
+    });
+    try { await held(); } finally { restoring.mockRestore(); }
+    // A turn that ended in error rests like an idle one: nothing runs there.
+    put({ archived: true, archivedAt: 1, status: 'error' });
+    expect(await client.call('worktrees.remove', { projectId: project.id, path: thread.cwd })).toEqual({ ok: true, branchDeleted: true });
+  });
+
+  /** Starts `worktrees.remove` and holds its git once started, before it deletes anything; `during` runs meanwhile. */
+  async function whileGitRemoves(projectId: string, path: string, during: () => Promise<void>): Promise<void> {
+    const signal = join(harness.dataDir, 'remove-may-run');
+    // Bun itself waits, then runs the real git with its output: no shell, so Windows runs it too.
+    const hold = 'const [signal, ...args] = process.argv.slice(1); while (!require("node:fs").existsSync(signal)) Bun.sleepSync(20);'
+      + ' process.exit(Bun.spawnSync(["git", ...args], { stdout: "inherit", stderr: "inherit" }).exitCode ?? 1);';
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    let waiting = false;
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command !== 'git' || !args.includes('remove')) return spawn(scope, command, args, options);
+      waiting = true;
+      return spawn(scope, process.execPath, ['-e', hold, signal, ...args], options);
+    });
+    try {
+      const removing = client.call('worktrees.remove', { projectId, path });
+      await waitFor(() => waiting);
+      await during();
+      writeFileSync(signal, '');
+      expect(await removing).toEqual({ ok: true, branchDeleted: true });
+    } finally { writeFileSync(signal, ''); spy.mockRestore(); }
+    expect(existsSync(path)).toBe(false);
+  }
+
+  test('a checkout git is removing cannot be restored or given a new thread until git ends', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Being removed', worktree: {} });
+    await client.call('threads.archive', { threadId: thread.id, archived: true });
+    await whileGitRemoves(project.id, thread.cwd, async () => {
+      const restored = await rejection(client.call('threads.archive', { threadId: thread.id, archived: false }));
+      expect(restored.reason).toMatchObject({ rpc: { message: expect.stringContaining('is being removed'), data: expect.objectContaining({ field: 'cwd' }) } });
+      expect(harness.core.threads.require(thread.id).archived).toBe(true);
+      expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Arrives', cwd: thread.cwd }))).toThrow('is being removed');
+    });
+    // Once git is done the reservation goes: restoring works, and the folder refuses the turn.
+    expect((await client.call('threads.archive', { threadId: thread.id, archived: false })).archived).toBe(false);
+  });
+
+  test('neither a deleted conversation brought back nor a link to the checkout gets past its removal', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Deleted', worktree: {} });
+    await client.call('threads.remove', { threadId: thread.id });
+    // A link made before the removal: the same folder under another name, and a folder inside it.
+    const alias = join(project.path, 'alias');
+    symlinkSync(thread.cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    mkdirSync(join(thread.cwd, 'sub'));
+    const inner = join(project.path, 'inner');
+    symlinkSync(join(thread.cwd, 'sub'), inner, process.platform === 'win32' ? 'junction' : 'dir');
+    await whileGitRemoves(project.id, thread.cwd, async () => {
+      // Undoing the deletion would bring it back live, and its next turn would start in the folder git deletes.
+      expect(await thrown(client.call('threads.restore', { threadId: thread.id }))).toThrow('is being removed');
+      expect(harness.core.journal.listDeletedThreads().map((one) => one.id)).toContain(thread.id);
+      for (const cwd of [alias, join(alias, 'sub'), inner]) {
+        expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Through a link', cwd }))).toThrow('is being removed');
+      }
+      // Admission and spawn both normalize `inner/..` lexically to the project before following links.
+      const climb = `${inner}${sep}..`;
+      const admitted = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Lexical parent', cwd: climb });
+      expect(admitted.cwd).toBe(resolve(project.path));
+      const started = harness.core.procs.spawn('thr_climb' as never, process.execPath, ['-e', 'console.log(process.cwd())'], { cwd: climb });
+      const [ran] = await Promise.all([new Response(started.proc.stdout).text(), started.exited]);
+      expect(realpathSync(ran.trim())).toBe(realpathSync(project.path));
+    });
+    expect(harness.core.threads.list({ includeArchived: true }).filter((one) => one.cwd.startsWith(alias))).toEqual([]);
+  });
+
+  test('a draft cannot start its agent in a checkout being removed, and a draft whose agent runs there holds it', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const worktree = async (title: string): Promise<string> => {
+      const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title, worktree: {} });
+      await client.call('threads.archive', { threadId: thread.id, archived: true });
+      return thread.cwd;
+    };
+    // The native drivers start their process as the draft is prepared; this one starts a sleeper the same way.
+    // It ignores the polite stop, as an agent busy writing may: off Windows only the SIGKILL two seconds later ends it.
+    const sleeper = 'process.on("SIGTERM", () => {}); console.log("ready"); setTimeout(() => {}, 60_000)';
+    const started: string[] = [], refusals: string[] = [];
+    let gate: Promise<void> | null = null;
+    const restore = setDriver('echo', { ...echoDriver, setViewed: () => {}, releaseThread: () => {},
+      prepare: async (context) => {
+        await gate;
+        try {
+          const child = context.spawnChild(process.execPath, ['-e', sleeper], { cwd: context.thread.cwd });
+          child.stdout.once('data', () => started.push(context.thread.id));
+        }
+        catch (error) { refusals.push(error instanceof Error ? error.message : String(error)); }
+      },
+    });
+    try {
+      const removed = await worktree('Removed');
+      await whileGitRemoves(project.id, removed, async () => {
+        const draft = await client.call('drafts.prepare', { projectId: project.id, providerId: 'echo', accountId, cwd: removed, preparationId: 'draft_during_removal' });
+        await waitFor(() => refusals.length + started.length > 0);
+        expect(refusals).toEqual([expect.stringContaining('is being removed')]);
+        expect(harness.core.procs.liveCount(draft.threadId as never)).toBe(0);
+        await client.call('drafts.release', { preparationId: draft.preparationId });
+      });
+      const held = await worktree('Held by a draft');
+      const draft = await client.call('drafts.prepare', { projectId: project.id, providerId: 'echo', accountId, cwd: held, preparationId: 'draft_before_removal' });
+      await waitFor(() => started.includes(draft.threadId));
+      expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: held }))).toThrow('is a draft whose agent still runs there');
+      expect(existsSync(held)).toBe(true);
+      // Discarded, its agent is still stopping: the checkout stays held until it has exited.
+      await client.call('drafts.release', { preparationId: draft.preparationId });
+      if (process.platform !== 'win32') {
+        expect(harness.core.procs.liveCount(draft.threadId as never)).toBe(1);
+        expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: held }))).toThrow('is a draft whose agent still runs there');
+        expect(existsSync(held)).toBe(true);
+      }
+      await waitFor(() => harness.core.procs.liveCount(draft.threadId as never) === 0);
+      expect(await client.call('worktrees.remove', { projectId: project.id, path: held })).toEqual({ ok: true, branchDeleted: true });
+      // A preparation still running when its draft is discarded starts nothing afterwards.
+      const late = await worktree('Late preparation');
+      let open = () => {};
+      gate = new Promise((resolve) => { open = resolve; });
+      const discarded = await client.call('drafts.prepare', { projectId: project.id, providerId: 'echo', accountId, cwd: late, preparationId: 'draft_discarded_early' });
+      await client.call('drafts.release', { preparationId: discarded.preparationId });
+      open();
+      await waitFor(() => refusals.length === 2);
+      expect(refusals[1]).toContain('draft preparation was released');
+      expect(harness.core.procs.liveCount(discarded.threadId as never)).toBe(0);
+    } finally { restore(); }
+  });
+
+  test('a draft sent while the removal resolves folders holds the checkout by its live row', async () => {
+    const project = await repoProject();
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Sent', worktree: {} });
+    // Each check lists who stands there, resolves their folders, then decides. Here the thread is still a draft
+    // when each check starts and sent by the time it decides: no process, a live row.
+    let calls = 0;
+    const spy = spyOn(harness.core.drafts, 'threads').mockImplementation(() => (calls++ % 2 === 0 ? [harness.core.threads.require(thread.id)] : []));
+    try {
+      expect(await thrown(client.call('worktrees.remove', { projectId: project.id, path: thread.cwd }))).toThrow('works there: archive it first');
+    } finally { spy.mockRestore(); }
+    expect(existsSync(thread.cwd)).toBe(true);
+  });
+
+  test('a proved branch is deleted only if no checkout took it back while the deletion waited', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const removable = addWorktree(project, 'reused');
+    const sha = git(removable, 'rev-parse', 'HEAD').trim();
+    const fresh = join(dirname(removable), 'reused-again');
+    const sweep = new WorktreeSweep(harness.core);
+    let removed = false, listing = 0;
+    let reusing: Promise<unknown> | null = null;
+    const reuse = (): Promise<unknown> => (reusing = harness.core.worktrees.ensure('thr_reused', row, 'boite/reused', fresh).catch((error: unknown) => error));
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      if (command === 'git' && args.includes('remove')) removed = true;
+      // The deletion's own check of the branch: a thread taking the branch back starts beside it.
+      if (command === 'git' && removed && reusing === null && listing === 0 && args.includes('list')) void reuse();
+      return spawn(scope, command, args, options);
+    });
+    // A deletion that checks the branch in one locked section and deletes it in another leaves the reuse room in between.
+    const listed = sweep.listed.bind(sweep);
+    const between = spyOn(sweep, 'listed').mockImplementation(async (project) => {
+      listing += 1;
+      const answer = await listed(project).finally(() => { listing -= 1; });
+      if (removed && reusing === null) await reuse();
+      return answer;
+    });
+    try {
+      await sweep.removeSettled(row, removable, { sha, branch: 'boite/reused' });
+      await reusing;
+    } finally { spy.mockRestore(); between.mockRestore(); }
+    expect(reusing).not.toBeNull();
+    // A checkout that came back still has its branch; one that could not keeps nothing pointing at a deleted ref.
+    if (existsSync(fresh)) expect(git(project.path, 'rev-parse', '--verify', '--quiet', 'refs/heads/boite/reused').trim()).toBe(sha);
+    else {
+      const ref = Bun.spawnSync({ cmd: ['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/boite/reused'], cwd: project.path, env: FIXTURE_GIT_ENV, stdout: 'pipe', stderr: 'pipe' });
+      expect(ref.exitCode).toBe(1);
+    }
+  });
+
+  test('the list and a removal wait for a registration in progress in the same repository', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const removable = addWorktree(project, 'removable');
+    const registering = harness.core.worktrees.pathFor(row, 'boite/registering');
+    const paused = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    let released = false;
+    const early: string[] = [];
+    const procs = harness.core.procs, spawn = procs.spawn.bind(procs);
+    const spy = spyOn(procs, 'spawn').mockImplementation((scope, command, args, options) => {
+      const child = spawn(scope, command, args, options);
+      if (command === 'git' && String(scope).startsWith('worktrees:') && !released) early.push(args.filter((arg) => !arg.startsWith('core.')).join(' '));
+      if (command !== 'git' || !args.includes('add') || !args.includes('boite/registering')) return child;
+      return { ...child, exited: child.exited.then(async (code) => {
+        // Git's half-written registration: commondir is empty until the add completes.
+        const file = join(project.path, '.git', 'worktrees', basename(registering), 'commondir');
+        const saved = readFileSync(file);
+        writeFileSync(file, '');
+        paused.resolve();
+        try { await release.promise; } finally { writeFileSync(file, saved); released = true; }
+        return code;
+      }) };
+    });
+    try {
+      const adding = harness.core.worktrees.add('thr_registering', row, 'boite/registering');
+      await paused.promise;
+      const listing = Promise.allSettled([client.call('worktrees.list', { projectId: project.id })]);
+      const removing = Promise.allSettled([client.call('worktrees.remove', { projectId: project.id, path: removable })]);
+      // Long enough for an ungated read to reach git while the registration is half written.
+      await waitFor(() => early.length > 0, 500).catch(() => undefined);
+      release.resolve();
+      await adding;
+      const [[listed], [removed]] = await Promise.all([listing, removing]);
+      expect(early).toEqual([]);
+      expect(listed).toMatchObject({ status: 'fulfilled' });
+      expect(removed).toMatchObject({ status: 'fulfilled', value: { ok: true } });
+      expect(existsSync(removable)).toBe(false);
+    } finally { release.resolve(); spy.mockRestore(); }
+  });
+
+  test('the list reads a checkout a removal holds as leaving, without starting git in it', async () => {
+    const project = await repoProject();
+    const removable = addWorktree(project, 'removable');
+    // The moment `detach` holds it, under the resolved key `withVacantCheckout` adds:
+    // Windows CI reached the list's status then, and macOS lists `/private/var`.
+    const release = harness.core.worktrees.reservations.reserve(removable, [await removalKey(removable)]);
+    try {
+      const listed = await client.call('worktrees.list', { projectId: project.id });
+      expect(byPath(listed, removable)).toMatchObject({ missing: true, dirty: false });
+    } finally { release(); }
   });
 
   test('an archived thread does not hold its worktree, and a turn after the restore is refused by folder', async () => {

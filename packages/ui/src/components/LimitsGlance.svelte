@@ -7,6 +7,8 @@
   import { gatewayReader, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import QuotaPopup from './QuotaPopup.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
   import QuotaPin from './QuotaPin.svelte';
@@ -18,6 +20,9 @@
    * sends monitoring and accounts to the Limits page.
    */
   let { store }: { store: Store } = $props();
+  /** Providers is a desktop settings page and the owner's: a phone is offered no way to it. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
 
   const popover = new Closing();
   let trigger = $state<HTMLButtonElement>();
@@ -129,7 +134,7 @@
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
     <QuotaPopup {rows} loading={reader.busy} completed={reader.landed} error={failed} outdated={reader.outdated} owner={store.owner}
       order={store.settings?.quotaOrder ?? []} reorder={store.owner ? (quotaOrder) => store.saveSettings({ quotaOrder }) : undefined}
-      refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
+      refresh={() => read(true)} connect={providersReachable ? () => page('accounts') : undefined} settings={() => page('limits')} {close} testPrefix="limits-glance">
       {#snippet title()}<QuotaMachineScope {store} />{/snippet}
       {#snippet actions()}<QuotaPin />{/snippet}
     </QuotaPopup>
