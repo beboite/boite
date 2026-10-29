@@ -44,71 +44,75 @@ function isRecord(value: unknown): value is HandoffRecord {
  */
 export class RestartHandoff {
   /** Tool calls in flight per thread, as `messageId:partIndex`, with when each started. */
-  private readonly tools = new Map<ThreadId, Map<string, number>>();
+  readonly #tools = new Map<ThreadId, Map<string, number>>();
   /** What this core hands over, once `begin` ran. */
-  private entries: Map<TurnId, Entry> | null = null;
+  #entries: Map<TurnId, Entry> | null = null;
   /** Running turns still to end before this core may exit. */
-  private readonly pending = new Map<TurnId, ThreadId>();
-  private readonly asked = new Set<TurnId>();
-  private finished: Promise<void> | null = null;
-  private settle: (() => void) | null = null;
+  readonly #pending = new Map<TurnId, ThreadId>();
+  readonly #asked = new Set<TurnId>();
+  #finished: Promise<void> | null = null;
+  #settle: (() => void) | null = null;
   /** Each inherited entry stays durable until its continuation starts or is explicitly excluded. */
-  private inherited: HandoffRecord | null = null;
+  #inherited: HandoffRecord | null = null;
   /**
    * The previous core stopped through a handoff this core carries on, rather
    * than dying: what delegation and workflows cut then resumes too.
    */
   readonly handedOver: boolean;
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+  readonly #core: Core;
+  readonly #threads: ThreadStore;
+
+  constructor(core: Core, threads: ThreadStore) {
+    this.#core = core; this.#threads = threads;
     const stored = core.journal.getSetting(KEY);
     if (stored !== undefined && stored !== null) {
-      if (isRecord(stored) && Date.now() - stored.at <= HANDOFF.maxAgeMs) this.inherited = stored;
+      if (isRecord(stored) && Date.now() - stored.at <= HANDOFF.maxAgeMs) this.#inherited = stored;
       else {
         core.journal.deleteSetting(KEY);
         core.log('warn', 'the restart handoff left by the previous core is older than an hour or unreadable: nothing resumes');
       }
     }
-    this.handedOver = this.inherited !== null;
-    core.bus.onAny((name, payload) => this.observe(name, payload));
+    this.handedOver = this.#inherited !== null;
+    core.bus.onAny((name, payload) => this.#observe(name, payload));
   }
 
-  get active(): boolean { return this.entries !== null; }
+  get active(): boolean { return this.#entries !== null; }
 
   /** The tool calls of this thread's turn still running. An agent update pauses a turn at zero too. */
   toolsRunning(threadId: ThreadId): number {
-    return this.tools.get(threadId)?.size ?? 0;
+    return this.#tools.get(threadId)?.size ?? 0;
   }
 
   /** A turn paused in place starts its next attempt with no tool call open, whatever the stopped one left. */
   forgetTools(threadId: ThreadId): void {
-    this.tools.delete(threadId);
+    this.#tools.delete(threadId);
   }
 
   /** Whether this handoff resumes that turn on the next core itself. */
   carries(turnId: TurnId): boolean {
-    return this.entries?.has(turnId) ?? false;
+    return this.#entries?.has(turnId) ?? false;
   }
 
   /** A queued turn this handoff carries to the next core stays queued through shutdown. */
   keepsQueued(turnId: TurnId): boolean {
-    return this.entries?.get(turnId)?.was === 'queued' || this.inheritedTurns().get(turnId) === 'queued';
+    return this.#entries?.get(turnId)?.was === 'queued' || this.inheritedTurns().get(turnId) === 'queued';
   }
 
   /** The user stopped the thread himself: that turn is his to send again. */
   forget(threadId: ThreadId): void {
     let changed = false;
-    for (const entry of this.entries?.values() ?? []) {
-      if (entry.threadId === threadId) changed = this.entries!.delete(entry.turnId) || changed;
+    for (const entry of this.#entries?.values() ?? []) {
+      if (entry.threadId === threadId) changed = this.#entries!.delete(entry.turnId) || changed;
     }
-    if (this.inherited !== null) {
-      const remaining = this.inherited.turns.filter(entry => entry.threadId !== threadId);
-      changed = remaining.length !== this.inherited.turns.length || changed;
-      this.inherited.turns = remaining;
+    if (this.#inherited !== null) {
+      const remaining = this.#inherited.turns.filter(entry => entry.threadId !== threadId);
+      changed = remaining.length !== this.#inherited.turns.length || changed;
+      this.#inherited.turns = remaining;
     }
     if (changed) {
-      if (this.entries !== null) this.save();
-      else this.saveInherited();
+      if (this.#entries !== null) this.#save();
+      else this.#saveInherited();
     }
   }
 
@@ -118,59 +122,59 @@ export class RestartHandoff {
    * of them ended.
    */
   begin(graceMs: number = HANDOFF.graceMs): Promise<void> {
-    if (this.finished !== null) return this.finished;
-    const state = this.core.scheduler.state();
-    this.entries = new Map();
+    if (this.#finished !== null) return this.#finished;
+    const state = this.#core.scheduler.state();
+    this.#entries = new Map();
     for (const run of state.running) {
-      this.pending.set(run.turnId, run.threadId);
-      if (this.resumable(run.turnId, run.threadId, 'running')) this.entries.set(run.turnId, { turnId: run.turnId, threadId: run.threadId, was: 'running' });
+      this.#pending.set(run.turnId, run.threadId);
+      if (this.#resumable(run.turnId, run.threadId, 'running')) this.#entries.set(run.turnId, { turnId: run.turnId, threadId: run.threadId, was: 'running' });
     }
     for (const waiting of state.queued) {
       if (waiting.queueHold) continue;
-      if (this.resumable(waiting.turnId, waiting.threadId, 'queued')) this.entries.set(waiting.turnId, { turnId: waiting.turnId, threadId: waiting.threadId, was: 'queued' });
+      if (this.#resumable(waiting.turnId, waiting.threadId, 'queued')) this.#entries.set(waiting.turnId, { turnId: waiting.turnId, threadId: waiting.threadId, was: 'queued' });
     }
-    this.save();
-    this.core.log('info', `restart handoff: ${this.pending.size} running and ${state.queued.length} queued turns, ${this.entries.size} of them resume on the next start`);
+    this.#save();
+    this.#core.log('info', `restart handoff: ${this.#pending.size} running and ${state.queued.length} queued turns, ${this.#entries.size} of them resume on the next start`);
 
     const { promise, resolve } = Promise.withResolvers<void>();
-    this.finished = promise;
-    if (this.pending.size === 0) {
+    this.#finished = promise;
+    if (this.#pending.size === 0) {
       resolve();
       return promise;
     }
     const timers: ReturnType<typeof setTimeout>[] = [];
-    this.settle = () => {
+    this.#settle = () => {
       for (const timer of timers) clearTimeout(timer);
-      this.settle = null;
+      this.#settle = null;
       resolve();
     };
     // Past the grace every turn is stopped where it stands.
     timers.push(setTimeout(() => {
-      for (const [turnId, threadId] of this.pending) this.stop(turnId, threadId);
+      for (const [turnId, threadId] of this.#pending) this.#stop(turnId, threadId);
     }, graceMs));
     // A stop the runner could not settle either must not hold the restart.
-    timers.push(setTimeout(() => this.settle?.(), graceMs + STOP_DEADLINE.ms + STOP_DEADLINE.forceMs + 1_000));
+    timers.push(setTimeout(() => this.#settle?.(), graceMs + STOP_DEADLINE.ms + STOP_DEADLINE.forceMs + 1_000));
     for (const timer of timers) timer.unref?.();
     const now = Date.now();
-    for (const [turnId, threadId] of this.pending) {
-      const running = [...this.tools.get(threadId)?.values() ?? []];
-      if (running.length > 0 && running.every(startedAt => now - startedAt >= HANDOFF.longToolMs)) this.stop(turnId, threadId);
-      else this.stopWhenBetweenTools(turnId, threadId);
+    for (const [turnId, threadId] of this.#pending) {
+      const running = [...this.#tools.get(threadId)?.values() ?? []];
+      if (running.length > 0 && running.every(startedAt => now - startedAt >= HANDOFF.longToolMs)) this.#stop(turnId, threadId);
+      else this.#stopWhenBetweenTools(turnId, threadId);
     }
     return promise;
   }
 
   /** The turns of the previous core that the recovery leaves alone or closes without an error. */
   inheritedTurns(): Map<TurnId, Entry['was']> {
-    return new Map((this.inherited?.turns ?? []).map(entry => {
-      const admitted = this.admitted(entry);
+    return new Map((this.#inherited?.turns ?? []).map(entry => {
+      const admitted = this.#admitted(entry);
       return [admitted ?? entry.turnId, admitted === null ? entry.was : 'queued'];
     }));
   }
 
   /** Whether a queued turn of the previous core can go back in line as it is. */
   requeues(turn: Turn): boolean {
-    return turn.status === 'queued' && !turn.queueHold && this.inheritedTurns().get(turn.id) === 'queued' && this.resumable(turn.id, turn.threadId, 'queued');
+    return turn.status === 'queued' && !turn.queueHold && this.inheritedTurns().get(turn.id) === 'queued' && this.#resumable(turn.id, turn.threadId, 'queued');
   }
 
   /**
@@ -178,68 +182,68 @@ export class RestartHandoff {
    * whose turn was cut gets a `resume` turn. Returns how many started.
    */
   resume(): number {
-    const record = this.inherited;
-    if (record === null || this.core.stopping) return 0;
-    if (record.turns.length === 0) { this.saveInherited(); return 0; }
+    const record = this.#inherited;
+    if (record === null || this.#core.stopping) return 0;
+    if (record.turns.length === 0) { this.#saveInherited(); return 0; }
     let resumed = 0;
     for (const entry of [...record.turns]) {
       // Admission events can synchronously stop another inherited thread.
-      if (!this.inherited?.turns.includes(entry) || this.core.stopping) continue;
-      const admitted = this.admitted(entry);
-      const turn = this.core.journal.getTurn(admitted ?? entry.turnId);
-      const thread = this.core.journal.getThread(entry.threadId);
-      if (turn === null || thread === null || !this.resumable(turn.id, thread.id, admitted === null ? entry.was : 'queued')) {
-        this.consume(entry);
+      if (!this.#inherited?.turns.includes(entry) || this.#core.stopping) continue;
+      const admitted = this.#admitted(entry);
+      const turn = this.#core.journal.getTurn(admitted ?? entry.turnId);
+      const thread = this.#core.journal.getThread(entry.threadId);
+      if (turn === null || thread === null || !this.#resumable(turn.id, thread.id, admitted === null ? entry.was : 'queued')) {
+        this.#consume(entry);
         continue;
       }
       try {
         if (turn.status === 'queued') {
-          const state = this.core.scheduler.state();
+          const state = this.#core.scheduler.state();
           if ([...state.queued, ...state.running].some(item => item.turnId === turn.id)) continue;
-          this.core.scheduler.enqueue(turn, turn.execution?.accountId ?? thread.accountId);
+          this.#core.scheduler.enqueue(turn, turn.execution?.accountId ?? thread.accountId);
           resumed += 1;
         } else if (admitted === null && entry.was === 'running' && turn.status === 'stopped') {
-          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), { kind: 'resume', reason: 'handoff', requestId: this.requestId(entry) });
-          this.remember(entry, continuation.id);
+          const continuation = this.#threads.startTurn(thread.id, this.continuation(turn), { kind: 'resume', reason: 'handoff', requestId: this.#requestId(entry) });
+          this.#remember(entry, continuation.id);
           resumed += 1;
-        } else this.consume(entry);
+        } else this.#consume(entry);
       } catch (error) {
         // Admission commits before scheduler dispatch. A crash or exception in
         // that dispatch still has one durable request-to-turn identity.
-        const accepted = this.admitted(entry);
-        if (accepted !== null) this.remember(entry, accepted);
-        this.core.log('warn', `thread ${thread.id} was not resumed after the restart: ${messageOf(error)}`);
+        const accepted = this.#admitted(entry);
+        if (accepted !== null) this.#remember(entry, accepted);
+        this.#core.log('warn', `thread ${thread.id} was not resumed after the restart: ${messageOf(error)}`);
       }
     }
-    if (resumed > 0) this.core.log('info', `restart handoff: resumed ${resumed} threads`);
+    if (resumed > 0) this.#core.log('info', `restart handoff: resumed ${resumed} threads`);
     return resumed;
   }
 
-  private requestId(entry: Entry): string { return `restart_${entry.turnId}`; }
+  #requestId(entry: Entry): string { return `restart_${entry.turnId}`; }
 
-  private admitted(entry: Entry): TurnId | null {
-    return entry.admittedTurnId ?? (entry.was === 'running' ? this.core.journal.turnRequest(entry.threadId, this.requestId(entry))?.turn_id : undefined) ?? null;
+  #admitted(entry: Entry): TurnId | null {
+    return entry.admittedTurnId ?? (entry.was === 'running' ? this.#core.journal.turnRequest(entry.threadId, this.#requestId(entry))?.turn_id : undefined) ?? null;
   }
 
-  private remember(entry: Entry, turnId: TurnId): void {
-    if (!this.inherited?.turns.includes(entry)) return;
+  #remember(entry: Entry, turnId: TurnId): void {
+    if (!this.#inherited?.turns.includes(entry)) return;
     entry.admittedTurnId = turnId;
-    this.saveInherited();
+    this.#saveInherited();
   }
 
-  private consume(entry: Entry): void {
-    if (!this.inherited?.turns.includes(entry)) return;
-    this.inherited.turns = this.inherited.turns.filter(item => item !== entry);
-    this.saveInherited();
+  #consume(entry: Entry): void {
+    if (!this.#inherited?.turns.includes(entry)) return;
+    this.#inherited.turns = this.#inherited.turns.filter(item => item !== entry);
+    this.#saveInherited();
   }
 
-  private saveInherited(): void {
-    if (this.core.journal.isClosed()) return;
-    if (this.entries !== null) { this.save(); return; }
-    if (this.inherited?.turns.length) this.core.journal.setSetting(KEY, this.inherited);
+  #saveInherited(): void {
+    if (this.#core.journal.isClosed()) return;
+    if (this.#entries !== null) { this.#save(); return; }
+    if (this.#inherited?.turns.length) this.#core.journal.setSetting(KEY, this.#inherited);
     else {
-      this.inherited = null;
-      this.core.journal.deleteSetting(KEY);
+      this.#inherited = null;
+      this.#core.journal.deleteSetting(KEY);
     }
   }
 
@@ -251,8 +255,8 @@ export class RestartHandoff {
    */
   continuation(turn: Turn, lead: string = RESUME_TEXT.handoff.prompt): string {
     const opening = turn.execution?.operation === 'resume'
-      ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
-      : this.core.journal.lastUserMessage(turn.threadId, turn.id);
+      ? Array.from(this.#core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
+      : this.#core.journal.lastUserMessage(turn.threadId, turn.id);
     const text = (opening?.parts ?? []).map(part => part.type === 'text' ? part.text : '').join('').trim();
     // A second restart over a resumed turn sends the same note, not a note about a note.
     if (turn.execution?.operation === 'resume' && text.length > 0) return text;
@@ -267,31 +271,31 @@ export class RestartHandoff {
    * `Workflows.resumeAfterRestart`) and
    * pause after a crash. A compaction or a coordination wake is not worth repeating.
    */
-  private resumable(turnId: TurnId, threadId: ThreadId, was: Entry['was']): boolean {
-    const turn = this.core.journal.getTurn(turnId);
-    const thread: ThreadSummary | null = this.core.journal.getThread(threadId);
+  #resumable(turnId: TurnId, threadId: ThreadId, was: Entry['was']): boolean {
+    const turn = this.#core.journal.getTurn(turnId);
+    const thread: ThreadSummary | null = this.#core.journal.getThread(threadId);
     if (turn === null || thread === null || thread.archived || thread.parentThreadId) return false;
     const operation = turn.execution?.operation;
     return operation === undefined || operation === 'resume' || (was === 'running' && operation === 'background');
   }
 
-  private stopWhenBetweenTools(turnId: TurnId, threadId: ThreadId): void {
-    if (!this.pending.has(turnId) || (this.tools.get(threadId)?.size ?? 0) > 0) return;
-    this.stop(turnId, threadId);
+  #stopWhenBetweenTools(turnId: TurnId, threadId: ThreadId): void {
+    if (!this.#pending.has(turnId) || (this.#tools.get(threadId)?.size ?? 0) > 0) return;
+    this.#stop(turnId, threadId);
   }
 
-  private stop(turnId: TurnId, threadId: ThreadId): void {
-    if (this.asked.has(turnId)) return;
-    this.asked.add(turnId);
+  #stop(turnId: TurnId, threadId: ThreadId): void {
+    if (this.#asked.has(turnId)) return;
+    this.#asked.add(turnId);
     // False when the turn ended in the same tick: its `turn.finished` clears it.
-    this.threads.stopRunning(threadId);
+    this.#threads.stopRunning(threadId);
   }
 
-  private observe(name: RpcEventName, payload: unknown): void {
-    if (name === 'turn.started' && this.entries === null) {
+  #observe(name: RpcEventName, payload: unknown): void {
+    if (name === 'turn.started' && this.#entries === null) {
       const turn = payload as Turn;
-      for (const entry of [...this.inherited?.turns ?? []]) {
-        if ((this.admitted(entry) ?? entry.turnId) === turn.id) this.consume(entry);
+      for (const entry of [...this.#inherited?.turns ?? []]) {
+        if ((this.#admitted(entry) ?? entry.turnId) === turn.id) this.#consume(entry);
       }
       return;
     }
@@ -299,27 +303,27 @@ export class RestartHandoff {
       const { threadId, messageId, partIndex, part } = payload as RpcEvents['message.part'];
       if (part.type !== 'tool') return;
       const key = `${messageId}:${partIndex}`;
-      const running = this.tools.get(threadId) ?? new Map<string, number>();
+      const running = this.#tools.get(threadId) ?? new Map<string, number>();
       if (part.status !== 'running') running.delete(key);
       else if (!running.has(key)) running.set(key, typeof part.startedAt === 'number' ? part.startedAt : Date.now());
-      if (running.size > 0) this.tools.set(threadId, running);
-      else this.tools.delete(threadId);
-      if (this.entries === null || running.size > 0) return;
-      for (const [turnId, pendingThread] of this.pending) if (pendingThread === threadId) this.stopWhenBetweenTools(turnId, threadId);
+      if (running.size > 0) this.#tools.set(threadId, running);
+      else this.#tools.delete(threadId);
+      if (this.#entries === null || running.size > 0) return;
+      for (const [turnId, pendingThread] of this.#pending) if (pendingThread === threadId) this.#stopWhenBetweenTools(turnId, threadId);
       return;
     }
     if (name !== 'turn.finished') return;
     const turn = payload as RpcEvents['turn.finished'];
-    this.tools.delete(turn.threadId);
-    if (this.entries === null) return;
+    this.#tools.delete(turn.threadId);
+    if (this.#entries === null) return;
     // Done or failed during the grace: nothing is left to resume.
-    if (turn.status !== 'stopped' && this.entries.delete(turn.id)) this.save();
-    if (this.pending.delete(turn.id) && this.pending.size === 0) this.settle?.();
+    if (turn.status !== 'stopped' && this.#entries.delete(turn.id)) this.#save();
+    if (this.#pending.delete(turn.id) && this.#pending.size === 0) this.#settle?.();
   }
 
-  private save(): void {
-    if (this.entries === null || this.core.journal.isClosed()) return;
-    const held = (this.inherited?.turns ?? []).filter(entry => !this.entries!.has(this.admitted(entry) ?? entry.turnId));
-    this.core.journal.setSetting(KEY, { at: Date.now(), turns: [...this.entries.values(), ...held] } satisfies HandoffRecord);
+  #save(): void {
+    if (this.#entries === null || this.#core.journal.isClosed()) return;
+    const held = (this.#inherited?.turns ?? []).filter(entry => !this.#entries!.has(this.#admitted(entry) ?? entry.turnId));
+    this.#core.journal.setSetting(KEY, { at: Date.now(), turns: [...this.#entries.values(), ...held] } satisfies HandoffRecord);
   }
 }

@@ -99,58 +99,60 @@ export interface ControlTarget {
  * and its mode. It sends only what moved, on the session `target` names.
  */
 export class SessionControls {
-  private configWarned = false;
+  #configWarned = false;
   /** What the last session answer, or the last `set_config_option`, listed. */
-  private configOptions: SessionConfigOption[] = [];
+  #configOptions: SessionConfigOption[] = [];
   /** What the last session answer said about models, for the agents that list them. */
-  private agentModels: AgentModels | null = null;
+  #agentModels: AgentModels | null = null;
   /**
    * The model and the effort as they last went out, whichever call carried
    * them. `undefined` is "nothing sent yet", which is not the same as a thread
    * that asks for none. They are not in the session key: a turn that moved one
    * of them sends it on the live session instead of dropping the process.
    */
-  private appliedModel: string | null | undefined = undefined;
-  private appliedEffort: string | null | undefined = undefined;
+  #appliedModel: string | null | undefined = undefined;
+  #appliedEffort: string | null | undefined = undefined;
   /**
    * The model the agent opened its first new session on: what "the agent's own
    * model" is when a thread goes back to it on a session that was moved off it.
    */
-  private ownModel: string | null = null;
+  #ownModel: string | null = null;
   /**
    * The options came from this session's own answers, not from another
    * session's seed: only then does a current value say what this one is on.
    */
-  private ownOptions = false;
+  #ownOptions = false;
   /** Efforts this process refused: asked again, they cost the same wait and the same warning. */
-  private readonly refused = new Set<string>();
+  readonly #refused = new Set<string>();
   /** What the last `session/new` or `session/load` said the agent can be in. */
-  private modes: SessionMode[] = [];
+  #modes: SessionMode[] = [];
   /** The mode the agent is in, as it last told us: an answer or a drift it announced. */
-  private currentModeId: string | null = null;
-  private modeWarned = false;
+  #currentModeId: string | null = null;
+  #modeWarned = false;
 
-  constructor(private readonly target: () => ControlTarget) {}
+  readonly #target: () => ControlTarget;
+
+  constructor(target: () => ControlTarget) { this.#target = target; }
 
   seed(options: SessionConfigOption[]): void {
-    if (this.configOptions.length === 0) this.configOptions = structuredClone(options);
+    if (this.#configOptions.length === 0) this.#configOptions = structuredClone(options);
     this.noteOwnModel(options);
   }
 
   /** The model option's value in a `session/new` answer, the first one kept. */
   noteOwnModel(options: SessionConfigOption[] | null): void {
-    if (this.ownModel !== null) return;
+    if (this.#ownModel !== null) return;
     const option = categoryOption(options, 'model');
-    if (option?.type === 'select' && typeof option.currentValue === 'string' && option.currentValue.length > 0) this.ownModel = option.currentValue;
+    if (option?.type === 'select' && typeof option.currentValue === 'string' && option.currentValue.length > 0) this.#ownModel = option.currentValue;
   }
 
   catalog(ctx: SessionContext): ModelInfo[] | null {
-    if (categoryOption(this.configOptions, 'model') === null && this.agentModels === null) return null;
-    return modelsFrom(ctx.provider, this.configOptions, this.agentModels);
+    if (categoryOption(this.#configOptions, 'model') === null && this.#agentModels === null) return null;
+    return modelsFrom(ctx.provider, this.#configOptions, this.#agentModels);
   }
 
   hasOptions(): boolean {
-    return this.configOptions.length > 0;
+    return this.#configOptions.length > 0;
   }
 
   /**
@@ -162,7 +164,7 @@ export class SessionControls {
    * previous admission before the next protected prompt.
    */
   noteOptionUpdate(options: SessionConfigOption[]): void {
-    this.configOptions = this.configOptions.map(entry => {
+    this.#configOptions = this.#configOptions.map(entry => {
       if (entry.category !== 'mode' && entry.category !== 'model') return entry;
       return options.find(option => option.id === entry.id && option.category === entry.category) ?? entry;
     });
@@ -170,7 +172,7 @@ export class SessionControls {
 
   /** `current_mode_update`: a mode change the agent announced on its own. */
   noteMode(modeId: string): void {
-    this.currentModeId = modeId;
+    this.#currentModeId = modeId;
   }
 
   /**
@@ -184,13 +186,13 @@ export class SessionControls {
     options: SessionConfigOption[] | null,
     answer: unknown,
   ): void {
-    this.noteModes(modes);
+    this.#noteModes(modes);
     if (options !== null && options.length > 0) {
-      this.configOptions = options;
-      this.ownOptions = true;
+      this.#configOptions = options;
+      this.#ownOptions = true;
     }
     const listed = agentModelsOf(answer);
-    if (listed !== null) this.agentModels = listed;
+    if (listed !== null) this.#agentModels = listed;
   }
 
   /**
@@ -205,25 +207,25 @@ export class SessionControls {
    */
   async applyModel(ctx: SessionContext): Promise<void> {
     if (!isGrok(ctx.provider)) return;
-    const { agent, sessionId } = this.target();
+    const { agent, sessionId } = this.#target();
     if (agent === null || sessionId === null) return;
 
     const wanted = ctx.thread.model === AGENT_OWN_MODEL ? null : ctx.thread.model;
     const effort = ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
     if (wanted === null && effort === null) return;
 
-    const listed = this.agentModels;
+    const listed = this.#agentModels;
     const modelId = wanted ?? listed?.currentModelId ?? null;
     if (modelId === null) return;
-    if (this.appliedModel === modelId && this.appliedEffort === effort) return;
+    if (this.#appliedModel === modelId && this.#appliedEffort === effort) return;
 
     // Nothing sent yet, and the session already opened on that pair.
-    if (this.appliedModel === undefined && listed !== null && listed.currentModelId === modelId) {
+    if (this.#appliedModel === undefined && listed !== null && listed.currentModelId === modelId) {
       const entry = listed.available.find((model) => model.modelId === modelId) ?? null;
       const current = entry === null ? null : grokReasoningEffortOf(entry.meta);
       if (effort === null || effort === current) {
-        this.appliedModel = modelId;
-        this.appliedEffort = effort;
+        this.#appliedModel = modelId;
+        this.#appliedEffort = effort;
         return;
       }
     }
@@ -234,12 +236,12 @@ export class SessionControls {
       ...(withEffort === null ? {} : { _meta: { reasoningEffort: withEffort } }),
     });
     // The session already runs this model: only the effort is new.
-    const running = this.appliedModel === undefined ? listed?.currentModelId === modelId : this.appliedModel === modelId;
+    const running = this.#appliedModel === undefined ? listed?.currentModelId === modelId : this.#appliedModel === modelId;
     let refusal: unknown;
     try {
       await set(effort);
-      this.appliedModel = modelId;
-      this.appliedEffort = effort;
+      this.#appliedModel = modelId;
+      this.#appliedEffort = effort;
       return;
     } catch (error) {
       refusal = error;
@@ -248,8 +250,8 @@ export class SessionControls {
       // The pair was refused: the model alone tells which half the agent rejects.
       try {
         await set(null);
-        this.appliedModel = modelId;
-        this.appliedEffort = null;
+        this.#appliedModel = modelId;
+        this.#appliedEffort = null;
       } catch (error) {
         throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(error)}`);
       }
@@ -260,10 +262,10 @@ export class SessionControls {
   }
 
   /** What a `session/new` or `session/load` answered about modes, if anything. */
-  private noteModes(state: SessionModeState | null | undefined): void {
+  #noteModes(state: SessionModeState | null | undefined): void {
     if (state === null || state === undefined) return;
-    this.modes = state.availableModes;
-    this.currentModeId = state.currentModeId;
+    this.#modes = state.availableModes;
+    this.#currentModeId = state.currentModeId;
   }
 
   /**
@@ -279,28 +281,28 @@ export class SessionControls {
     // Grok's mode went on the command line at spawn and it advertises no
     // `availableModes`: there is nothing to match and nothing to warn about.
     if (isGrok(ctx.provider)) return false;
-    const { agent, sessionId } = this.target();
+    const { agent, sessionId } = this.#target();
     if (agent === null || sessionId === null) return false;
     const wanted = ctx.thread.permissionMode;
 
     // An agent that lists its modes as a config option has no `session/set_mode` to answer.
-    const option = this.modes.length === 0 ? categoryOption(this.configOptions, 'mode') : null;
-    if (option !== null) return this.applyModeOption(ctx, option, wanted);
+    const option = this.#modes.length === 0 ? categoryOption(this.#configOptions, 'mode') : null;
+    if (option !== null) return this.#applyModeOption(ctx, option, wanted);
 
-    const modeId = matchMode(wanted, this.modes);
+    const modeId = matchMode(wanted, this.#modes);
     if (modeId === null) {
       if (ctx.protectedExecution) throw new Error(`execution.acp.permissionMode: native agent offers no exact mode for ${wanted}`);
-      if (this.modeWarned) return false;
-      this.modeWarned = true;
-      const offered = this.modes.length === 0 ? 'none' : this.modes.map((mode) => mode.id).join(', ');
+      if (this.#modeWarned) return false;
+      this.#modeWarned = true;
+      const offered = this.#modes.length === 0 ? 'none' : this.#modes.map((mode) => mode.id).join(', ');
       ctx.log('warn', `acp: no session mode matches the permission mode ${wanted}; the agent offers ${offered}`);
       return false;
     }
-    if (this.currentModeId === modeId) return true;
+    if (this.#currentModeId === modeId) return true;
 
     try {
       await agent.request('session/set_mode', { sessionId, modeId });
-      this.currentModeId = modeId;
+      this.#currentModeId = modeId;
       return true;
     } catch (error) {
       if (ctx.protectedExecution) throw new Error(`execution.acp.permissionMode: native agent refused ${modeId}: ${messageOf(error)}`);
@@ -316,15 +318,15 @@ export class SessionControls {
    * agent is in, so nothing goes out when it already matches, and the answer
    * refreshes it. No match is one warning, as for `session/set_mode`.
    */
-  private async applyModeOption(ctx: SessionContext, option: SessionConfigOption, wanted: PermissionMode): Promise<boolean> {
-    const { agent, sessionId } = this.target();
+  async #applyModeOption(ctx: SessionContext, option: SessionConfigOption, wanted: PermissionMode): Promise<boolean> {
+    const { agent, sessionId } = this.#target();
     if (agent === null || sessionId === null) return false;
     const values = selectValues(option);
     const modeId = matchMode(wanted, values.map((id) => ({ id, name: id })));
     if (modeId === null) {
       if (ctx.protectedExecution) throw new Error(`execution.acp.permissionMode: native agent offers no exact mode for ${wanted}`);
-      if (this.modeWarned) return false;
-      this.modeWarned = true;
+      if (this.#modeWarned) return false;
+      this.#modeWarned = true;
       ctx.log('warn', `acp: no session mode matches the permission mode ${wanted}; the agent offers ${values.length === 0 ? 'none' : values.join(', ')}`);
       return false;
     }
@@ -337,8 +339,8 @@ export class SessionControls {
         if (confirmed?.type !== 'select' || String(confirmed.currentValue) !== modeId) throw new Error(`execution.acp.permissionMode: native agent did not confirm ${modeId}`);
       }
       if (listed !== null && listed.length > 0) {
-        this.configOptions = listed;
-        this.ownOptions = true;
+        this.#configOptions = listed;
+        this.#ownOptions = true;
       }
       return true;
     } catch (error) {
@@ -363,30 +365,30 @@ export class SessionControls {
     // answers `session/set_config_option` with method-not-found: nothing goes
     // out.
     if (isGrok(ctx.provider)) return;
-    if (this.configOptions.length === 0 && !ctx.protectedExecution) return;
+    if (this.#configOptions.length === 0 && !ctx.protectedExecution) return;
     const model = ctx.thread.model;
     const effort = ctx.thread.effort;
-    if (model !== this.appliedModel || ctx.protectedExecution) {
+    if (model !== this.#appliedModel || ctx.protectedExecution) {
       // Back to the agent's own model on a session moved off it: that model
       // has to be asked for, or the session stays on the last one.
-      const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;
-      const unapplied = await this.setOption(ctx, 'model', wanted);
+      const wanted = model === AGENT_OWN_MODEL && this.#appliedModel !== undefined && this.#ownModel !== null ? this.#ownModel : model;
+      const unapplied = await this.#setOption(ctx, 'model', wanted);
       if (unapplied?.kind === 'gone') throw new Error('the acp session went away before the prompt');
       if (unapplied === null) {
         // OpenCode 2 puts the effort back to its default with any other model:
         // what the answer now reports decides whether the effort goes again.
-        if (this.appliedModel !== model) this.appliedEffort = undefined;
-        this.appliedModel = model;
+        if (this.#appliedModel !== model) this.#appliedEffort = undefined;
+        this.#appliedModel = model;
       } else if (ctx.protectedExecution) {
         throw new Error(`execution.acp.model: native agent offers no confirmed model ${wanted}`);
       } else if (unapplied.kind === 'unlisted' || unapplied.kind === 'refused') {
         throw new ModelRefused(`thread.model: ${ctx.provider.name} ${unapplied.detail}`);
       }
     }
-    if (effort !== this.appliedEffort) {
-      const unapplied = await this.setOption(ctx, 'thought_level', effort);
+    if (effort !== this.#appliedEffort) {
+      const unapplied = await this.#setOption(ctx, 'thought_level', effort);
       if (unapplied?.kind === 'gone') throw new Error('the acp session went away before the prompt');
-      if (unapplied === null) this.appliedEffort = effort;
+      if (unapplied === null) this.#appliedEffort = effort;
     }
   }
 
@@ -396,18 +398,18 @@ export class SessionControls {
    * the prefix the account's environment names. OpenCode 2 lists the models of
    * its own providers alone and still runs `douane/<model>` when asked.
    */
-  private injectedModelOption(ctx: SessionContext, category: SessionConfigOptionCategory, wanted: string): SessionConfigOption | undefined {
+  #injectedModelOption(ctx: SessionContext, category: SessionConfigOptionCategory, wanted: string): SessionConfigOption | undefined {
     const prefix = ctx.accountEnv[PROXY_PREFIX_ENV];
     if (category !== 'model' || prefix === undefined || prefix.length === 0 || !wanted.startsWith(prefix)) return undefined;
-    return categoryOption(this.configOptions, 'model') ?? undefined;
+    return categoryOption(this.#configOptions, 'model') ?? undefined;
   }
 
   /** One effort level on the session as it runs. False when the agent has no such option or refused it. */
   async applyEffort(ctx: SessionContext, effort: string): Promise<boolean> {
-    if (isGrok(ctx.provider) || this.configOptions.length === 0) return false;
-    if (effort === this.appliedEffort) return true;
-    if ((await this.setOption(ctx, 'thought_level', effort)) !== null) return false;
-    this.appliedEffort = effort;
+    if (isGrok(ctx.provider) || this.#configOptions.length === 0) return false;
+    if (effort === this.#appliedEffort) return true;
+    if ((await this.#setOption(ctx, 'thought_level', effort)) !== null) return false;
+    this.#appliedEffort = effort;
     return true;
   }
 
@@ -416,38 +418,38 @@ export class SessionControls {
    * needed; otherwise why not. A refused effort is not asked again by this
    * process; a refused model is, since it fails its turn instead of running.
    */
-  private async setOption(
+  async #setOption(
     ctx: SessionContext,
     category: SessionConfigOptionCategory,
     wanted: string | null,
   ): Promise<Unapplied | null> {
-    const { agent, sessionId } = this.target();
+    const { agent, sessionId } = this.#target();
     const strictModel = !!ctx.protectedExecution && category === 'model';
     const gone: Unapplied = { kind: 'gone', detail: 'the agent process is gone' };
     if (agent === null || sessionId === null) return gone;
     // No effort set: an agent that lists `default` among its levels (OpenCode
     // 2) is put back on it, since it keeps the last level it was asked for.
     if ((wanted === null || wanted.length === 0) && category === 'thought_level') {
-      const option = categoryOption(this.configOptions, category);
+      const option = categoryOption(this.#configOptions, category);
       if (option === null || !selectValues(option).includes(AGENT_DEFAULT_EFFORT)) return null;
       wanted = AGENT_DEFAULT_EFFORT;
     }
     // Nothing to ask for: the agent keeps whatever it is configured with.
     if (wanted === null || wanted.length === 0) return null;
     if (category === 'model' && wanted === AGENT_OWN_MODEL) return null;
-    const listed = this.configOptions.find(
+    const listed = this.#configOptions.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );
     // Already the value this session last reported: nothing to send.
-    if (this.ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return null;
+    if (this.#ownOptions && listed?.type === 'select' && String(listed.currentValue) === wanted) return null;
     const refusal = `${category}\0${wanted}`;
-    if (category !== 'model' && this.refused.has(refusal)) return { kind: 'refused', detail: `refused the ${category} ${wanted}` };
-    const option = listed ?? this.injectedModelOption(ctx, category, wanted);
+    if (category !== 'model' && this.#refused.has(refusal)) return { kind: 'refused', detail: `refused the ${category} ${wanted}` };
+    const option = listed ?? this.#injectedModelOption(ctx, category, wanted);
     if (option === undefined) {
-      const offered = categoryOption(this.configOptions, category);
+      const offered = categoryOption(this.#configOptions, category);
       if (offered !== null && category === 'model') return { kind: 'unlisted', detail: `offers no model ${wanted}; it offers ${selectValues(offered).join(', ') || 'none'}` };
-      if (!this.configWarned) {
-        this.configWarned = true;
+      if (!this.#configWarned) {
+        this.#configWarned = true;
         ctx.log('warn', `acp: the agent offers no ${category} option with the value ${wanted}`);
       }
       return { kind: offered === null ? 'absent' : 'unlisted', detail: `offers no ${category} ${wanted}` };
@@ -458,7 +460,7 @@ export class SessionControls {
     // is asked again; a refusal of one it lists is its answer.
     const waits = listed === undefined ? INJECTED_MODEL_RETRY_MS : [];
     for (let attempt = 0; ; attempt += 1) {
-      const live = this.target();
+      const live = this.#target();
       if (live.agent === null || live.sessionId === null) return gone;
       try {
         const answer = await live.agent.request('session/set_config_option', {
@@ -475,8 +477,8 @@ export class SessionControls {
           }
         }
         if (options !== null && options.length > 0) {
-          this.configOptions = options;
-          this.ownOptions = true;
+          this.#configOptions = options;
+          this.#ownOptions = true;
         }
         return null;
       } catch (error) {
@@ -485,7 +487,7 @@ export class SessionControls {
           if (strictModel) throw new Error(`execution.acp.model: native agent refused ${wanted}: ${messageOf(error)}`);
           if (category === 'model') return { kind: 'refused', detail: `refused the model ${wanted}: ${messageOf(error)}` };
           ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
-          this.refused.add(refusal);
+          this.#refused.add(refusal);
           return { kind: 'refused', detail: `refused the ${category} ${wanted}` };
         }
         await new Promise<void>((resolve) => { setTimeout(resolve, wait); });
