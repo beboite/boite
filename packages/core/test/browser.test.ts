@@ -113,6 +113,22 @@ real('a page nobody drives or watches sleeps, and meets the next command or view
   expect(await awakeFor(2000)).toBe(true);
 }, 150_000);
 
+real('a background tab woken from sleep draws again: its screenshot answers', async () => {
+  const { harness, agent, threadId } = browserFixture;
+  harness.core.browser.sleepAfterMs = 300;
+  const first = (await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } })).tabId!;
+  // The second tab is the browser's front one; the first is drawn only while focus emulation keeps it shown.
+  const second = (await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop') } })).tabId!;
+  const browser = harness.core.browser;
+  for (const end = Date.now() + 30_000; !(browser.asleep(first) && browser.asleep(second)) && Date.now() < end;) await Bun.sleep(50);
+  expect([browser.asleep(first), browser.asleep(second)]).toEqual([true, true]);
+  // Before the fix the woken page stayed hidden and the capture waited 30 s for a frame that never came.
+  const started = performance.now();
+  const shot = await agent.call('browser.command', { threadId, tabId: first, action: { kind: 'screenshot' } });
+  expect(Buffer.from(shot.screenshot!.base64, 'base64').subarray(1, 4).toString()).toBe('PNG');
+  expect(performance.now() - started).toBeLessThan(10_000);
+}, 150_000);
+
 real('boite browse opens its page as a new tab of the conversation browser, not in a panel of its own', async () => {
   const { owner, agent, threadId } = browserFixture;
   const mine = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
