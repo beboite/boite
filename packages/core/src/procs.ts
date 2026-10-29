@@ -20,22 +20,8 @@ import { ExecutionProtections } from './execution-protection.ts';
 import { closeProcessResources, protectionRunner } from './protection-runner.ts';
 import { processEventDiagnostic } from './process-event-diagnostics.ts';
 
-import type { ChildProcess, ManagedStop, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
+import type { ChildProcess, ManagedStop, ProcessEntry as Entry, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
 export type { ChildProcess, ManagedStop, PipedChildProcess, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
-
-interface Entry {
-  record: ProcessRecord;
-  identity: ProcessIdentity;
-  root: boolean;
-  startup?: boolean;
-  /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
-  kill(): void | Promise<void>;
-  /** Not yet seen exiting by its spawner, which holds its handle until then; false for one the core did not spawn. */
-  running(): boolean;
-  usage(): { cpuMs: number; peakMemoryBytes: number } | null;
-  /** The parent running when this process started, held after it exits: the sweep reads lineage through it. */
-  parent?: Entry | null;
-}
 
 export const STARTUP_PRIORITY = { ms: 30_000 };
 /** How long an exited pid stays in its thread's history, for a late job event. */
