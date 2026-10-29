@@ -395,7 +395,7 @@ export class ContactStore implements LinkedContacts {
       if (params.trusted !== undefined) entry.trusted = params.trusted;
     });
     if (name !== undefined) this.members.mark(this.members.holdersOf(contact.coreId));
-    // Trusted now: what waits is answered without the owner.
+    // Trusted now: what waits gets the automatic pass; what it opens no project for stays with the owner.
     if (params.trusted === true) for (const request of this.#requests()) if (request.coreId === contact.coreId && request.direction === 'in' && request.status === 'pending') this.#autoDecide(request.id);
     return this.view(contact);
   }
