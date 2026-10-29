@@ -247,6 +247,18 @@ export const strings = {
       failed: 'This diagram could not be drawn: {reason}',
       unavailable: 'The diagram could not be drawn here.'
     },
+    /** A ```view block of an answer, its HTML shown as a page (`lib/view-block.ts`). The reasons end `failed`. */
+    viewBlock: {
+      label: 'View',
+      showView: 'View',
+      failed: 'This view could not be shown: {reason}',
+      unavailable: 'The view could not be shown here.',
+      timeout: 'it did not load in time',
+      silent: 'its page did not start',
+      navigated: 'it left its own page'
+    },
+    /** What stands in for a diagram, a formula or a view an answer is still writing. */
+    drawingPending: 'Drawing…',
     /** The tooltip of a formula Temml could not read, its source left as written. */
     formulaFailed: 'This formula could not be read: {reason}'
   }

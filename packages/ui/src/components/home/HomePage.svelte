@@ -9,6 +9,7 @@
   import AddContact from './AddContact.svelte';
   import ContactPage from './ContactPage.svelte';
   import ContactSettings from './ContactSettings.svelte';
+  import MailCard from './MailCard.svelte';
   import RequestCard from './RequestCard.svelte';
 
   /**
@@ -50,6 +51,13 @@
           <p>{labels.intro}</p>
         </div>
       </header>
+
+      {#if data.mail?.length}
+        <section class="card" data-testid="home-mail">
+          <h2 class="ui-label-box"><span class="ui-label">{labels.mail.title}</span><InfoTip topic={labels.mail.title} text={labels.mail.tip} /><span class="count">{fill(labels.waiting, { count: count(data.mail.length) })}</span></h2>
+          {#each data.mail as letter (letter.id)}<MailCard {view} {letter} {now} />{/each}
+        </section>
+      {/if}
 
       {#if requests.pending.length || requests.decided.length}
         <section class="card" data-testid="home-requests">

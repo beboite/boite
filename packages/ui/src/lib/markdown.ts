@@ -7,11 +7,11 @@ import { closesFence, fenceLanguage, openFence } from './fences';
  * attributes are escaped. No images: a `data:` picture arrives as a tool document,
  * and an answer never fetches a remote one.
  *
- * A closed ```` ```mermaid ```` block and math between `$$…$$`, `\[…\]`,
- * `\(…\)` or in a ```` ```math ```` block become marked elements that still
- * show their source (`md-mermaid`, `md-math`); `lib/rich-markdown.ts` draws
- * them once they are in the page. A single `$` is never math: prices and
- * `$PATH` stay text.
+ * A closed ```` ```mermaid ```` or ```` ```view ```` block and math between
+ * `$$…$$`, `\[…\]`, `\(…\)` or in a ```` ```math ```` block become marked
+ * elements that hold their source (`md-mermaid`, `md-view`, `md-math`);
+ * `lib/rich-markdown.ts` draws them once they are in the page. A ```` ```html ````
+ * block stays code. A single `$` is never math: prices and `$PATH` stay text.
  */
 
 function escape(text: string): string {
@@ -22,12 +22,14 @@ function escape(text: string): string {
     .replaceAll('"', '&quot;');
 }
 
+
 const HEADING = /^(#{1,6})\s+(.+)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const ITEM = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 const BULLET_MARK = /^\s*[-*+]\s/;
 const TASK = /^\[([ xX])\]\s+(.*)$/;
-const QUOTE = /^\s*>\s?(.*)$/;
+/** A quoted line: its text is a document of its own once the mark is off (`readQuote`). */
+export const QUOTE = /^\s*>\s?(.*)$/;
 const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
 
 interface ListItem {
@@ -233,7 +235,7 @@ function readFence(lines: string[], start: number): Block | null {
   }
   const language = name ? ` data-language="${escape(name)}"` : '';
   const pre = `<pre${language}><code>${escape(source)}</code></pre>`;
-  if (closed && kind === 'mermaid' && source.trim()) return { html: `<div class="md-mermaid" data-source="${escape(source)}">${pre}</div>`, end };
+  if (closed && (kind === 'mermaid' || kind === 'view') && source.trim()) return { html: `<div class="md-${kind}" data-source="${escape(source)}">${pre}</div>`, end };
   return { html: pre, end };
 }
 

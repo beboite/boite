@@ -230,6 +230,7 @@ const RULES: Partial<Record<RpcMethodName, Rule>> = {
   'contacts.grant': net('contacts'),
   'contacts.sendHuman': net('contacts'),
   'contacts.decide': when('network.contacts', (values, params) => params.accept === true && values.network?.contacts === false),
+  'contacts.decideMail': when('network.contacts', (values, params) => params.accept === true && values.network?.contacts === false),
   'contacts.tailscaleKey': when('network.contacts', (values, params) => params.key !== null && values.network?.contacts === false),
   'threads.linkPullRequest': pullRequestsOff,
   'threads.watchPullRequest': pullRequestsOff,

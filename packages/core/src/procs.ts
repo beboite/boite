@@ -20,22 +20,8 @@ import { ExecutionProtections } from './execution-protection.ts';
 import { closeProcessResources, protectionRunner } from './protection-runner.ts';
 import { processEventDiagnostic } from './process-event-diagnostics.ts';
 
-import type { ChildProcess, ManagedStop, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
+import type { ChildProcess, ManagedStop, ProcessEntry as Entry, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
 export type { ChildProcess, ManagedStop, PipedChildProcess, SpawnedChild, SpawnedPipedProcess, SpawnedProcess, SpawnedTerminal, SpawnOptions, TerminalSpawnOptions } from './process-spawn-types.ts';
-
-interface Entry {
-  record: ProcessRecord;
-  identity: ProcessIdentity;
-  root: boolean;
-  startup?: boolean;
-  /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
-  kill(): void | Promise<void>;
-  /** Not yet seen exiting by its spawner, which holds its handle until then; false for one the core did not spawn. */
-  running(): boolean;
-  usage(): { cpuMs: number; peakMemoryBytes: number } | null;
-  /** The parent running when this process started, held after it exits: the sweep reads lineage through it. */
-  parent?: Entry | null;
-}
 
 export const STARTUP_PRIORITY = { ms: 30_000 };
 /** How long an exited pid stays in its thread's history, for a late job event. */
@@ -657,11 +643,12 @@ export class ProcRegistry {
     void stop.finally(() => this.#stops.delete(stop));
   }
 
-  /** Project removal must wait for exit records before deleting the projection; `waitForExit` waits alone, for `pids` only if given. */
+  /** Project removal waits for exit records; native admission also drains untraced job members when requested. */
   async stopAndWait(threadId: ThreadId): Promise<void> { this.killTree(threadId); await this.waitForExit(threadId); }
-  async waitForExit(threadId: ThreadId, pids?: number[]): Promise<void> {
+  async waitForExit(threadId: ThreadId, pids?: number[], options: {native?: boolean} = {}): Promise<void> {
     const deadline = Date.now() + 5000;
-    while (pids ? pids.some((pid) => this.#live.get(threadId)?.has(pid)) : this.liveCount(threadId) > 0) {
+    while ((pids ? pids.some((pid) => this.#live.get(threadId)?.has(pid)) : this.liveCount(threadId) > 0)
+      || options.native && this.platform.hasProcesses?.(threadId)) {
       if (Date.now() >= deadline) throw new Error(`processes of ${threadId} did not exit within five seconds`);
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
@@ -766,6 +753,12 @@ export class ProcRegistry {
     if ((this.#live.get(threadId)?.size ?? 0) === 0) {
       this.#lastLoad.delete(threadId); this.#lastPushed.delete(threadId);
       this.#resources.forget(threadId);
+      // The load tick skips a thread with nothing live, so its last sample would
+      // stand on every client: a thread whose warm session ended still counted
+      // as an agent at work in the task manager.
+      if (!this.#journal.isClosed() && this.#journal.getThread(threadId) !== null) {
+        this.#bus.emit('thread.load', { threadId, load: { processes: 0, cpuPercent: 0, memoryBytes: 0 } });
+      }
     }
     this.#forgetWhenIdle(threadId);
     this.platform.pidRemoved(threadId, pid, !this.#shown.has(threadId));

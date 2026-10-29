@@ -1,4 +1,4 @@
-import type { Thread, ThreadId } from '@boite/contracts';
+import type { AgentLetter, Thread, ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
 
 /*
@@ -64,4 +64,27 @@ export function trustContactMail(ctx: FakeContext, threadId: ThreadId): void {
   const ids = history(ctx, threadId);
   for (const id of ids) heldMail(ctx).delete(id);
   settle(ctx, ids);
+}
+
+/** Letters the owner delivered one by one, as the core's approval digests. */
+const approved = new WeakMap<FakeContext, Set<string>>();
+
+/**
+ * As the core's `contactMailGate`: contact mail outside a shared project
+ * reaches the agent when its contact is trusted or the owner delivered it.
+ * Other mail waits for the owner, except on a tool-free thread (echo in
+ * default mode), which reads it and takes the hold.
+ */
+export function contactMailRoute(ctx: FakeContext, threadId: ThreadId, letter: AgentLetter, trusted: boolean): 'open' | 'cleared' | 'owner' | 'tool-free' {
+  if (!letter.contact || letter.sharedProjectId) return 'open';
+  if (trusted || approved.get(ctx)?.has(letter.id)) return 'cleared';
+  const thread = ctx.threads.get(threadId);
+  const provider = thread && ctx.providers.find(entry => entry.id === thread.providerId);
+  return provider?.protocol === 'echo' && thread!.permissionMode === 'default' ? 'tool-free' : 'owner';
+}
+
+export function approveContactMail(ctx: FakeContext, letterId: string): void {
+  let ids = approved.get(ctx);
+  if (!ids) { ids = new Set(); approved.set(ctx, ids); }
+  ids.add(letterId);
 }

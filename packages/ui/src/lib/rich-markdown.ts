@@ -1,13 +1,16 @@
 /**
- * Draws the diagrams and formulas `lib/markdown.ts` marked (`.md-mermaid`,
- * `.md-math`) in a node that shows rendered Markdown, as they arrive in it:
- * the node is watched, so a block an answer completes is drawn on its own.
+ * Draws the diagrams, formulas and views `lib/markdown.ts` marked
+ * (`.md-mermaid`, `.md-math`, `.md-view`) in a node that shows rendered
+ * Markdown, as they arrive in it: the node is watched, so a block an answer
+ * completes is drawn on its own.
  *
  * This action is all the startup bundle carries. The drawing code, its styles
  * and the libraries behind it (`lib/rich-markdown-draw.ts`) are imported the
- * first time a node holds something to draw. Until then the source stays on
- * screen, and it stays when that import fails: a diagram then says it could
- * not be drawn here.
+ * first time a node holds something to draw. Until a block is drawn, app.css
+ * keeps a placeholder where it goes in place of its source (`data-rich-markdown`
+ * scopes that to the nodes this action watches). A block that cannot be drawn
+ * shows its source again (`md-source`): when that import fails, a diagram or a
+ * view also says it could not be drawn here.
  */
 import { strings } from './strings';
 import type { MediaItem } from './media-gallery';
@@ -17,9 +20,14 @@ type Drawing = typeof import('./rich-markdown-draw');
 export interface RichMarkdownOptions {
   /** Shows a drawn diagram over the app (`ImageViewer`). Without it a diagram has no enlarge button. */
   onenlarge?: (item: MediaItem) => void;
+  /**
+   * The address a ```view block's HTML opens at as a page (`Store.viewBlock`),
+   * on the machine that owns the conversation. Without it a view block stays code.
+   */
+  viewBlock?: (html: string) => Promise<{ ok: true; value: string } | { ok: false; error: string }>;
 }
 
-const PENDING = '.md-math:not([data-drawn]), .md-mermaid:not([data-drawn])';
+const PENDING = '.md-math:not([data-drawn]), .md-mermaid:not([data-drawn]), .md-view:not([data-drawn])';
 
 let drawing: Drawing | null = null;
 let loading: Promise<Drawing> | null = null;
@@ -32,7 +40,8 @@ function load(): Promise<Drawing> {
 
 export function richMarkdown(node: HTMLElement, options: RichMarkdownOptions = {}) {
   let current = options;
-  const enlarge = () => current.onenlarge;
+  const settings = () => current;
+  node.setAttribute('data-rich-markdown', '');
   const draw = (): void => {
     if (!node.querySelector(PENDING)) return;
     if (!drawing) {
@@ -41,18 +50,19 @@ export function richMarkdown(node: HTMLElement, options: RichMarkdownOptions = {
     }
     for (const element of node.querySelectorAll<HTMLElement>(PENDING)) {
       element.dataset.drawn = '';
-      drawing.draw(element, enlarge);
+      drawing.draw(element, settings);
     }
   };
-  // The blocks waiting now keep their source; a formula's TeX reads as it is.
+  // The blocks waiting now show their source; a formula's TeX reads as it is.
   const unavailable = (): void => {
     for (const element of node.querySelectorAll<HTMLElement>(PENDING)) {
       element.dataset.drawn = '';
-      if (!element.classList.contains('md-mermaid')) continue;
+      element.classList.add('md-source');
+      if (element.classList.contains('md-math')) continue;
       const line = document.createElement('p');
       line.className = 'md-diagram-error';
       line.dataset.testid = 'diagram-error';
-      line.textContent = strings.chat.diagram.unavailable;
+      line.textContent = element.classList.contains('md-view') ? strings.chat.viewBlock.unavailable : strings.chat.diagram.unavailable;
       element.append(line);
     }
   };

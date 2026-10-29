@@ -2,9 +2,9 @@
 import { threadActive } from '@boite/contracts';
 import {createHash} from 'node:crypto';
 import {realpathSync} from 'node:fs';
-import type {AgentLetter} from '@boite/contracts';
+import type {AgentLetter, HeldContactLetter} from '@boite/contracts';
 import type {Core} from '../core.ts';
-import {refused} from '../errors.ts';
+import {invalidParams, refused} from '../errors.ts';
 import {withLoad} from '../threads/records.ts';
 import type {AccessBinding} from './access-scopes.ts';
 import {incomingContact} from './human-letters.ts';
@@ -13,8 +13,8 @@ import {incomingContact} from './human-letters.ts';
  * `peers` are every contact whose mail the history read; `holders` only those
  * whose mail came outside a shared project and holds it. Scopes saved before
  * `holders` existed hold through all their peers. `trusted` are the digests of
- * the letters still waiting when the owner trusted the history; those letters,
- * exactly as they were, no longer hold it.
+ * the letters still waiting when the owner trusted the history or delivered
+ * them one by one; those letters, exactly as they were, no longer hold it.
  */
 interface LetterScope {bindings: AccessBinding[]; legacy: boolean; peers: string[]; holders?: string[]; trustedAt?: number; trusted?: string[]}
 const checkedHistory = new WeakMap<Core, Set<string>>();
@@ -54,6 +54,76 @@ function history(core: Core, threadId: string): string[] {
     thread = thread.parentThreadId ? core.journal.getThread(thread.parentThreadId) : null;
   }
   return ids;
+}
+
+/** Unexpired contact mail outside a shared project still in this thread's inbox, oldest first. */
+function waitingMail(core: Core, threadId: string): AgentLetter[] {
+  return (core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id=? AND direction='in' AND status='received' AND json_type(data,'$.sharedProjectId') IS NULL ORDER BY created_at").all(threadId) as {data: string}[])
+    .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.contact && letter.expiresAt > Date.now());
+}
+
+/**
+ * How this thread takes contact mail sent outside a shared project, which has
+ * no boundary Boite can enforce. It is `cleared` once its contact is trusted or
+ * the owner delivered that very letter, and `held` for the owner otherwise,
+ * unless the thread runs tool-free, which reads it and holds its history instead.
+ */
+export function contactMailGate(core: Core, threadId: string): {cleared: (letter: AgentLetter) => boolean; held: (letter: AgentLetter) => boolean} {
+  const thread = core.journal.getThread(threadId);
+  const toolFree = thread !== null && core.providers.get(thread.providerId)?.protocol === 'echo' && thread.permissionMode === 'default';
+  const approved = storedScope(core, threadId)?.trusted ?? [];
+  const cleared = (letter: AgentLetter) => Boolean(letter.contact) && !letter.sharedProjectId
+    && (core.contacts.find(letter.contact!.coreId)?.trusted === true || approved.includes(approval(letter)));
+  return {cleared, held: letter => Boolean(letter.contact) && !letter.sharedProjectId && !toolFree && !cleared(letter)};
+}
+
+/** The contact mail every thread here holds for the owner, oldest first, at most 50. */
+export function heldMail(core: Core): HeldContactLetter[] {
+  const rows = core.journal.db.query("SELECT data FROM coordination_letters WHERE status='received' AND direction='in' AND json_type(data,'$.contact')='object' AND json_type(data,'$.sharedProjectId') IS NULL ORDER BY created_at").all() as {data: string}[];
+  const held: HeldContactLetter[] = [], gates = new Map<string, ReturnType<typeof contactMailGate>>();
+  for (const row of rows) {
+    const letter = JSON.parse(row.data) as AgentLetter, threadId = letter.to.threadId;
+    const thread = core.journal.getThread(threadId);
+    if (letter.expiresAt <= Date.now() || !thread || thread.archived) continue;
+    const gate = gates.get(threadId) ?? contactMailGate(core, threadId);
+    gates.set(threadId, gate);
+    if (!gate.held(letter)) continue;
+    const coreId = letter.contact!.coreId;
+    held.push({id: letter.id, coreId, contact: core.contacts.find(coreId)?.name ?? letter.contact!.name, from: letter.from.title, threadId, thread: thread.title, text: letter.text, createdAt: letter.createdAt, expiresAt: letter.expiresAt});
+    if (held.length === 50) break;
+  }
+  return held;
+}
+
+/**
+ * The owner delivers one held letter (`heldMail`) to its thread, approving it
+ * exactly as it is, or refuses it: its sender reads that it was refused.
+ */
+export function decideMail(core: Core, id: unknown, accept: unknown): {ok: true} {
+  if (typeof id !== 'string' || id.length > 100) throw invalidParams('id: expected a letter id', {field: 'id'});
+  if (typeof accept !== 'boolean') throw invalidParams('accept: expected a boolean', {field: 'accept'});
+  const row = core.journal.db.query("SELECT data FROM coordination_letters WHERE id=? AND direction='in' AND status='received'").get(id) as {data: string} | null;
+  const letter = row ? JSON.parse(row.data) as AgentLetter : null;
+  if (!letter || letter.expiresAt <= Date.now() || !contactMailGate(core, letter.to.threadId).held(letter)) throw invalidParams('id: expected a contact letter waiting for the owner', {field: 'id'});
+  if (!accept) {
+    core.coordination.refuseHeld(letter, 'Refused by the owner');
+    return {ok: true};
+  }
+  const threadId = letter.to.threadId;
+  const scope = storedScope(core, threadId) ?? {bindings: [], legacy: false, peers: []};
+  // An approval lasts until its letter reached the agent: waiting, or queued for a provider turn that admits it again.
+  const unread = core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id=? AND direction='in' AND status IN ('received','uncertain')").all(threadId) as {data: string}[];
+  const live = new Set(unread.map(row => approval(JSON.parse(row.data) as AgentLetter)));
+  core.journal.setSetting(`shared-file-letters:${threadId}`, {...scope, trusted: [...(scope.trusted ?? []).filter(digest => live.has(digest)), approval(letter)]});
+  core.contacts.changed();
+  core.coordination.resumeTrusted(threadId);
+  return {ok: true};
+}
+
+/** A contact the owner now trusts: the threads holding its mail take it. */
+export function releaseMail(core: Core, coreId: string): void {
+  const rows = core.journal.db.query("SELECT DISTINCT thread_id FROM coordination_letters WHERE direction='in' AND status='received' AND json_extract(data,'$.contact.coreId')=?").all(coreId) as {thread_id: string}[];
+  for (const row of rows) core.coordination.resumeTrusted(row.thread_id);
 }
 
 export function letterScope(core: Core, threadId: string): LetterScope {
@@ -97,8 +167,7 @@ export function trustLetters(core: Core, threadId: string): void {
     // A refused wake left the holders' letters waiting: the owner trusted them
     // too, not a letter that arrives later.
     const holders = scope.holders ?? scope.peers;
-    const waiting = (core.journal.db.query("SELECT data FROM coordination_letters WHERE thread_id=? AND direction='in' AND status='received' AND json_type(data,'$.sharedProjectId') IS NULL").all(id) as {data: string}[])
-      .map(row => JSON.parse(row.data) as AgentLetter).filter(letter => letter.contact && letter.expiresAt > Date.now());
+    const waiting = waitingMail(core, id);
     const trusted = waiting.map(approval).filter((digest, index) => scope.trusted?.includes(digest) || holders.includes(waiting[index]!.contact!.coreId));
     core.journal.setSetting(`shared-file-letters:${id}`, {...scope, legacy: false, holders: [], trustedAt: Date.now(), trusted});
     // The hold may have refused a wake whose letters expired since: its pause ends all the same.
@@ -136,10 +205,15 @@ export function protectLetters(core: Core, threadId: string, letters: AgentLette
   // Core-formatted request answers still contain the contact's untrusted reason.
   const contactMail = letters.filter(l => l.contact);
   if (!contactMail.length) return;
-  // A letter the owner trusted while it waited carries no new authority.
-  const trusted = storedScope(core, threadId)?.trusted ?? [];
-  const external = contactMail.filter(l => l.sharedProjectId || !trusted.includes(approval(l)));
-  if (!external.length) return;
+  // A letter the owner trusted or delivered, or one from a trusted contact, carries no new authority.
+  const gate = contactMailGate(core, threadId);
+  const external = contactMail.filter(l => !gate.cleared(l));
+  if (!external.length) {
+    // Without a scope, a restart would read this delivered mail as an older core's history and hold the thread.
+    if (!storedScope(core, threadId)) core.journal.setSetting(`shared-file-letters:${threadId}`, {bindings: [], legacy: false, peers: [...new Set(contactMail.map(l => l.contact!.coreId))]} satisfies LetterScope);
+    return;
+  }
+  if (external.some(gate.held)) throw refused('shared file policy: contact mail outside a shared project waits for the owner');
   const thread = core.threads.require(threadId);
   const protocol = core.providers.require(thread.providerId).protocol;
   if (!core.sharedAccess.execution.support(protocol, thread.providerId, thread.permissionMode).supported || protocol === 'echo' && thread.permissionMode !== 'default') throw refused('shared file policy: contact letter execution requires a protected provider route');

@@ -68,8 +68,8 @@ turns it off too. A shell on the loopback that
 names no device is given the core's hostname. The name is whatever the client
 said, so it is information for the agent and never grants anything.
 
-Device and agent event lists live in `packages/contracts/src/access.ts`; agent
-method reasons live in `packages/core/src/access.ts`. New methods remain
+Device and agent access lists and method reasons live in
+`packages/contracts/src/access.ts`. New methods remain
 owner-only unless the access lists explicitly permit them. The router and
 [in-memory client](development.md#contract-scenarios) enforce the same contract.
 The [CLI](cli.md) uses the agent credential inside a thread.
@@ -86,7 +86,13 @@ prompts separately from message history; their attachments are content-addressed
 assets. Compare-and-swap and tombstones protect edits across reconnects.
 Removing references collects unused assets; live records and pending uploads
 retain their bytes without loading attachment bodies during text saves.
-The core drains accepted queues even when every client is closed, waking only
+The core is the sole queue runner, including for incognito input. Private
+records and assets stay in memory, restricted to their originating connection.
+Private delivery receipts stay in memory to protect reconnects; durable receipts
+are stored in the journal.
+Batching, activity command parsing and permission auto-decisions live in contracts
+and are shared with the render fixture. The core drains accepted durable queues
+even when every client is closed, waking only
 records with queued input and targeting thread events to that thread's record.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
 from `permissions.list`; an answered, ended or withdrawn request leaves the list

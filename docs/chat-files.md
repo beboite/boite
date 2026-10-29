@@ -97,6 +97,10 @@ answer, with no card around it, on the conversation's own background, in the
 app's theme and faces. Every provider can use the command. No setting turns
 it on, and the switch above does not turn it off.
 
+A page small enough to write in the answer can be a ```` ```view ```` block
+instead, with no file and no command: the same frame, kit and theme, drawn
+where the block is ([view blocks](diagrams-and-formulas.md#view-blocks)).
+
 Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png) · [a view placed between two paragraphs](images/inline-view-placed-desktop.png) · [the same on a phone](images/inline-view-placed-phone.png)
 
 ### The app's look
@@ -145,10 +149,12 @@ The guide every session starts with (`packages/core/src/agent-guide.ts`) sends
 a diagram, a chart or a formula to the chat first: `CHAT_VISUALS` names the
 Mermaid headers chat draws and the TeX delimiters, and says when a picture is
 called for ([diagrams and formulas](diagrams-and-formulas.md)). That costs the
-agent no command and no help to read. The next line, `VIEW_GUIDE_LINE` in
-`packages/contracts/src/view.ts`, keeps a page for what Mermaid cannot draw (a
-simulator, an animation, a custom page) and sends the agent to `boite view
-help` before its first one. `VIEW_HELP`, beside it, prints the rest: the layout
+agent no command and no help to read, and so does a small interactive or
+animated piece: the same line offers a ```` ```view ```` block of HTML in the
+answer ([view blocks](diagrams-and-formulas.md#view-blocks)). The next line,
+`VIEW_GUIDE_LINE` in `packages/contracts/src/view.ts`, keeps `boite view` for a
+larger page or one kept as a file and sends the agent to `boite view help`
+before its first one. `VIEW_HELP`, beside it, prints the rest: the layout
 rules, the app's look and its kit, the theme variables, how to animate and what
 the publish checks. The built-in skill `boite-visual` is listed for the same
 richer case only.

@@ -54,7 +54,6 @@
   let activityRoom = $state(0);
   const answerEntries = textEntries();
   let text = $derived(composer?.text ?? '');
-  /** The attachments this prompt carries, the same array the strip above the box draws. */
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
   let previewReferences = $derived(composer?.previewReferences ?? []);
   let choice = $state<Choice | null>(null);
@@ -128,7 +127,7 @@
   });
   /**
    * A thread whose machine dropped still takes prompts: they wait in its queue on the device and go out
-   * once the machine is back. A draft's queue starts its conversation then (`launchQueuedDrafts`); an
+   * once the machine is back. The core starts a draft's conversation from its queue; an
    * incognito draft is never kept on the device, so it waits for the machine.
    */
   let offline = $derived(!target && store.connection !== 'ready' && (thread !== null ? !store.draft : !!store.draft && !store.draft.incognito));
@@ -387,8 +386,9 @@
       // Every queued prompt keeps the chips it was written with: a later change of the picker does not redirect it.
       // Chips that only show what the thread resolves to keep the thread's own selection, so the prompt can steer a turn left on the agent's default.
       const kept = queuedChoice(inputStore, inputStore.openThread?.id === inputKey ? inputStore.openThread : null, $state.snapshot(sendChoice));
-      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: kept, ...(references.length ? { previewReferences: references } : {}) },
-        offline ? { choice: { ...kept } } : undefined);
+      if (!inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, choice: kept, ...(references.length ? { previewReferences: references } : {}) },
+        offline ? { choice: { ...kept } } : undefined)) return;
+      if (state.queued[0]?.request?.failed !== undefined) inputStore.retryQueued(inputKey, 0);
       state.editing = null;
       emptyBox(state);
       resetHistory(state);

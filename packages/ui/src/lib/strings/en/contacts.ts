@@ -18,7 +18,7 @@ export const strings = {
     rename: 'Rename {name}',
     nameLabel: 'Contact name',
     trusted: 'Trusted',
-    trustedTip: 'Its requests are answered without you: a project whose git remote matches is shared, otherwise the concierge agent decides. Reading conversations is never granted that way.',
+    trustedTip: 'Its requests can open a project without you: one whose git remote matches, otherwise the one the concierge agent picks. A request it cannot place waits for you. Its messages reach your agents without waiting for you. Reading conversations is never granted that way.',
     youShare: 'You share with {name}',
     theyShare: '{name} shares with you',
     nothingOpen: 'Nothing yet',
@@ -62,6 +62,20 @@ export const strings = {
       refused: 'Refused',
       by: { owner: 'Owner', match: 'Match', concierge: 'Concierge' },
       byTip: { owner: 'Decided by the owner.', match: 'Its git remote matched exactly one project.', concierge: 'Decided by the concierge agent for a trusted contact.' }
+    },
+    /** Mail a contact sent outside a shared project, held until the owner delivers it to the agent it was written to. */
+    mail: {
+      title: 'Messages',
+      tip: 'Sent outside a shared project: no agent reads it until you deliver it. A trusted contact\'s messages reach your agents directly.',
+      writes: '{contact} writes to {thread}',
+      from: 'Sent from: {thread}',
+      until: 'Waits until {time}',
+      deliver: 'Deliver',
+      deliverTip: 'The agent of {thread} reads it as written.',
+      refuse: 'Refuse',
+      refuseTip: 'The sender reads that you refused it.',
+      details: 'Details',
+      pending: '{count} contact messages waiting'
     },
     invite: {
       title: 'Invite someone',

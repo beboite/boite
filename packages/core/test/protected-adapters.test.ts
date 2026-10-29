@@ -1,6 +1,7 @@
 import {afterEach, describe, expect, test} from 'bun:test';
 import {copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {TOOL_FREE_CONTEXT, type PermissionMode, type ThreadSummary} from '@boite/contracts';
 import {createPiDriver} from '../src/drivers/pi.ts';
 import {createAcpDriver} from '../src/drivers/acp.ts';
@@ -60,7 +61,8 @@ describe.skipIf(!native)('native protected extensions', () => {
     const logs: string[] = [];
     let approvals = 0, spawns = 0;
     const workspaces: string[] = [];
-    const processes: {pid: number | undefined; cwd: string | undefined; events: Record<string, unknown>[]}[] = [];
+    const processes: {pid: number | undefined; command: string; args: string[]; cwd: string | undefined; events: Record<string, unknown>[]}[] = [];
+    const tracePiStartup = protocol === 'pi' && process.platform === 'win32';
     const ctx: TurnContext = {thread: {...thread, contextMode: {...TOOL_FREE_CONTEXT}}, account, provider, accountEnv, protectedExecution, prompt: 'Run the deterministic fixture.', attachments: [], sessionId: null,
       turn: {id: 'synthetic-turn', threadId: thread.id} as TurnContext['turn'], warmProcessMinutes: 1,
       emit: {startMessage: () => 'synthetic-message', delta: () => {}, part: () => {}, patchTool: () => {}, complete: () => {}},
@@ -69,10 +71,14 @@ describe.skipIf(!native)('native protected extensions', () => {
       spawn: () => {throw new Error('Control must use the tracked child route');},
       spawnChild: (cmd, args, opts) => {
         spawns++; if (opts?.cwd) workspaces.push(opts.cwd);
-        const child = core.procs.spawnChild(control, cmd, args, {...opts,
-          env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env}});
-        const captured = {pid: child.pid, cwd: opts?.cwd, events: [] as Record<string, unknown>[]};
+        const tracedArgs = tracePiStartup ? ['--import', pathToFileURL(join(import.meta.dir, 'fixtures/native-pi-startup.mjs')).href, ...args] : args;
+        const child = core.procs.spawnChild(control, cmd, tracedArgs, {...opts,
+          env: {PATH: process.env.PATH, SystemRoot: process.env['SystemRoot'], HOME: accountDir, LANG: 'C.UTF-8', ...accountEnv, ...opts?.env, ...(tracePiStartup ? {PI_TIMING: '1'} : {})}});
+        const captured = {pid: child.pid, command: cmd, args: tracedArgs, cwd: opts?.cwd, events: [] as Record<string, unknown>[]};
         processes.push(captured);
+        child.once('spawn', () => captured.events.push({event: 'spawn', at: Date.now()}));
+        child.stdout.once('data', () => captured.events.push({event: 'first-stdout', at: Date.now()}));
+        child.stderr.once('data', () => captured.events.push({event: 'first-stderr', at: Date.now()}));
         child.once('exit', (code, signal) => captured.events.push({event: 'exit', at: Date.now(), code, signal}));
         child.once('close', (code, signal) => captured.events.push({event: 'close', at: Date.now(), code, signal}));
         child.once('error', error => captured.events.push({event: 'error', at: Date.now(), error: error.message}));
@@ -84,6 +90,7 @@ describe.skipIf(!native)('native protected extensions', () => {
     const handle = driver.startTurn(ctx);
     expect(handle.setPermissionMode).toBeUndefined();
     const result = await handle.done;
+    if (tracePiStartup) console.error(JSON.stringify({protocol, helper: process.env.BOITE_WINDOWS_SANDBOX_PATH, processes, logs}));
     if (result.status !== 'done') console.error(logs.join('\n'));
     if (!readFileSync(join(root, 'answer.js'), 'utf8').includes('return 42')) console.error(JSON.stringify({protocol, helper: process.env.BOITE_WINDOWS_SANDBOX_PATH, processes, logs, requests: api?.requests}));
     expect(result, logs.join('\n')).toMatchObject({status: 'done'});

@@ -109,3 +109,19 @@ test('a load sample is a load-only event for a client that accepts it and the wh
   expect(seen.current.filter(event => event === 'thread.load')).toHaveLength(1);
   expect(seen.legacy.filter(event => event === 'thread.load')).toHaveLength(0);
 });
+
+test('a thread whose last process exits gets a zero load, so no client keeps counting it as running', async () => {
+  const owner = await harness.connect();
+  const { threadId } = await echoThread(harness, owner);
+  const loads: RpcEvents['thread.load']['load'][] = [];
+  bus.onAny((name, payload) => {
+    const event = payload as RpcEvents['thread.load'];
+    if (name === 'thread.load' && event.threadId === threadId) loads.push(event.load);
+  });
+  sink.started(threadId, 702, { exe: 'claude', commandLine: null, parentPid: null, startedAt: 1, incarnation: '1' });
+  await waitFor(() => loads.some(load => load.processes === 1), 2000);
+
+  sink.exited(threadId, 702, { exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null, startedAt: 1, incarnation: '1' });
+  await waitFor(() => loads.at(-1)?.processes === 0, 2000);
+  expect(loads.at(-1)).toEqual({ processes: 0, cpuPercent: 0, memoryBytes: 0 });
+});
