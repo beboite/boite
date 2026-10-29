@@ -40,6 +40,8 @@ export interface StartTurnOptions {
   persistAdmission?: () => (() => void);
   /** The agent selection the input was queued with, which the turn keeps. */
   choice?: ComposerChoice;
+  /** The prompt as typed, when it may start an automatic goal (`docs/goals.md`). */
+  autoGoal?: string;
 }
 
 export type TurnOperation = NonNullable<Turn['execution']>['operation'];

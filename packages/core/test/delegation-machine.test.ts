@@ -568,6 +568,8 @@ test('a restart of the child\'s machine keeps the child at work for its parent u
   desk.core.delegation.remote.stop(threadId, other.thread.id);
   await desk.core.delegation.remote.flush(pcId);
   await pc.core.delegation.remote.flush(deskId);
+  // An automatic report may already be in flight; the newer stop state goes in the next batch.
+  await waitFor(() => [child.thread.id, other.thread.id].every(id => seen(id).state?.restarting === undefined));
   for (const id of [child.thread.id, other.thread.id]) {
     const cut = seen(id).state!.lastTurn!.id;
     expect(pc.core.threads.handoff.carries(cut)).toBe(false);

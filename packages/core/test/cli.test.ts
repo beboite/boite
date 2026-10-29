@@ -693,12 +693,12 @@ describe('settings', () => {
     // Nothing below flips the whip on any app, so the card stays open:
     // a prompt from a phone that already had it on,
     const phone = await harness.connect();
-    await phone.call('client.preferences', { app: B, language: 'en', experiments: ['whip', 'goal2'], labels: {} });
+    await phone.call('client.preferences', { app: B, language: 'en', experiments: ['whip', 'theme-grain'], labels: {} });
     await turn(phone, 'from the phone');
     // a core setting moving while that phone is the app agents read,
     await client.call('settings.set', { agentCpuCapPercent: 70 });
     // and that phone switching its language.
-    await phone.call('client.preferences', { app: B, language: 'fr', experiments: ['whip', 'goal2'], labels: {} });
+    await phone.call('client.preferences', { app: B, language: 'fr', experiments: ['whip', 'theme-grain'], labels: {} });
     expect(await client.call('questions.list', { threadId })).toHaveLength(1);
 
     // The desktop flipped it while offline: its first report on a new socket settles the card.
@@ -710,8 +710,8 @@ describe('settings', () => {
     expect(await client.call('questions.list', { threadId })).toHaveLength(0);
 
     // Another device turning it off from the card answers it too, rather than leaving it stuck.
-    const goal = JSON.parse((await boite(['settings', 'request', 'experiment.goal2', 'true', '--why', 'Review your goals', '--json'])).out) as { setting: { previous: boolean; app: string } };
-    expect(goal.setting).toMatchObject({ previous: false, app: A });
+    const grain = JSON.parse((await boite(['settings', 'request', 'experiment.theme-grain', 'true', '--why', 'Try the grain', '--json'])).out) as { setting: { previous: boolean; app: string } };
+    expect(grain.setting).toMatchObject({ previous: false, app: A });
     const changed = client.next('turn.finished', (finished) => finished.threadId === threadId, 10000);
     await phone.call('client.preferences', { app: B, language: 'fr', experiments: ['whip'], labels: {} });
     await changed;
@@ -719,7 +719,7 @@ describe('settings', () => {
       'hello',
       'from the phone',
       '> Try the whip\n\napplied: experiment.whip is now true',
-      '> Review your goals\n\nchanged: the user set experiment.goal2 to false, not true',
+      '> Try the grain\n\nchanged: the user set experiment.theme-grain to false, not true',
     ]);
   });
 });

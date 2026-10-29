@@ -21,14 +21,14 @@ test('phones follow the desktop app on this machine before one reached from else
   book.report(socket({ client: 'shell', device: 'paired' }, true, 'session'), report(['whip'], 'app-paired-01'));
   expect(book.desktopExperiments()).toBeNull();
   // A desktop app from elsewhere stands in while this machine's has not reported.
-  book.report(laptop, report(['goal2'], 'app-laptop-01'));
+  book.report(laptop, report(['theme-grain'], 'app-laptop-01'));
   book.report(here, report(['resident-agents'], 'app-here-0001'));
   // Once this machine's has, another desktop app's flips no longer move what phones follow.
   book.report(laptop, report(['contacts'], 'app-laptop-01'));
   // The same switches again, as after a reconnect, say nothing.
   book.report(here, report(['resident-agents'], 'app-here-0001'));
   book.report(here, report(['resident-agents', 'whip'], 'app-here-0001'));
-  expect(moves).toEqual([['goal2'], ['resident-agents'], ['resident-agents', 'whip']]);
+  expect(moves).toEqual([['theme-grain'], ['resident-agents'], ['resident-agents', 'whip']]);
   expect(book.desktopExperiments()).toEqual(['resident-agents', 'whip']);
 });
 

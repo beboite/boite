@@ -91,7 +91,7 @@ test('background compaction turns on for the machine picked above it, not the wi
   const page = query('[data-testid=experiments-page]');
   const bar = query('[data-testid=settings-machine-bar]');
   expect(page.contains(bar)).toBe(true);
-  expect(bar.compareDocumentPosition(query('[data-testid=experiment-goal2]')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect(bar.compareDocumentPosition(query('[data-testid=experiment-theme-grain]')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   query<HTMLButtonElement>('[data-testid=settings-machine]').click();
   flushSync();
   query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
@@ -99,15 +99,6 @@ test('background compaction turns on for the machine picked above it, not the wi
   query<HTMLInputElement>('[data-testid=background-compaction-on]').click();
   await waitFor(() => remote.store.settings?.backgroundCompaction === true);
   expect(store.settings?.backgroundCompaction ?? false).toBe(false);
-  // The checklist model sits among this device's switches, above the bar: it stays this window's machine's.
-  query<HTMLInputElement>('[data-testid=experiment-goal2]').click();
-  await waitFor(() => document.querySelector('[data-testid=goal2-tracker-model]') !== null);
-  query<HTMLButtonElement>('[data-testid=goal2-tracker-model]').click();
-  flushSync();
-  const picked = [...document.querySelectorAll<HTMLElement>('[data-testid=goal2-tracker-model-menu] [data-value]')].find(row => row.dataset.value !== 'auto')!;
-  picked.click();
-  await waitFor(() => store.settings?.goalTracker != null);
-  expect(remote.store.settings?.goalTracker ?? null).toBe(null);
   expect(workspace.active).toBe(store);
 });
 
