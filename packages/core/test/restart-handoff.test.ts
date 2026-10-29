@@ -322,6 +322,41 @@ test('a turn that also runs a fresh tool call still waits for it, even beside an
   } finally { await h.stop(); }
 }, 15_000);
 
+test('an agent that dies in its tool call during the grace is stopped without an error, and its thread resumes', async () => {
+  // 2026-10-29: the service stop reached every agent scope at once; claude exited 143 mid-call and two workflow steps failed.
+  HANDOFF.graceMs = 10_000;
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  let next: Next | undefined;
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    await client.call('threads.subscribe', { threadId });
+    const opened = client.next('message.part', event => event.threadId === threadId);
+    const turn = await client.call('turns.start', { threadId, prompt: 'build it [sleep:300] [notice] going on [sleep:100] [error]' });
+    const first = await opened;
+    // The call the agent is in when its process is killed.
+    h.core.bus.emit('message.part', { threadId, messageId: first.messageId, partIndex: first.partIndex + 20,
+      part: { type: 'tool', toolId: 'cut', name: 'Bash', input: {}, output: null, status: 'running', startedAt: Date.now() } });
+    expect((await ask(h)).status).toBe(202);
+    await waitFor(() => stops === 1);
+    const left = h.core.journal.getTurn(turn.id)!;
+    expect(left.status).toBe('stopped');
+    expect(left.error).toBeNull();
+    const messages = messagesOf(h.core, left);
+    expect(messages.every(message => message.state !== 'error')).toBe(true);
+    // A notice the agent went on after still shows; only the death that cut the call is dropped.
+    expect(messages.flatMap(message => message.parts).filter(part => part.type === 'error').map(part => part.type === 'error' && part.message)).toEqual(['echo notice requested']);
+    client.close();
+    await exit(h);
+
+    next = startNext(h);
+    const core = next.core;
+    await waitFor(() => core.journal.listTurns(threadId).length === 2);
+    expect(core.journal.listTurns(threadId)[1]!.execution?.operation).toBe('resume');
+  } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }
+});
+
 test('a queued turn runs once on the next core, and a turn the user stopped does not resume', async () => {
   let stops = 0;
   const h = await startTestCore({ onShutdown: () => { stops += 1; } });

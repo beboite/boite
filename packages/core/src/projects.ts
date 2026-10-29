@@ -81,9 +81,9 @@ interface GitFlag {
 }
 
 export class ProjectStore {
-  private readonly removing = new Set<ProjectId>();
-  private readonly files = new FileIndex();
-  private draftsDir: string | null = null;
+  readonly #removing = new Set<ProjectId>();
+  readonly #files = new FileIndex();
+  #draftsDir: string | null = null;
   /** The last `.git` answer per project folder. Answers read it; a check in the background refreshes it. */
   private readonly git = new Map<string, GitFlag>();
   /** Replaced by a test to hold a check pending. */
@@ -97,14 +97,17 @@ export class ProjectStore {
   /** How long a detection may take; lowered by a test. */
   iconWaitMs = ICON_DETECT_TIMEOUT_MS;
   /** Projects waiting for a background detection, and every one queued since this core started. */
-  private readonly iconQueue: ProjectId[] = [];
-  private readonly iconQueued = new Set<ProjectId>();
-  private iconWorkers = 0;
-  private iconSweepDone = false;
+  readonly #iconQueue: ProjectId[] = [];
+  readonly #iconQueued = new Set<ProjectId>();
+  #iconWorkers = 0;
+  #iconSweepDone = false;
 
-  constructor(private readonly core: Core) {
+  readonly #core: Core;
+
+  constructor(core: Core) {
+    this.#core = core;
     // The first `projects.list` after a start already has answers.
-    for (const project of core.journal.listProjects()) this.refreshGit(project.path);
+    for (const project of core.journal.listProjects()) this.#refreshGit(project.path);
   }
 
   /**
@@ -112,11 +115,11 @@ export class ProjectStore {
    * folder. Resolved once per core; a test sets the variable before its core.
    */
   draftsPath(): string {
-    if (this.draftsDir === null) {
+    if (this.#draftsDir === null) {
       const fromEnv = process.env.BOITE_DRAFTS_DIR;
-      this.draftsDir = resolve(fromEnv !== undefined && fromEnv.length > 0 ? fromEnv : join(documentsDir(), 'Boite'));
+      this.#draftsDir = resolve(fromEnv !== undefined && fromEnv.length > 0 ? fromEnv : join(documentsDir(), 'Boite'));
     }
-    return this.draftsDir;
+    return this.#draftsDir;
   }
 
   /** The drafts project, its folder and its row made on the first call. */
@@ -144,13 +147,13 @@ export class ProjectStore {
   listFiles(projectId: ProjectId, query: string, limit?: number): Promise<FilesPage> {
     const project = this.require(projectId);
     if (typeof query !== 'string') throw refused('projects.files wants a string query', { projectId });
-    return this.files.list(project.path, query, limit);
+    return this.#files.list(project.path, query, limit);
   }
 
   list(): Project[] {
-    const counts = this.core.journal.archivedThreadCounts();
-    const icons = this.core.journal.projectIcons();
-    return this.core.journal.listProjects().map((project) => this.described(project, true, counts, icons));
+    const counts = this.#core.journal.archivedThreadCounts();
+    const icons = this.#core.journal.projectIcons();
+    return this.#core.journal.listProjects().map((project) => this.#described(project, true, counts, icons));
   }
 
   /**
@@ -163,10 +166,10 @@ export class ProjectStore {
    * waits for it and checks once more.
    */
   async listFresh(): Promise<Project[]> {
-    const projects = this.core.journal.listProjects();
+    const projects = this.#core.journal.listProjects();
     const checks: Promise<void>[] = [];
     for (const project of projects) {
-      const check = this.freshGit(project.path);
+      const check = this.#freshGit(project.path);
       if (check !== null) checks.push(check);
     }
     if (checks.length > 0) {
@@ -184,17 +187,17 @@ export class ProjectStore {
       }
     }
     // Every folder was just checked or is still being checked: no second probe.
-    const counts = this.core.journal.archivedThreadCounts();
-    const icons = this.core.journal.projectIcons();
-    const answer = this.core.journal.listProjects().map((project) => this.described(project, false, counts, icons));
+    const counts = this.#core.journal.archivedThreadCounts();
+    const icons = this.#core.journal.projectIcons();
+    const answer = this.#core.journal.listProjects().map((project) => this.#described(project, false, counts, icons));
     // Icons come from the journal only. A project never checked, or checked
     // with nothing found, is detected once per core in the background, after
     // this answer has left: a client hears `project.updated` when one appears.
-    if (!this.iconSweepDone) {
-      this.iconSweepDone = true;
+    if (!this.#iconSweepDone) {
+      this.#iconSweepDone = true;
       for (const project of answer) {
         const row = icons.get(project.id);
-        if (!this.isDrafts(project) && (row === undefined || row.kind === 'none')) this.queueIcon(project.id);
+        if (!this.isDrafts(project) && (row === undefined || row.kind === 'none')) this.#queueIcon(project.id);
       }
     }
     return answer;
@@ -207,7 +210,7 @@ export class ProjectStore {
    */
   async refreshIcon(projectId: ProjectId): Promise<Project> {
     const project = this.require(projectId);
-    const outcome = await this.detectIcon(projectId);
+    const outcome = await this.#detectIcon(projectId);
     if (outcome === 'timeout') {
       throw refused(`the project's folder could not be read within ${this.iconWaitMs} ms; its icon is unchanged`, { field: 'projectId', projectId, path: project.path });
     }
@@ -217,7 +220,7 @@ export class ProjectStore {
   /** The stored image of a project whose icon is one, as a data URL. Never reads the folder. */
   iconImage(projectId: ProjectId): { version: string; dataUrl: string } {
     this.require(projectId);
-    const image = this.core.journal.projectIconImage(projectId);
+    const image = this.#core.journal.projectIconImage(projectId);
     if (image === null) {
       throw refused('projects.icon: this project has no image icon; its icon field says which kind it has', { field: 'projectId', projectId, expected: "a project whose icon.kind is 'image'" });
     }
@@ -225,32 +228,32 @@ export class ProjectStore {
   }
 
   /** Queues a background detection, at most once per project per core. */
-  private queueIcon(projectId: ProjectId): void {
-    if (this.iconQueued.has(projectId)) return;
-    this.iconQueued.add(projectId);
-    this.iconQueue.push(projectId);
-    while (this.iconWorkers < ICON_WORKERS && this.iconWorkers < this.iconQueue.length) {
-      this.iconWorkers += 1;
-      void this.iconWorker();
+  #queueIcon(projectId: ProjectId): void {
+    if (this.#iconQueued.has(projectId)) return;
+    this.#iconQueued.add(projectId);
+    this.#iconQueue.push(projectId);
+    while (this.#iconWorkers < ICON_WORKERS && this.#iconWorkers < this.#iconQueue.length) {
+      this.#iconWorkers += 1;
+      void this.#iconWorker();
     }
   }
 
-  private async iconWorker(): Promise<void> {
+  async #iconWorker(): Promise<void> {
     try {
       // Off the caller's turn: an add or a list answers before any folder is read.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      for (let next = this.iconQueue.shift(); next !== undefined && !this.core.stopping; next = this.iconQueue.shift()) {
-        await this.detectIcon(next).catch(() => undefined);
+      for (let next = this.#iconQueue.shift(); next !== undefined && !this.#core.stopping; next = this.#iconQueue.shift()) {
+        await this.#detectIcon(next).catch(() => undefined);
       }
     } finally {
-      this.iconWorkers -= 1;
+      this.#iconWorkers -= 1;
     }
   }
 
   /** One detection, stored, and announced when what a client sees moved. */
-  private async detectIcon(projectId: ProjectId): Promise<'changed' | 'same' | 'timeout' | 'gone'> {
-    if (this.core.stopping) return 'gone';
-    const project = this.core.journal.getProject(projectId);
+  async #detectIcon(projectId: ProjectId): Promise<'changed' | 'same' | 'timeout' | 'gone'> {
+    if (this.#core.stopping) return 'gone';
+    const project = this.#core.journal.getProject(projectId);
     if (project === null) return 'gone';
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<null>((resolve) => {
@@ -259,10 +262,10 @@ export class ProjectStore {
     });
     const found = await Promise.race([this.iconDetect(project.path).catch(() => null), deadline]);
     clearTimeout(timer);
-    if (this.core.stopping || this.removing.has(projectId) || this.core.journal.getProject(projectId) === null) return 'gone';
+    if (this.#core.stopping || this.#removing.has(projectId) || this.#core.journal.getProject(projectId) === null) return 'gone';
     if (found === null) return 'timeout';
-    const before = JSON.stringify(iconOf(this.core.journal.projectIcons().get(projectId)) ?? null);
-    this.core.journal.putProjectIcon(projectId, found, Date.now());
+    const before = JSON.stringify(iconOf(this.#core.journal.projectIcons().get(projectId)) ?? null);
+    this.#core.journal.putProjectIcon(projectId, found, Date.now());
     if (JSON.stringify(iconOf(rowOf(found)) ?? null) === before) return 'same';
     this.announce(projectId);
     return 'changed';
@@ -279,7 +282,7 @@ export class ProjectStore {
       throw refused(`${method}.${field} must name a project`, { ...context, field, expected });
     }
     const wanted = query.trim();
-    const projects = this.core.journal.listProjects();
+    const projects = this.#core.journal.listProjects();
     const fold = (text: string): string => (process.platform === 'win32' ? text.toLowerCase() : text);
     const byId = projects.find((project) => project.id === wanted);
     const byPath = isAbsolute(wanted) ? projects.find((project) => fold(resolve(project.path)) === fold(resolve(wanted))) : undefined;
@@ -296,10 +299,10 @@ export class ProjectStore {
 
   require(projectId: ProjectId | null): Project {
     if (projectId === null) throw refused('this agent session has no project');
-    if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });
-    const project = this.core.journal.getProject(projectId);
+    if (this.#removing.has(projectId)) throw refused('this project is being removed', { projectId });
+    const project = this.#core.journal.getProject(projectId);
     if (project === null) throw notFound(`unknown project ${projectId}`, { projectId });
-    return this.described(project);
+    return this.#described(project);
   }
 
   /**
@@ -313,7 +316,7 @@ export class ProjectStore {
     if (this.isDrafts(project)) return project;
     const present = await this.folderProbe(project.path).catch(() => null);
     if (present === null) return project;
-    this.noteFolder(project.path, !present);
+    this.#noteFolder(project.path, !present);
     if (!present) {
       throw folderGone(project.path, { field: 'projectId', projectId, project: project.name });
     }
@@ -321,24 +324,24 @@ export class ProjectStore {
   }
 
   /** Records what a check said of a folder and tells the clients when a project appeared or vanished. */
-  private noteFolder(path: string, missing: boolean): void {
+  #noteFolder(path: string, missing: boolean): void {
     const flag = this.git.get(path) ?? { value: undefined, inflight: false };
     const before = flag.missing;
     flag.missing = missing;
     if (missing) flag.value = false;
     this.git.set(path, flag);
     // The first answer of a folder that is there changes nothing a client drew.
-    if (before === missing || (before === undefined && !missing) || this.core.stopping) return;
-    for (const project of this.core.journal.listProjects()) {
-      if (project.path === path && !this.removing.has(project.id)) this.announce(project.id);
+    if (before === missing || (before === undefined && !missing) || this.#core.stopping) return;
+    for (const project of this.#core.journal.listProjects()) {
+      if (project.path === path && !this.#removing.has(project.id)) this.announce(project.id);
     }
   }
 
   /** The project a folder already is, archived ones included, or null. */
   registered(path: string): Project | null {
     const key = pathKey(resolve(path));
-    const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
-    return existing === undefined ? null : this.described(existing);
+    const existing = this.#core.journal.listProjects().find((project) => pathKey(project.path) === key);
+    return existing === undefined ? null : this.#described(existing);
   }
 
   add(path: string, name?: string): Project {
@@ -355,11 +358,11 @@ export class ProjectStore {
     // already registered. The git flag is keyed by the stored spelling, the
     // one `described` and `refreshGit` read.
     const key = pathKey(full);
-    const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
+    const existing = this.#core.journal.listProjects().find((project) => pathKey(project.path) === key);
     // The folder just answered, so this check does too; the answer is exact from the start.
     this.git.set(existing?.path ?? full, { value: existsSync(join(full, '.git')), missing: false, inflight: false });
     // No second check of a folder that was just checked.
-    if (existing !== undefined) return this.described(existing, false);
+    if (existing !== undefined) return this.#described(existing, false);
 
     const project: Project = {
       id: newId('prj_'),
@@ -367,13 +370,13 @@ export class ProjectStore {
       path: full,
       createdAt: Date.now(),
     };
-    this.core.journal.append({ type: 'project.added', threadId: null, version: 1, payload: project }, () => {
-      this.core.journal.putProject(project);
+    this.#core.journal.append({ type: 'project.added', threadId: null, version: 1, payload: project }, () => {
+      this.#core.journal.putProject(project);
     });
-    const answered = this.described(project, false);
-    this.core.bus.emit('project.added', answered);
+    const answered = this.#described(project, false);
+    this.#core.bus.emit('project.added', answered);
     // Its icon is read after this answer, in the background; `project.updated` brings it.
-    if (!this.isDrafts(project)) this.queueIcon(project.id);
+    if (!this.isDrafts(project)) this.#queueIcon(project.id);
     return answered;
   }
 
@@ -388,8 +391,8 @@ export class ProjectStore {
       throw refused('the drafts project has a localized system name', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
     }
     if (project.name === trimmed) return project;
-    this.core.journal.append({ type: 'project.renamed', threadId: null, version: 1, payload: { projectId, name: trimmed } }, () => {
-      this.core.journal.putProject({ ...project, name: trimmed });
+    this.#core.journal.append({ type: 'project.renamed', threadId: null, version: 1, payload: { projectId, name: trimmed } }, () => {
+      this.#core.journal.putProject({ ...project, name: trimmed });
     });
     return this.announce(projectId);
   }
@@ -406,8 +409,8 @@ export class ProjectStore {
     }
     if ((project.archived === true) === archived) return project;
     const next: Project = { id: project.id, name: project.name, path: project.path, createdAt: project.createdAt, ...(archived ? { archived: true } : {}), ...(project.worktreeDefault ? { worktreeDefault: true } : {}) };
-    this.core.journal.append({ type: 'project.archived', threadId: null, version: 1, payload: { projectId, archived } }, () => {
-      this.core.journal.putProject(next);
+    this.#core.journal.append({ type: 'project.archived', threadId: null, version: 1, payload: { projectId, archived } }, () => {
+      this.#core.journal.putProject(next);
     });
     return this.announce(projectId);
   }
@@ -415,9 +418,9 @@ export class ProjectStore {
   setAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Project {
     this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setAutoArchiveMergedPr.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
-    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-      this.core.journal.append({ type: 'project.autoArchiveMergedPrChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(`project-auto-archive-merged-pr:${projectId}`, enabled));
-      if (!enabled) this.core.threads.showMergedPrThreads(projectId);
+    return this.#core.bus.afterCommit(() => this.#core.journal.db.transaction(() => {
+      this.#core.journal.append({ type: 'project.autoArchiveMergedPrChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.#core.journal.setSetting(`project-auto-archive-merged-pr:${projectId}`, enabled));
+      if (!enabled) this.#core.threads.showMergedPrThreads(projectId);
       return this.announce(projectId);
     })());
   }
@@ -426,8 +429,8 @@ export class ProjectStore {
   setAutoRemoveWorktrees(projectId: ProjectId, enabled: boolean): Project {
     this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setAutoRemoveWorktrees.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
-    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-      this.core.journal.append({ type: 'project.autoRemoveWorktreesChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(autoRemoveWorktreesKey(projectId), enabled));
+    return this.#core.bus.afterCommit(() => this.#core.journal.db.transaction(() => {
+      this.#core.journal.append({ type: 'project.autoRemoveWorktreesChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.#core.journal.setSetting(autoRemoveWorktreesKey(projectId), enabled));
       return this.announce(projectId);
     })());
   }
@@ -442,50 +445,50 @@ export class ProjectStore {
     // Re-read after the disk check so a concurrent archive retains its flag.
     const current = this.require(projectId);
     if ((current.worktreeDefault === true) === enabled) return current;
-    this.core.journal.append({ type: 'project.worktreeDefaultChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => {
-      this.core.journal.putProject({ ...current, worktreeDefault: enabled });
+    this.#core.journal.append({ type: 'project.worktreeDefaultChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => {
+      this.#core.journal.putProject({ ...current, worktreeDefault: enabled });
     });
     return this.announce(projectId);
   }
 
   /** Tells every client how a project now reads, after anything its answer counts has moved. */
   announce(projectId: ProjectId): Project {
-    const stored = this.core.journal.getProject(projectId);
+    const stored = this.#core.journal.getProject(projectId);
     if (stored === null) throw notFound(`unknown project ${projectId}`, { projectId });
-    const answered = this.described(stored, false);
-    this.core.bus.emit('project.updated', answered);
+    const answered = this.#described(stored, false);
+    this.#core.bus.emit('project.updated', answered);
     return answered;
   }
 
   async remove(projectId: ProjectId): Promise<void> {
     const project = this.require(projectId);
-    this.removing.add(projectId);
+    this.#removing.add(projectId);
     try {
-      const threads = this.core.journal.listThreads(projectId);
-      for (const thread of threads) this.core.threads.archive(thread.id, true);
-      await Promise.all(threads.map((thread) => this.core.scheduler.stopAndWait(thread.id)));
-      await Promise.all(threads.map((thread) => this.core.procs.stopAndWait(thread.id)));
+      const threads = this.#core.journal.listThreads(projectId);
+      for (const thread of threads) this.#core.threads.archive(thread.id, true);
+      await Promise.all(threads.map((thread) => this.#core.scheduler.stopAndWait(thread.id)));
+      await Promise.all(threads.map((thread) => this.#core.procs.stopAndWait(thread.id)));
       // A thread's shells run under their own trace ids: they are gone too before the records go.
-      await Promise.all(threads.map((thread) => this.core.terminals.stopThread(thread.id)));
-      const threadIds = this.core.journal.append(
+      await Promise.all(threads.map((thread) => this.#core.terminals.stopThread(thread.id)));
+      const threadIds = this.#core.journal.append(
         { type: 'project.removed', threadId: null, version: 1, payload: { projectId } },
         () => {
-          const removed = this.core.journal.deleteThreadsOfProject(projectId);
-          this.core.journal.deleteProject(projectId);
+          const removed = this.#core.journal.deleteThreadsOfProject(projectId);
+          this.#core.journal.deleteProject(projectId);
           return removed;
         },
       );
-      await this.core.threads.codeCheckpoints.discard(threadIds).catch(error => {
-        this.core.log('warn', `file checkpoints of removed project ${projectId} were not deleted: ${messageOf(error)}`);
+      await this.#core.threads.codeCheckpoints.discard(threadIds).catch(error => {
+        this.#core.log('warn', `file checkpoints of removed project ${projectId} were not deleted: ${messageOf(error)}`);
       });
-      for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
-      this.core.bus.emit('project.removed', { projectId });
-      this.core.bus.emit('thread.deletionsUpdated', {});
-      this.files.forget(project.path);
+      for (const threadId of threadIds) this.#core.bus.emit('thread.removed', { threadId });
+      this.#core.bus.emit('project.removed', { projectId });
+      this.#core.bus.emit('thread.deletionsUpdated', {});
+      this.#files.forget(project.path);
       this.git.delete(project.path);
-      this.iconQueued.delete(projectId);
+      this.#iconQueued.delete(projectId);
     } finally {
-      this.removing.delete(projectId);
+      this.#removing.delete(projectId);
     }
   }
 
@@ -500,20 +503,20 @@ export class ProjectStore {
    * per list when the caller hands the counts over, and the icon is the one
    * stored by the last detection, read from the journal, never the folder.
    */
-  private described(
+  #described(
     project: Project,
     refresh = true,
-    counts = this.core.journal.archivedThreadCounts(),
-    icons = this.core.journal.projectIcons(),
+    counts = this.#core.journal.archivedThreadCounts(),
+    icons = this.#core.journal.projectIcons(),
   ): Project {
     const flag = this.git.get(project.path);
-    if (refresh) this.refreshGit(project.path);
+    if (refresh) this.#refreshGit(project.path);
     const { archived: archivedThreads, done: doneThreads } = counts.get(project.id) ?? { archived: 0, done: 0 };
     const icon = iconOf(icons.get(project.id));
     return {
       ...project,
-      autoArchiveMergedPr: this.core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) !== false,
-      autoRemoveWorktrees: this.core.journal.getSetting(autoRemoveWorktreesKey(project.id)) !== false,
+      autoArchiveMergedPr: this.#core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) !== false,
+      autoRemoveWorktrees: this.#core.journal.getSetting(autoRemoveWorktreesKey(project.id)) !== false,
       ...(archivedThreads > 0 ? { archivedThreads } : {}),
       ...(doneThreads > 0 ? { doneThreads } : {}),
       ...(icon === undefined ? {} : { icon }),
@@ -527,17 +530,17 @@ export class ProjectStore {
    * A check of `path` that started after this call: a new one, or the pending
    * one followed by another. Null when the pending check is overdue.
    */
-  private freshGit(path: string): Promise<void> | null {
+  #freshGit(path: string): Promise<void> | null {
     const pending = this.git.get(path)?.pending;
-    if (pending === undefined) return this.refreshGit(path);
+    if (pending === undefined) return this.#refreshGit(path);
     if (pending.overdue) return null;
     // One follow-up per pending check, however many lists ask meanwhile.
-    pending.again ??= pending.done.then(() => this.refreshGit(path) ?? this.git.get(path)?.pending?.done);
+    pending.again ??= pending.done.then(() => this.#refreshGit(path) ?? this.git.get(path)?.pending?.done);
     return pending.again;
   }
 
   /** Starts a check of `path`, or returns null when one is already pending. */
-  private refreshGit(path: string): Promise<void> | null {
+  #refreshGit(path: string): Promise<void> | null {
     const flag = this.git.get(path) ?? { value: undefined, inflight: false };
     if (flag.inflight) return null;
     flag.inflight = true;
@@ -552,7 +555,7 @@ export class ProjectStore {
         const present = found === true ? true : found === false ? await this.folderProbe(path).catch(() => null) : null;
         flag.inflight = false;
         flag.pending = undefined;
-        if (present !== null && this.git.get(path) === flag) this.noteFolder(path, !present);
+        if (present !== null && this.git.get(path) === flag) this.#noteFolder(path, !present);
       },
       () => {
         flag.inflight = false;

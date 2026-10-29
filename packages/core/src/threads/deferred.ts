@@ -29,9 +29,12 @@ export class DeferredInput {
   /** A driver asked for a background turn while the thread's last turn was still closing. */
   readonly pendingWakes = new Map<ThreadId, string>();
   /** What background work wrote while a persistent agent was held (paused, out of budget): one turn once it may run. */
-  private readonly heldWakes = new Map<ThreadId, string[]>();
+  readonly #heldWakes = new Map<ThreadId, string[]>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;
     this.memory = new MemoryNotices(core, threads);
   }
 
@@ -41,33 +44,33 @@ export class DeferredInput {
    * sent as a prompt of its own when the thread is idle.
    */
   deliverAnswer(threadId: ThreadId, text: string): void {
-    this.defer(threadId, text);
+    this.#defer(threadId, text);
     const handle = this.threads.runner.handles.get(threadId);
     if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
-      const turnId = this.core.journal.runningTurn(threadId)?.id;
+      const turnId = this.#core.journal.runningTurn(threadId)?.id;
       this.threads.runner.steering.add(threadId);
       let recorded = false;
       const accepted = () => {
-        if (recorded || this.core.stopping) return;
-        if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
+        if (recorded || this.#core.stopping) return;
+        if (turnId) this.threads.runner.answerAfter.set(turnId, this.#recordAnswer(threadId, turnId, text));
         const held = this.deferredAnswers.get(threadId) ?? [];
         const index = held.indexOf(text);
         if (index >= 0) held.splice(index, 1);
         if (!held.length) this.deferredAnswers.delete(threadId);
         recorded = true;
-        this.changed(threadId);
+        this.#changed(threadId);
       };
       void handle.steer(text, undefined, accepted)
         .then(submitted => { if (submitted) accepted(); })
         .catch(error => {
-          if (this.core.stopping) return;
-          this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
+          if (this.#core.stopping) return;
+          this.#core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
         })
         .finally(() => {
           this.threads.runner.steering.delete(threadId);
-          if (this.core.stopping) return;
+          if (this.#core.stopping) return;
           // A late rejection must not undo Stop or retry a failed turn.
-          if (!this.threads.runner.handles.has(threadId) && turnId && this.core.journal.getTurn(turnId)?.status === 'done') this.flushDeferred(threadId);
+          if (!this.threads.runner.handles.has(threadId) && turnId && this.#core.journal.getTurn(turnId)?.status === 'done') this.flushDeferred(threadId);
           void this.memory.flushRunning(threadId);
         });
       return;
@@ -75,21 +78,21 @@ export class DeferredInput {
     if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
   }
 
-  private defer(threadId: ThreadId, text: string): void {
+  #defer(threadId: ThreadId, text: string): void {
     this.deferredAnswers.set(threadId, [...(this.deferredAnswers.get(threadId) ?? []), text]);
-    this.changed(threadId);
+    this.#changed(threadId);
   }
 
-  private changed(threadId: ThreadId): void {
-    const thread = this.core.journal.getThread(threadId);
-    if (thread) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  #changed(threadId: ThreadId): void {
+    const thread = this.#core.journal.getThread(threadId);
+    if (thread) this.#core.bus.emit('thread.updated', withLoad(this.#core, thread));
   }
 
-  private recordAnswer(threadId: ThreadId, turnId: string, text: string, createdAt = Date.now()): number {
+  #recordAnswer(threadId: ThreadId, turnId: string, text: string, createdAt = Date.now()): number {
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt, parts: [{ type: 'text', text }] };
-    this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
-    this.core.bus.emit('message.started', message);
-    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+    this.#core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => this.#core.journal.putMessage(message));
+    this.#core.bus.emit('message.started', message);
+    this.#core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
     return createdAt;
   }
 
@@ -99,7 +102,7 @@ export class DeferredInput {
     const held = this.deferredAnswers.get(threadId);
     if (!held?.length) return;
     const text = held.join('\n\n');
-    this.recordAnswer(threadId, turnId, text, promptAt - 1);
+    this.#recordAnswer(threadId, turnId, text, promptAt - 1);
     // No `changed` here: this runs inside the startTurn transaction, and the
     // status event after it already sees the empty map.
     this.deferredAnswers.delete(threadId);
@@ -109,9 +112,9 @@ export class DeferredInput {
 
   /** The held answers as one prompt, when the thread can take one. */
   flushDeferred(threadId: ThreadId): void {
-    if (this.core.stopping) return;
+    if (this.#core.stopping) return;
     const held = this.deferredAnswers.get(threadId);
-    const thread = this.core.journal.getThread(threadId);
+    const thread = this.#core.journal.getThread(threadId);
     if (held === undefined || thread === null || thread.archived) return;
     if (this.threads.isBusy(threadId) || this.threads.runner.steering.has(threadId)) return;
     this.deferredAnswers.delete(threadId);
@@ -120,9 +123,9 @@ export class DeferredInput {
     } catch (error) {
       // Kept for the next prompt the user sends, which carries them first.
       this.deferredAnswers.set(threadId, held);
-      this.core.log('warn', `thread ${threadId}: async answers wait for the next prompt: ${messageOf(error)}`);
+      this.#core.log('warn', `thread ${threadId}: async answers wait for the next prompt: ${messageOf(error)}`);
     }
-    this.changed(threadId);
+    this.#changed(threadId);
   }
 
   /**
@@ -137,10 +140,10 @@ export class DeferredInput {
     if (this.threads.runner.steering.has(threadId)) return null;
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
-    const turnId = this.core.journal.runningTurn(threadId)?.id;
-    if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, held.join('\n\n')));
+    const turnId = this.#core.journal.runningTurn(threadId)?.id;
+    if (turnId) this.threads.runner.answerAfter.set(turnId, this.#recordAnswer(threadId, turnId, held.join('\n\n')));
     this.deferredAnswers.delete(threadId);
-    this.changed(threadId);
+    this.#changed(threadId);
     return `The user answered while you were working:\n\n${held.join('\n\n')}`;
   }
 
@@ -152,7 +155,7 @@ export class DeferredInput {
     this.consumed.delete(threadId);
     if (held !== undefined) {
       this.deferredAnswers.delete(threadId);
-      this.changed(threadId);
+      this.#changed(threadId);
     }
     const text = [consumed, held?.length ? held.join('\n\n') : undefined].filter((part): part is string => part !== undefined && part.length > 0).join('\n\n');
     return text.length > 0 ? `${text}\n\n` : '';
@@ -164,7 +167,7 @@ export class DeferredInput {
    * busy the running turn takes that output instead.
    */
   wake(threadId: ThreadId, text: string): void {
-    const thread = this.core.journal.getThread(threadId);
+    const thread = this.#core.journal.getThread(threadId);
     if (thread === null || thread.archived) return;
     if (this.threads.isBusy(threadId)) {
       // The turn that ended is still being saved: open this one right after it.
@@ -175,15 +178,15 @@ export class DeferredInput {
       this.threads.startTurn(threadId, text, { kind: 'background' });
     } catch (error) {
       if (isAgentHeld(error)) {
-        this.heldWakes.set(threadId, [...this.heldWakes.get(threadId) ?? [], text]);
-        this.core.agentRuntime.whenAdmitted(threadId, 'background', () => {
-          const held = this.heldWakes.get(threadId) ?? [];
-          this.heldWakes.delete(threadId);
+        this.#heldWakes.set(threadId, [...this.#heldWakes.get(threadId) ?? [], text]);
+        this.#core.agentRuntime.whenAdmitted(threadId, 'background', () => {
+          const held = this.#heldWakes.get(threadId) ?? [];
+          this.#heldWakes.delete(threadId);
           if (held.length) this.wake(threadId, held.join('\n\n'));
         });
         return;
       }
-      this.core.log('warn', `thread ${threadId}: the agent resumed on its own but no turn could open: ${messageOf(error)}`);
+      this.#core.log('warn', `thread ${threadId}: the agent resumed on its own but no turn could open: ${messageOf(error)}`);
     }
   }
 }

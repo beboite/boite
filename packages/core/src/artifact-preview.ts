@@ -22,59 +22,63 @@ interface Preview { server: ReturnType<typeof Bun.serve>; url: string; port: num
 
 /** A separate origin per HTML entry point: preview scripts never share the core UI's storage or RPC origin. */
 export class ArtifactPreviews {
-  private readonly previews = new Map<string, Preview>();
-  private unlisten: (() => void) | null = null;
-  constructor(private readonly core: Core) {}
+  readonly #previews = new Map<string, Preview>();
+  #unlisten: (() => void) | null = null;
+  readonly #core: Core;
 
-  private key(threadId: string, path: string): string { return `${threadId}\0${path}`; }
+  constructor(core: Core) {
+    this.#core = core;
+  }
 
-  private touch(key: string, preview: Preview): void {
-    this.previews.delete(key);
-    this.previews.set(key, preview);
+  #key(threadId: string, path: string): string { return `${threadId}\0${path}`; }
+
+  #touch(key: string, preview: Preview): void {
+    this.#previews.delete(key);
+    this.#previews.set(key, preview);
   }
 
   open(threadId: string, path: string): { url: string; port: number; path: string } {
-    this.unlisten ??= this.core.bus.onCommitted((name) => {
+    this.#unlisten ??= this.#core.bus.onCommitted((name) => {
       if (name !== 'thread.updated' && name !== 'thread.removed') return;
-      for (const [key, preview] of this.previews) {
+      for (const [key, preview] of this.#previews) {
         try {
           const threadId = key.split('\0')[0]!;
-          this.core.sharedAccess.denyTool(threadId);
-          if (!this.core.threads.require(threadId).archived) continue;
+          this.#core.sharedAccess.denyTool(threadId);
+          if (!this.#core.threads.require(threadId).archived) continue;
         } catch { /* removed or protected */ }
-        preview.server.stop(true); this.previews.delete(key);
+        preview.server.stop(true); this.#previews.delete(key);
       }
     });
-    const thread = this.core.threads.require(threadId);
+    const thread = this.#core.threads.require(threadId);
     // A live neighbouring-asset origin has no immutable dependency scope. Shared jobs use a checked inline view.
-    this.core.sharedAccess.denyTool(threadId);
+    this.#core.sharedAccess.denyTool(threadId);
     if (thread.archived) throw refused('artifacts.preview needs an active thread');
     const found = existingInside(thread.cwd, path, 'file', 'artifacts.preview path');
     if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.preview path must be an HTML file', { path });
     const root = realpathSync(dirname(found.absolute));
-    const key = this.key(threadId, found.relative);
-    const previous = this.previews.get(key);
+    const key = this.#key(threadId, found.relative);
+    const previous = this.#previews.get(key);
     if (previous && previous.root === root) {
-      this.touch(key, previous);
+      this.#touch(key, previous);
       return { url: previous.url, port: previous.port, path: found.relative };
     }
-    if (previous) { previous.server.stop(true); this.previews.delete(key); }
-    if (this.previews.size >= MAX_PREVIEWS) {
-      const [oldestKey, oldest] = this.previews.entries().next().value!;
+    if (previous) { previous.server.stop(true); this.#previews.delete(key); }
+    if (this.#previews.size >= MAX_PREVIEWS) {
+      const [oldestKey, oldest] = this.#previews.entries().next().value!;
       oldest.server.stop(true);
-      this.previews.delete(oldestKey);
+      this.#previews.delete(oldestKey);
     }
     const token = newToken();
     const prefix = `/${token}/`;
     const server = Bun.serve({
-      hostname: this.core.info().endpoint.host, port: 0,
+      hostname: this.#core.info().endpoint.host, port: 0,
       fetch: request => {
         const notFound = () => new Response('preview asset not found', { status: 404 });
         if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('GET or HEAD only', { status: 405 });
         // Protection can change before a thread event closes the origin.
         try {
-          this.core.sharedAccess.denyTool(threadId);
-          if (this.core.threads.require(threadId).archived) return notFound();
+          this.#core.sharedAccess.denyTool(threadId);
+          if (this.#core.threads.require(threadId).archived) return notFound();
         } catch { return notFound(); }
         const parsed = new URL(request.url);
         if (!parsed.pathname.startsWith(prefix)) return notFound();
@@ -89,38 +93,38 @@ export class ArtifactPreviews {
           // macOS /var aliases and linked project folders must compare canonical paths.
           existingInside(realpathSync(thread.cwd), target.absolute, 'file', 'preview asset');
           if (realpathSync(root) !== root || target.stats.size > MAX_ASSET_BYTES) return notFound();
-          const active = this.previews.get(key);
-          if (active) this.touch(key, active);
+          const active = this.#previews.get(key);
+          if (active) this.#touch(key, active);
           const file = Bun.file(target.absolute);
           return fileResponse(file, request.headers.get('range'), {
             'content-type': mime, 'cache-control': 'no-store',
             'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
             'cross-origin-resource-policy': 'same-origin',
             // Preview HTML can run its scripts, but cannot navigate a parent or create popups.
-            'content-security-policy': previewContentPolicy(this.core.policy.remotePreviewResourcesOff()),
+            'content-security-policy': previewContentPolicy(this.#core.policy.remotePreviewResourcesOff()),
           }, request.method === 'HEAD');
         } catch { return notFound(); }
       },
     });
-    const url = new URL(this.core.reachableUrl());
+    const url = new URL(this.#core.reachableUrl());
     url.port = String(server.port);
     url.pathname = `${prefix}${encodeURIComponent(basename(found.absolute))}`;
-    this.previews.set(key, { server, url: url.href, port: server.port!, root });
+    this.#previews.set(key, { server, url: url.href, port: server.port!, root });
     return { url: url.href, port: server.port!, path: found.relative };
   }
 
   close(threadId: string, path: string): void {
-    const thread = this.core.threads.require(threadId);
+    const thread = this.#core.threads.require(threadId);
     // Closing still works after the original HTML has been deleted.
-    const key = this.key(threadId, resolveInside(thread.cwd, path, 'artifacts.previewClose path').relative);
-    this.previews.get(key)?.server.stop(true);
-    this.previews.delete(key);
+    const key = this.#key(threadId, resolveInside(thread.cwd, path, 'artifacts.previewClose path').relative);
+    this.#previews.get(key)?.server.stop(true);
+    this.#previews.delete(key);
   }
 
   stop(): void {
-    this.unlisten?.(); this.unlisten = null;
-    for (const preview of this.previews.values()) preview.server.stop(true);
-    this.previews.clear();
+    this.#unlisten?.(); this.#unlisten = null;
+    for (const preview of this.#previews.values()) preview.server.stop(true);
+    this.#previews.clear();
   }
 }
 

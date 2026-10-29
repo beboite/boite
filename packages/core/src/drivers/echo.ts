@@ -15,6 +15,7 @@ const TOOL_STREAM_DELAY_MS = 120;
 const TOOL_STREAM_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 const TOOL_STREAM_PIECES = 4;
 const ERROR_MESSAGE = 'echo error requested';
+const NOTICE_MESSAGE = 'echo notice requested';
 /** The sentences the real agents fail with, so the fake's refusals read like theirs. */
 const CAPACITY_MESSAGE = 'Selected model is at capacity. Please try a different model.';
 const USAGE_LIMIT_MESSAGE = 'You\'ve hit your usage limit.';
@@ -74,6 +75,8 @@ type Segment =
   | { kind: 'compact' }
   | { kind: 'spawn'; command: string }
   | { kind: 'error' }
+  /** `[notice]`: an error part the turn goes on after, the way pi's error notifications are. */
+  | { kind: 'notice' }
   /** `[capacity:2]`: the first two turns of the thread that reach it fail as a model at capacity. */
   | { kind: 'capacity'; times: number }
   /** `[usage-limit:60000]`: the turn fails on a spent usage window that resets this many ms from now. */
@@ -94,7 +97,7 @@ const COMPACT_POST_TOKENS = 300;
  * one whenever a prompt mentions it, which is what the end to end run types.
  */
 const DIRECTIVE =
-  /\[(?:sleep:\d+|tool-stream|tool(?::\d+)?|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error|capacity:\d+|usage-limit:-?\d+)\]|\bquestion\b/g;
+  /\[(?:sleep:\d+|tool-stream|tool(?::\d+)?|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error|notice|capacity:\d+|usage-limit:-?\d+)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -121,6 +124,7 @@ export function parsePrompt(prompt: string): Segment[] {
     else if (body === 'question') segments.push({ kind: 'question' });
     else if (body === 'think') segments.push({ kind: 'think' });
     else if (body === 'compact') segments.push({ kind: 'compact' });
+    else if (body === 'notice') segments.push({ kind: 'notice' });
     else if (body.startsWith('capacity:')) segments.push({ kind: 'capacity', times: Number(body.slice('capacity:'.length)) });
     else if (body.startsWith('usage-limit:')) segments.push({ kind: 'usage-limit', inMs: Number(body.slice('usage-limit:'.length)) });
     else segments.push({ kind: 'error' });
@@ -514,6 +518,9 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         await writeText(output);
         break;
       }
+      case 'notice':
+        ctx.emit.part(messageId, takeIndex(), { type: 'error', message: NOTICE_MESSAGE });
+        break;
       case 'error': {
         const index = takeIndex();
         ctx.emit.part(messageId, index, { type: 'error', message: ERROR_MESSAGE });

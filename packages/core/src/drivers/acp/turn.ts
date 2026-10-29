@@ -114,18 +114,18 @@ export function commandsOf(list: AvailableCommand[]): AgentCommand[] {
  * tool call, one part per permission question.
  */
 export class AcpTurn {
-  private messageId: MessageId | null = null;
-  private nextIndex = 0;
-  private textIndex: number | null = null;
-  private thinkingIndex: number | null = null;
-  private readonly tools = new Map<string, ToolEntry>();
+  #messageId: MessageId | null = null;
+  #nextIndex = 0;
+  #textIndex: number | null = null;
+  #thinkingIndex: number | null = null;
+  readonly #tools = new Map<string, ToolEntry>();
 
-  private status: TurnResult['status'] = 'done';
-  private error: string | null = null;
-  private diagnosticError: string | undefined;
-  private usage: Usage | null = null;
-  private resolve: (result: TurnResult) => void = () => undefined;
-  private wake: () => void = () => undefined;
+  #status: TurnResult['status'] = 'done';
+  #error: string | null = null;
+  #diagnosticError: string | undefined;
+  #usage: Usage | null = null;
+  #resolve: (result: TurnResult) => void = () => undefined;
+  #wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
   /** Resolves on `stop()`, so a permission still waiting can answer "cancelled". */
@@ -158,10 +158,10 @@ export class AcpTurn {
     this.antigravity = ctx.provider.quirks?.includes('antigravity') === true;
     this.sessionId = ctx.sessionId;
     this.done = new Promise<TurnResult>((resolve) => {
-      this.resolve = resolve;
+      this.#resolve = resolve;
     });
     this.stopped = new Promise<void>((resolve) => {
-      this.wake = resolve;
+      this.#wake = resolve;
     });
   }
 
@@ -171,7 +171,7 @@ export class AcpTurn {
 
   markStopped(): void {
     this.isStopped = true;
-    this.wake();
+    this.#wake();
   }
 
   /**
@@ -180,8 +180,8 @@ export class AcpTurn {
    * error part; a turn that already failed stays failed.
    */
   stopNow(): void {
-    if (this.settled || this.status === 'error') return;
-    this.status = 'stopped';
+    if (this.settled || this.#status === 'error') return;
+    this.#status = 'stopped';
   }
 
   /** `usage_update`: only the latest reading counts, and it is reported once, at the end. */
@@ -193,24 +193,24 @@ export class AcpTurn {
   settle(): void {
     if (this.settled) return;
     this.settled = true;
-    this.wake();
+    this.#wake();
     if (this.contextUse !== null) this.ctx.context(this.contextUse);
-    if (this.messageId !== null) {
-      this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
+    if (this.#messageId !== null) {
+      this.ctx.emit.complete(this.#messageId, this.#status === 'error' ? 'error' : 'complete');
     }
-    this.resolve({
-      status: this.status,
+    this.#resolve({
+      status: this.#status,
       sessionId: this.sessionId,
-      usage: this.usage,
-      error: this.error ?? undefined,
-      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
+      usage: this.#usage,
+      error: this.#error ?? undefined,
+      ...(this.#diagnosticError === undefined ? {} : { diagnosticError: this.#diagnosticError }),
       promptCache: acpCacheLife(this.ctx.provider.id, this.ctx.thread.model),
       ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }
 
   /** The turn's share of the session's running cost; a total below what came before is a session that started over. */
-  private turnCost(): number | null {
+  #turnCost(): number | null {
     const total = this.costUsdEquivalent;
     if (total === null) return null;
     return total >= this.costBefore ? total - this.costBefore : total;
@@ -218,12 +218,12 @@ export class AcpTurn {
 
   /** The prompt response: the stop reason becomes the status, the usage the numbers. */
   finish(response: PromptResponse): void {
-    this.usage = mapUsage(response.usage ?? null, this.turnCost());
+    this.#usage = mapUsage(response.usage ?? null, this.#turnCost());
     switch (response.stopReason) {
       case 'end_turn':
         break;
       case 'cancelled':
-        this.status = 'stopped';
+        this.#status = 'stopped';
         break;
       default:
         this.fail(`the agent stopped: ${response.stopReason}`);
@@ -232,10 +232,10 @@ export class AcpTurn {
   }
 
   fail(reason: string, diagnostic?: string): void {
-    if (this.status === 'error') return;
-    this.status = 'error';
-    this.error = reason;
-    this.diagnosticError = diagnostic;
+    if (this.#status === 'error') return;
+    this.#status = 'error';
+    this.#error = reason;
+    this.#diagnosticError = diagnostic;
     this.part(this.takeIndex(), { type: 'error', message: reason });
   }
 
@@ -244,55 +244,55 @@ export class AcpTurn {
    * fresh session and sends the turn again, so the conversation shows the answer.
    */
   loseSession(reason: string): void {
-    if (this.status === 'error') return;
+    if (this.#status === 'error') return;
     this.sessionLost = true;
-    this.status = 'error';
-    this.error = reason;
+    this.#status = 'error';
+    this.#error = reason;
   }
 
   // -- parts ----------------------------------------------------------------
 
-  private message(): MessageId {
-    if (this.messageId === null) this.messageId = this.ctx.emit.startMessage('assistant');
-    return this.messageId;
+  #message(): MessageId {
+    if (this.#messageId === null) this.#messageId = this.ctx.emit.startMessage('assistant');
+    return this.#messageId;
   }
 
   part(index: number, part: MessagePart): void {
-    this.ctx.emit.part(this.message(), index, part);
+    this.ctx.emit.part(this.#message(), index, part);
   }
 
   takeIndex(): number {
-    this.textIndex = null;
-    this.thinkingIndex = null;
-    const index = this.nextIndex;
-    this.nextIndex += 1;
+    this.#textIndex = null;
+    this.#thinkingIndex = null;
+    const index = this.#nextIndex;
+    this.#nextIndex += 1;
     return index;
   }
 
   writeText(text: string): void {
     if (text.length === 0) return;
-    if (this.textIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.textIndex = index;
+    if (this.#textIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#textIndex = index;
       // A text chunk after a thought chunk answers in its own part.
-      this.thinkingIndex = null;
+      this.#thinkingIndex = null;
       this.part(index, { type: 'text', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.textIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#textIndex, text);
   }
 
   /** `agent_thought_chunk`, the reasoning the UI folds. Its own part, like the text. */
   writeThinking(text: string): void {
     if (text.length === 0) return;
-    if (this.thinkingIndex === null) {
-      const index = this.nextIndex;
-      this.nextIndex += 1;
-      this.thinkingIndex = index;
-      this.textIndex = null;
+    if (this.#thinkingIndex === null) {
+      const index = this.#nextIndex;
+      this.#nextIndex += 1;
+      this.#thinkingIndex = index;
+      this.#textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
     }
-    this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
+    this.ctx.emit.delta(this.#message(), this.#thinkingIndex, text);
   }
 
   /**
@@ -312,7 +312,7 @@ export class AcpTurn {
     subagent: 'subagent' | 'mcp' | null = null,
     fallbackName: string | null = null,
   ): void {
-    const entry = this.tools.get(toolCallId) ?? {
+    const entry = this.#tools.get(toolCallId) ?? {
       index: this.takeIndex(),
       name: name ?? fallbackName ?? toolCallId,
       input: null,
@@ -346,7 +346,7 @@ export class AcpTurn {
         entry.documents = documentsOf(content.filter(item => item.type !== 'content' || item.content.type !== 'text'));
       } else entry.documents = documentsOf(content);
     }
-    this.tools.set(toolCallId, entry);
+    this.#tools.set(toolCallId, entry);
     this.part(entry.index, {
       type: 'tool',
       toolId: toolCallId,

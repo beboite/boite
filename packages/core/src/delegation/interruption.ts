@@ -14,6 +14,7 @@ export const INTERRUPTION_TEXT: Record<BackgroundInterruption, string> = {
 
 /** Whether a child's parent hears of its checkpoint now: a paused or off team hears on its resume. */
 export function parentListens(core: Core, thread: ThreadSummary): boolean {
+  if (core.delegation.remote.parentOf(thread.id)) return !thread.archived;
   const root = core.journal.getThread(thread.parentThreadId!);
   const config = root ? core.delegation.config(root.id) : null;
   return !!root && !!config?.enabled && !config.paused && !root.archived && !thread.archived;
@@ -25,14 +26,19 @@ export function parentListens(core: Core, thread: ThreadSummary): boolean {
  */
 export function tellInterrupted(core: Core, thread: ThreadSummary, tasks: string, how: string, reason: string): void {
   const root = core.journal.getThread(thread.parentThreadId!);
+  const link = core.delegation.remote.parentOf(thread.id);
   const turn = taskTurn(core, thread.id);
-  if (!root || !turn || !parentListens(core, thread)) return;
+  if ((!root && !link) || !turn || !parentListens(core, thread)) return;
+  const parentId = root?.id ?? link!.parentId;
   const requestId = `result:interrupted:${turn.id}`;
   if (core.journal.db.query('SELECT 1 FROM delegation_messages WHERE sender_id = ? AND request_id = ?').get(thread.id, requestId)) return;
-  core.logs.warn(`Subagent ${thread.id} of ${root.id} was waiting on ${tasks}; it ${how}`, {
-    source: 'delegation', event: 'delegation.interrupted', threadId: thread.id, turnId: turn.id, data: { parent: root.id, reason },
+  core.logs.warn(`Subagent ${thread.id} of ${parentId} was waiting on ${tasks}; it ${how}`, {
+    source: 'delegation', event: 'delegation.interrupted', threadId: thread.id, turnId: turn.id, data: { parent: parentId, reason },
   });
+  const resume = link ? '' : `boite delegate resume ${thread.id} continues it; `;
+  const text = `${thread.title}: interrupted\nIt was waiting on its background work (${tasks}), which ${how}. Its last message was a checkpoint, not its final result. ${resume}boite delegate send ${thread.id} "<instruction>" steers it.`.slice(0, 4000);
   try {
-    core.delegation.send({ threadId: thread.id, toThreadId: root.id, requestId, text: `${thread.title}: interrupted\nIt was waiting on its background work (${tasks}), which ${how}. Its last message was a checkpoint, not its final result. boite delegate resume ${thread.id} continues it; boite delegate send ${thread.id} "<instruction>" steers it.`.slice(0, 4000) }, 'result');
+    if (link) core.delegation.remote.letter(thread.id, { origin: 'result', requestId, text });
+    else core.delegation.send({ threadId: thread.id, toThreadId: parentId, requestId, text }, 'result');
   } catch (error) { core.log('warn', `delegation interruption ${thread.id}: ${messageOf(error)}`); }
 }
