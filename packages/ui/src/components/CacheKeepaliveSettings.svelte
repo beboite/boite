@@ -4,6 +4,7 @@
   import { CACHE_KEEPALIVE_HOURS } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
 
   /**
@@ -43,7 +44,7 @@
   <section class="card" id="settings-cache-keepalive" data-testid="cache-keepalive-settings">
     <label for="{uid}-on" class="master">
       <span class="words">
-        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.cacheKeepalive}</span><InfoTip topic={strings.settings.cacheKeepalive} text={strings.settings.cacheKeepaliveHint} /></h2>
+        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.cacheKeepalive}</span><InfoTip topic={strings.settings.cacheKeepalive} text={strings.settings.cacheKeepaliveHint} /><SyncMark {store} key="cacheKeepalive" /></h2>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="cache-keepalive-on"
         checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked, event.currentTarget)} />

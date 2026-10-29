@@ -48,22 +48,44 @@ have an inline preview while the switch is on; other types remain
 downloadable. Mutable file editing and viewing belong to the
 [right panel](panel.md).
 
-With the switch on, or the `open-chat-links` experiment, answers recognize
+With the switch on, or Open chat links in their apps, answers recognize
 Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
 paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
 `:line` or `#Lline` for source locations. Files resolve through the message's
 owning thread and machine; preview paths stay inside its working directory.
+To deliver media across machines, publish it with `boite attach` using a path
+on the conversation's machine. A mapped NAS drive on the viewing desktop does
+not give a remote core access to that path.
 A relative path that is not there as written is looked up by its tail
 (`files.locate`, owner only): `core.md` opens `.local/core.md`, the shallowest
 match wins, ignored folders count but `.git`, `.boite` and `node_modules` do
 not, and two matches at the same depth are reported instead of guessed.
 The local desktop's explicit open action follows the rules in
-[Open chat links](experiments.md#open-chat-links).
+[Open chat links in their apps](#open-chat-links-in-their-apps).
 
 Captures: [chat media on desktop](images/chat-media-desktop.png) · [chat media on a phone](images/chat-media-phone.png)
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes are not rendered, and HTML in an answer's text stays
 text. A page runs only as an inline view, below.
+
+## Open chat links in their apps
+
+Settings, General, **Open chat links in their apps** is off by default and
+shown only in the desktop app. A device that had turned on the
+`open-chat-links` experiment keeps it on. It enables the same link parsing as
+Chat files and previews: Markdown file links, bare web URLs, absolute paths,
+`file:///` links and paths inside inline code. Either switch enables this
+parsing; enabling both adds no further link types.
+
+On the owning local desktop, this switch also makes an explicit click open a
+file or folder in its associated application, including Windows shortcuts and
+absolute paths outside the checkout, instead of Boite's preview. On a remote
+machine or phone, links still use the inline preview and its existing owner
+and working-directory checks. They never open a file on the device displaying
+the conversation.
+
+Pages in the integrated browser and agent RPCs cannot invoke the native action.
+Network and device paths are refused before and after path resolution.
 
 ## Inline views
 
@@ -115,12 +137,17 @@ reader's theme or accent, and a font of the page's own (`viewAdvice` in
 
 ### What the agent is told
 
-The guide every session starts with (`packages/core/src/agent-guide.ts`) has
-one line: the command, and that a request for a visual or a schema calls for
-it. `boite view help` prints the rest, read only by an agent about to write a
-page: the layout rules, the app's look and its kit, the theme variables, how
-to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VIEW_HELP` in
-`packages/contracts/src/view.ts`, beside the code they describe.
+The guide every session starts with (`packages/core/src/agent-guide.ts`) sends
+a diagram, a chart or a formula to the chat first: `CHAT_VISUALS` names the
+Mermaid headers chat draws and the TeX delimiters, and says when a picture is
+called for ([diagrams and formulas](diagrams-and-formulas.md)). That costs the
+agent no command and no help to read. The next line, `VIEW_GUIDE_LINE` in
+`packages/contracts/src/view.ts`, keeps a page for what Mermaid cannot draw (a
+simulator, an animation, a custom page) and sends the agent to `boite view
+help` before its first one. `VIEW_HELP`, beside it, prints the rest: the layout
+rules, the app's look and its kit, the theme variables, how to animate and what
+the publish checks. The built-in skill `boite-visual` is listed for the same
+richer case only.
 
 One file is one visual. Several visuals are several files, each published
 with its own command. The help and the command's output tell the agent to
@@ -137,6 +164,39 @@ Publishing the same file again in the same turn replaces that visual on
 screen, so an agent fixes a page in place. In a later turn the same file is a
 new view, and the earlier answer keeps the page it had.
 
+### Check before publishing
+
+`boite view check <file.html> [--script checks.js] [--scheme dark|light]`
+loads a draft without publishing it. It embeds the same local assets and uses
+the same kit, sandbox and layout checks as publication, with content widths
+of 816 px and 330 px. It creates no message, artifact, browser tab or panel.
+Its temporary page and ticket are removed when the check ends, including on
+errors or timeout. The CLI saves the returned PNGs with unique names inside
+its current directory and never overwrites an existing file. Open both
+captures, fix the page and rerun before publishing.
+
+The check uses the app's fallback palettes and fonts, rather than a connected
+client's custom theme or selected fonts. Dark is the default;
+`--scheme light` uses the light palette and `prefers-color-scheme`.
+
+For a page with controls, `--script checks.js` reads a local JavaScript file
+whose contents are the body of an async function, without a function wrapper.
+It runs in the page after a fresh load at each width, so desktop interactions
+cannot carry state into the phone check. Use the DOM, click buttons, dispatch
+input/change events, await updates, throw when an assertion fails and return
+JSON values that describe the resulting state. Captures show the page after
+the script ran, including when it throws. Check every control and open the
+captures to inspect the resulting layout.
+
+The command prints captures, script results, errors and advice. Any error,
+or a browser unavailable or unable to answer, returns a nonzero exit code
+after available captures are saved. `--json` returns `checked`, `errors`,
+`advice` and `captures`; each capture has `width`, `height`, a local `path`
+and an optional script `value`, with no PNG bytes. A result exceeding the
+16 MB RPC response limit returns an error without captures; return smaller
+values or reduce the image detail. After fixing errors and advice and opening
+the new captures, run `boite view <file.html>` to publish as usual.
+
 ### What publishing does
 
 `artifacts.view` (`packages/core/src/views.ts`) reads the file, which must be
@@ -145,7 +205,13 @@ an `.html` file inside the thread's working directory, and then:
 1. Embeds every local file the page names by a relative path: pictures,
    fonts, audio and video become `data:` addresses, a script and a stylesheet
    become the element's own text, and what a linked stylesheet names in a
-   `url()` is embedded from that stylesheet's folder. They must stay inside
+   `url()` is embedded from that stylesheet's folder. A `url()` or an
+   `@import` counts only in a `<style>` element or a CSS attribute (`style`,
+   SVG's `fill`, `stroke`, `mask`, `clip-path`, `filter`, `marker-*`,
+   `cursor`); in script text, prose, a `<textarea>`, a `<title>` or another
+   attribute (`title`, `data-*`, `onclick`) it is left as written. A
+   `>` inside a quoted attribute value does not end its tag, a tag spelled
+   inside one starts nothing, and `<title-card>` is not a `<title>`. They must stay inside
    the working directory, and each is read through the descriptor of the file
    that was checked. The page with its files is at most 4 MB.
 2. Refuses a remote address in anything the page would load (`<script src>`,

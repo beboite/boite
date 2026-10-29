@@ -9,6 +9,10 @@
 # admission unless the user accepted Kill. Explicit stop requests /shutdown,
 # then ends a core that has not exited after 15 seconds.
 
+# installer-hooks.test.ts names a file here to learn which scripts ran; a
+# trace that cannot be written never stops the script.
+if ($env:BOITE_HOOKS_TRACE) { Add-Content -LiteralPath $env:BOITE_HOOKS_TRACE -ErrorAction SilentlyContinue -Value 'stop-core' }
+
 $exe = [IO.Path]::GetFullPath($env:BOITE_STOP_EXE)
 $entry = Join-Path ([IO.Path]::GetDirectoryName($exe)) 'core\main.js'
 

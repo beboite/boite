@@ -20,7 +20,8 @@ export function threadCapabilities(core: Core, threadId: string): ThreadCapabili
   if (core.stopping) runtimeReason = 'stopping';
   else if (core.updates.updating(thread.providerId)) runtimeReason = 'updating';
   else if (core.plugins.blocksAccount(thread.accountId)) runtimeReason = 'plugins-blocked';
-  const conversationReason = thread.agentSessionId ? 'agent-session' : thread.archived ? 'archived' : null;
+  // A persistent agent's thread steers, compacts and rewinds like any other; only a fork needs a project.
+  const conversationReason = thread.archived ? 'archived' : null;
   const handle = core.threads.runner.handles.get(threadId);
   const active = thread.status === 'running' ? core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND status = 'running' ORDER BY rowid DESC LIMIT 1").get(threadId) as { id: string } | null : null;
   const activeTurn = active ? core.journal.getTurn(active.id) : null;
@@ -35,10 +36,10 @@ export function threadCapabilities(core: Core, threadId: string): ThreadCapabili
   // Metadata existence checks must not decode old images or large tool output.
   const hasForkHistory = core.journal.db.query("SELECT 1 FROM messages WHERE thread_id = ? AND state != 'streaming' LIMIT 1").get(threadId) !== null;
   const hasRewindHistory = core.journal.db.query("SELECT 1 FROM messages WHERE thread_id = ? AND role = 'user' LIMIT 1").get(threadId) !== null;
-  return deriveThreadCapabilities({
+  const capabilities = deriveThreadCapabilities({
     threadId, providerId: thread.providerId, protocol, selectionVersion: thread.selectionVersion ?? 0,
     providerCapabilities: provider?.capabilities ?? null, runtimeReason,
-    conversationReason: conversationReason ?? (thread.projectId === null ? 'agent-session' : null),
+    conversationReason: conversationReason ?? (thread.projectId === null && !thread.agentSessionId ? 'agent-session' : null),
     busy: threadActive(thread.status) || Boolean(handle), steeringSupported, steeringReason, compactionReason,
     preparationSupported: protocol !== null && getDriver(protocol).prepare !== undefined,
     pendingApprovals: core.threads.listPermissions(threadId).length > 0,
@@ -48,4 +49,8 @@ export function threadCapabilities(core: Core, threadId: string): ThreadCapabili
     nativeRewindSupported: protocol === 'claude-sdk' || protocol === 'codex-appserver', nativeRewindAvailable: (protocol === 'claude-sdk' || protocol === 'codex-appserver') && core.threads.branching.nativeRewindAvailable(thread),
     backgroundSupported: protocol === 'claude-sdk' || core.threads.agentState.background.has(threadId),
   });
+  if (!thread.agentSessionId) return capabilities;
+  // A fork lands in a project, which an agent's thread has none of (`threads/branching.ts`).
+  const noFork = { supported: capabilities.fork.seeded.supported, available: false, reason: 'agent-session' as const };
+  return { ...capabilities, fork: { seeded: noFork, native: { ...noFork, supported: capabilities.fork.native.supported } } };
 }

@@ -40,12 +40,14 @@ export function offeredCards(): { kind: SurfaceKind; key: string }[] {
 
 /** The name of a kind, which a card, a tab and the new-surface menu all read. */
 export function kindName(kind: SurfaceKind): string {
+  if (kind === 'desk') return strings.agents.desk;
   if (kind === 'agents') return strings.delegation.heading;
   if (kind === 'messages') return strings.agentMessages.heading;
   if (kind === 'browser' || kind === 'agent-browser') return strings.rightPanel.browser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
   if (kind === 'device') return strings.rightPanel.device;
+  if (kind === 'window') return strings.rightPanel.window;
   if (kind === 'file') return strings.rightPanel.file;
   if (kind === 'tasks') return strings.rightPanel.tasks;
   return strings.rightPanel.trace;
@@ -53,12 +55,12 @@ export function kindName(kind: SurfaceKind): string {
 
 /**
  * A page needs a webview. Paired devices follow subagents and mail, read
- * changes and files read-only and watch the agent's browser and the Device
- * panel (`DEVICE_METHODS`); tasks and the trace read what only the owner may
+ * changes and files read-only and watch the agent's browser, the Device and
+ * the Window panels (`DEVICE_METHODS`); tasks and the trace read what only the owner may
  * ask for.
  */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file' || kind === 'device' || kind === 'agent-browser') return true;
+  if (kind === 'desk' || kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file' || kind === 'device' || kind === 'window' || kind === 'agent-browser') return true;
   return kind === 'browser' ? inShell : owner;
 }
 

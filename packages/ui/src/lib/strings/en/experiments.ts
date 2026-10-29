@@ -1,15 +1,14 @@
 export const strings = {
 
   experiments: {
+    pinnedQuotas: { title: 'Pinned model quotas', hint: 'Pin the current model provider limits in a corner of the conversation or below the thread list' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
-    openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',
       hint: 'An animated whip follows your pointer or finger. Flick to crack it, click or tap to drop it',
       action: 'Throw the whip',
       drop: 'Drop the whip'
     },
-    previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     goal2: {
       title: 'Reviewed goals',
       hint: 'Adds /goal2: another model writes the checklist of everything you asked for, updates it when you add or change something and, after each turn of the agent, tells it what is still open. When the agent says the goal is done, a new conversation that has not seen its work checks it and answers pass, partial or fail. Anything but a pass goes back to the agent, for up to five reviews',
@@ -33,16 +32,8 @@ export const strings = {
       hint: 'A clock beside the context meter counting down how long the provider keeps the conversation cached'
     },
     residentAgents: {
-      title: 'Agents',
-      hint: 'Resident agents with their own brain, missions and routines, from the sidebar. Agents you already made keep running while this is off'
-    },
-    edgeScrollbars: {
-      title: 'Edge scrollbars',
-      hint: 'Scrollbars take no room. Each one fades in as the pointer nears the edge of its area and can still be dragged. Mouse and pen only'
-    },
-    pressPreload: {
-      title: 'Load on press',
-      hint: 'A thread or page starts loading when you press it, before you release the click or lift your finger'
+      title: 'Bots',
+      hint: 'Bots: persistent agents with their own brain, memory and routines, from the sidebar. Bots you already made keep running while this is off'
     },
     contacts: {
       title: 'Contacts',

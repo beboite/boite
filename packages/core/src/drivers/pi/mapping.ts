@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { AgentCommand, ImageAttachment } from '@boite/contracts';
+import type { AgentCommand, ImageAttachment, ThreadContextMode } from '@boite/contracts';
 import { stringify } from '../tool-text.ts';
 import { resolveDataDir } from '../../paths.ts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
@@ -95,6 +95,22 @@ export function sessionDirOf(ctx: SessionContext): string {
 }
 
 /**
+ * What a thread in a context mode leaves out on pi's command line. pi has no
+ * approval gate in RPC mode, so a thread with no tool (`TOOL_FREE_CONTEXT`)
+ * starts with none at all. Extensions, pi's way to MCP servers and hooks, go
+ * with either; its context files, skills and prompt templates with instructions.
+ * A mode a request may ask of pi drops guides alone, which leaves all of this.
+ */
+export function contextArgs(mode: ThreadContextMode | null | undefined): string[] {
+  if (!mode) return [];
+  return [
+    ...(mode.tools?.length === 0 ? ['--no-tools'] : []),
+    ...(mode.mcp && mode.hooks ? [] : ['--no-extensions']),
+    ...(mode.instructions ? [] : ['--no-context-files', '--no-skills', '--no-prompt-templates']),
+  ];
+}
+
+/**
  * pi takes the model on the command line and nowhere else at launch:
  * `--model provider/id`, with `:<thinking>` appended for the reasoning level.
  * `default` is Boite's own id for "the agent keeps its own", so it sends
@@ -119,6 +135,8 @@ export function modelArgs(ctx: SessionContext): string[] {
 export function sessionKey(ctx: SessionContext): string {
   const model = ctx.thread.model;
   return JSON.stringify({
+    protection: ctx.protectedExecution?.fingerprint ?? null,
+    contextMode: ctx.thread.contextMode ?? null,
     ownModel: model === null || model === AGENT_OWN_MODEL,
     ownEffort: ctx.thread.effort === null,
     cwd: ctx.thread.cwd,

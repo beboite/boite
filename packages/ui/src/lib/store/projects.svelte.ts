@@ -49,9 +49,45 @@ export class Projects {
   }
 
   toggleProject(projectId: ProjectId): void {
-    this.collapsedProjects = this.ctx.store.isCollapsed(projectId)
+    this.#fold(this.ctx.store.isCollapsed(projectId)
       ? this.collapsedProjects.filter((id) => id !== projectId)
-      : [...this.collapsedProjects, projectId];
+      : [...this.collapsedProjects, projectId]);
+  }
+
+  /** A project something must show (a draft in it, a thread moved there) opens, and stays open after a restart. */
+  unfold(projectId: ProjectId): void {
+    if (this.isCollapsed(projectId)) this.#fold(this.collapsedProjects.filter((id) => id !== projectId));
+  }
+
+  /**
+   * Folds belong to this device and survive a restart. Per core, like the drafts:
+   * project ids can collide between machines, and the shell's own core may change port.
+   */
+  #foldsKey(): string {
+    const s = this.ctx.store;
+    return 'boite.foldedProjects.v1:' + JSON.stringify([s.localCore ? 'local' : s.machineId || s.endpointUrl, s.core?.hostname, s.core?.dataDir]);
+  }
+
+  #fold(ids: string[]): void {
+    this.collapsedProjects = ids;
+    try {
+      if (ids.length === 0) localStorage.removeItem(this.#foldsKey());
+      else localStorage.setItem(this.#foldsKey(), JSON.stringify(ids));
+    } catch { /* storage unavailable: the folds last until the app closes */ }
+  }
+
+  /** A project removed while this device was away leaves the folds once the machine lists its projects. */
+  pruneFolds(): void {
+    const listed = new Set(this.projects.map((p) => p.id));
+    const kept = this.collapsedProjects.filter((id) => listed.has(id));
+    if (kept.length !== this.collapsedProjects.length) this.#fold(kept);
+  }
+
+  /** The folds this device left on the core that just answered. Unreadable storage keeps the ones on screen. */
+  restoreFolds(): void {
+    let stored: unknown;
+    try { stored = JSON.parse(localStorage.getItem(this.#foldsKey()) ?? '[]'); } catch { return; }
+    this.collapsedProjects = Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [];
   }
 
   /** Per core, so two machines each land on their own project. */
@@ -89,8 +125,9 @@ export class Projects {
   async openWhereLeft(): Promise<void> {
     const s = this.ctx.store;
     if (!s.visible || s.page !== 'chat') return;
-    if (s.openThread || this.draft) return;
-    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !this.#inArchivedProject(t.projectId));
+    // An agent's own thread belongs to the Agents page: the chat starts from the threads around it.
+    if ((s.openThread && !s.openThread.agentSessionId) || this.draft) return;
+    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !t.agentSessionId && !this.#inArchivedProject(t.projectId));
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (recent) {
       await s.open(recent.id);
@@ -175,6 +212,7 @@ export class Projects {
       // Another machine took this Store meanwhile: project ids can collide between machines.
       if (!this.ctx.currentClient(client, clientGeneration) || !read.active) return;
       this.projects = retainRows(this.projects, read.apply(listed, this.projects));
+      this.pruneFolds();
     } catch {
       /* the list the app holds stays */
     } finally { read.cancel(); }
@@ -184,7 +222,8 @@ export class Projects {
    * The drafts project, asked of the core on the first send into it. The core
    * makes the folder then, and the thread the send creates goes in it.
    */
-  async ensureDrafts(): Promise<ProjectId | null> {
+  /** `quiet`: a background start that tries again later, so a failure is not the user's to read. */
+  async ensureDrafts(options: { quiet?: boolean } = {}): Promise<ProjectId | null> {
     const known = this.ctx.store.draftsProject;
     if (known) return known.id;
     const client = this.ctx.client;
@@ -197,7 +236,7 @@ export class Projects {
       return project.id;
     } catch (error) {
       // A switched machine closed the old client: its rejection is not this machine's error.
-      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration) && !options.quiet) this.ctx.fail(error);
       return null;
     }
   }
@@ -377,6 +416,18 @@ export class Projects {
     }
   }
 
+  async renameProject(projectId: ProjectId, name: string): Promise<void> {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    if (!client) return;
+    try {
+      const project = await client.call('projects.rename', { projectId, name });
+      if (this.ctx.currentClient(client, generation)) this.upsertProject(project);
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+    }
+  }
+
   async setProjectWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
@@ -449,6 +500,7 @@ export class Projects {
     this.ctx.drafts.forgetProject(projectId);
     for (const thread of s.threads.filter(t => t.projectId === projectId)) delete s.composerStates[thread.id];
     this.projects = this.projects.filter((p) => p.id !== projectId);
+    this.unfold(projectId);
     s.threads = s.threads.filter((t) => t.projectId !== projectId);
     if (s.openThread?.projectId === projectId || this.draft?.projectId === projectId) {
       this.ctx.threads.invalidateNavigation();
@@ -491,7 +543,7 @@ export class Projects {
     this.ctx.requests.keepRequestsOf(null);
     this.ctx.drafts.resume(target, { fresh, ...(draftId === undefined ? {} : { draftId }) });
     this.ctx.drafts.persist();
-    if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
+    if (target !== null) this.unfold(target);
     if (target !== null) this.rememberProject(target);
     if (options.refresh !== false) void this.refreshProjects();
     s.page = 'chat';
@@ -518,7 +570,7 @@ export class Projects {
     this.draft = { ...kept, ...(draft.id ? {} : { id: secureId(), createdAt: created() }), ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
-    this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);
+    this.unfold(target);
   }
 
   /** The draft's incognito switch, offered in the drafts only. */

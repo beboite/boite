@@ -14,6 +14,9 @@ const CORE: CoreInfo = {
   trace: { os: 'windows', mode: 'events', note: 'exact' }
 };
 
+/** A core that answers a call asking for `progress` in slices, as every core since 2026-10-05 does. */
+const SLICING: CoreInfo = { ...CORE, features: { chunkedAnswers: true } };
+
 interface Frame {
   id?: number;
   method?: string;
@@ -158,6 +161,67 @@ describe('rpcUrl', () => {
 });
 
 describe('WsClient', () => {
+  test('the hello measures how far the core clock runs ahead, from the middle of its round trip', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      const sent = Date.now();
+      await vi.advanceTimersByTimeAsync(400);
+      // The core read its clock 11 s ahead, halfway through the 400 ms trip.
+      socket.receive({ id: socket.frame(0).id, result: { core: { ...CORE, now: sent + 200 + 11_000 }, principal: 'owner' } });
+      await client.connect();
+      expect(client.clockOffset).toBe(11_000);
+      // Back from sleep the device set its clock right on the same socket: the probe's hello measures again.
+      const heard: number[] = [];
+      client.onClockOffset((offset) => heard.push(offset));
+      vi.setSystemTime(Date.now() + 11_000);
+      const resumed = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.receive({ id: socket.frame(1).id, result: { core: { ...CORE, now: Date.now() + 300 }, principal: 'owner' } });
+      await resumed;
+      expect(socket.closed).toBe(false);
+      expect(client.clockOffset).toBe(300);
+      expect(heard).toEqual([300]);
+      // A hello held behind an upload comes back 3 s later, held the whole way out: an odd trip that long cannot place the core's clock.
+      const late = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const probed = Date.now();
+      await vi.advanceTimersByTimeAsync(3_001);
+      socket.receive({ id: socket.frame(2).id, result: { core: { ...CORE, now: probed + 3_001 + 300 }, principal: 'owner' } });
+      await late;
+      expect(client.clockOffset).toBe(300);
+      expect(heard).toEqual([300]);
+      // The same slow trip after the device's clock fell 8 s behind: a shift larger than half the trip still counts.
+      vi.setSystemTime(Date.now() - 8_000);
+      const behind = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const again = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(3).id, result: { core: { ...CORE, now: again + 2_900 + 8_300 }, principal: 'owner' } });
+      await behind;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
+      // Another slow trip, held on the way back this time, reads 6900: both guesses are 1.5 s wide, so neither replaces the other.
+      const back = client.resume();
+      await vi.advanceTimersByTimeAsync(0);
+      const third = Date.now();
+      await vi.advanceTimersByTimeAsync(3_000);
+      socket.receive({ id: socket.frame(4).id, result: { core: { ...CORE, now: third + 100 + 8_300 }, principal: 'owner' } });
+      await back;
+      expect(client.clockOffset).toBe(9_700);
+      expect(heard).toEqual([300, 9_700]);
+    } finally { client.close(); vi.useRealTimers(); }
+    const old = connected();
+    try {
+      old.socket.open();
+      old.socket.receive({ id: old.socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await old.client.connect();
+      expect(old.client.clockOffset).toBe(0);
+    } finally { old.client.close(); }
+  });
+
   test('a silent RPC expires without resending it, and a probe the core answers keeps the connection', async () => {
     vi.useFakeTimers();
     const { client, socket } = connected();
@@ -302,7 +366,160 @@ describe('WsClient', () => {
     } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
   });
 
-  test('a remote call whose one large answer takes 45 s to arrive keeps its socket and resolves', async () => {
+  test('a remote call asks for its answer in slices, and slices arriving for 45 s keep the socket', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const socket = take(sockets, 0);
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: SLICING, principal: 'session' } });
+      await client.connect();
+      let outcome = '';
+      void client.call('threads.list', {}).then(() => { outcome = 'answered'; }, (error: Error) => { outcome = error.message; });
+      const request = JSON.parse(socket.sent[1]!) as { id: number; progress?: boolean };
+      expect(request.progress).toBe(true);
+
+      // A slow link: one slice every 9 s, the answer whole after 45 s.
+      const body = JSON.stringify({ jsonrpc: '2.0', id: request.id, result: [] });
+      const parts = [body.slice(0, 10), body.slice(10, 20), body.slice(20, 30), body.slice(30, 40), body.slice(40)];
+      for (const part of parts) {
+        await vi.advanceTimersByTimeAsync(9_000);
+        socket.onmessage?.({ data: `${RPC_CHUNK_MARK}${JSON.stringify({ id: request.id, bytes: new TextEncoder().encode(part).length, total: new TextEncoder().encode(body).length })}\n${part}` });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe('answered');
+      expect(socket.closed).toBe(false);
+      expect(sockets).toHaveLength(1);
+      // Slices are frames: the probe the call took with it, if any, was answered by them.
+      expect(client.state).toBe('ready');
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a half-open remote socket carrying a call is replaced 35 s after its last frame, not after the call times out', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: SLICING, principal: 'session' } });
+      await client.connect();
+      let failure: unknown = null;
+      void client.call('threads.list', {}).catch((error: unknown) => { failure = error; });
+      // An event a second later: the socket was heard after the call, which waits on.
+      await vi.advanceTimersByTimeAsync(1_000);
+      first.receive({ method: 'core.log', params: { level: 'info', message: 'tick', at: 1 } });
+
+      await vi.advanceTimersByTimeAsync(24_999);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+      expect(first.closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
+      // Dropped, not timed out: the store resends a prompt it carried once the machine is back.
+      expect(wasDropped(failure)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a call sent in the millisecond of the last frame still probes a socket that then stays silent', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: SLICING, principal: 'session' } });
+      await client.connect();
+      // Same instant as the hello's answer: the clock cannot tell them apart, the frame count can.
+      void client.call('threads.list', {}).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'hello']);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(first.closed).toBe(true);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a probe waits behind a large upload at 32 KiB/s, and an answer that lands meanwhile keeps the socket', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: SLICING, principal: 'session' } });
+      await client.connect();
+      await vi.advanceTimersByTimeAsync(1_000);
+      // A prompt with 2 MiB of picture on a slow uplink: the core reads its hello only after it.
+      let outcome = '';
+      void client.call('turns.start', { threadId: 'thr_far', prompt: 'x'.repeat(2 * 1024 * 1024) }).then(() => { outcome = 'answered'; }, (error: Error) => { outcome = error.message; });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'turns.start', 'hello']);
+      // 10 s and 64 s for the upload: still waiting at 70 s.
+      await vi.advanceTimersByTimeAsync(70_000);
+      expect(first.closed).toBe(false);
+      first.receive({ id: first.frame(1).id, result: { id: 'trn_far' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe('answered');
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(first.closed).toBe(false);
+      expect(sockets).toHaveLength(1);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a call that hears nothing for 3 s on a remote socket probes it, so a dead link shows within 13 s', async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: SLICING, principal: 'session' } });
+      await client.connect();
+      // Busy a moment ago: a call goes alone.
+      const quick = client.call('threads.list', {});
+      first.receive({ id: first.frame(1).id, result: [] });
+      await quick;
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list']);
+
+      // The link dies a second later, and the user opens a conversation there.
+      await vi.advanceTimersByTimeAsync(1_000);
+      let failure: unknown = null;
+      void client.call('threads.get', { threadId: 'thr_far' }).catch((error: unknown) => { failure = error; });
+      void client.call('permissions.list', {}).catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'threads.get', 'permissions.list']);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'threads.list', 'threads.get', 'permissions.list', 'hello']);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(first.closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
+      expect(wasDropped(failure)).toBe(true);
+    } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a core that answers in one frame: a call whose answer takes 45 s to arrive keeps its socket and resolves', async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
@@ -333,7 +550,7 @@ describe('WsClient', () => {
     } finally { client.close(); vi.useRealTimers(); }
   });
 
-  test('a half-open remote socket carrying a call is replaced once that call times out', async () => {
+  test('a core that answers in one frame: a half-open socket carrying a call is replaced once that call times out', async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {

@@ -12,8 +12,9 @@ export type ImagePreviews = (messageId: string, partIndex: number, data: string)
 const DRAWN_IMAGE = /^image\/(png|jpeg|gif|webp)$/;
 
 /**
- * File links need names and sizes. An assistant's video, audio or PDF keeps
- * its bytes: it previews on mount. An assistant's picture above
+ * File links need names and sizes. Video and audio bytes are fetched separately
+ * when their player nears the screen. An assistant's PDF keeps its bytes for
+ * signature checking before preview. An assistant's picture above
  * `IMAGE_INLINE_CHARS` is deferred like a prompt's, with the size its header
  * gives and its blur, and is read once it nears the screen: nine screenshots
  * an agent attached made a 40-message page weigh 12 MB.
@@ -34,7 +35,7 @@ export function previewFileData(messages: Message[], previews?: ImagePreviews): 
 export function previewFilePart(part: MessagePart, role: Message['role'], messageId: string, index: number, previews?: ImagePreviews): MessagePart {
   if (part.type !== 'file' || part.dataDeferred) return part;
   const picture = DRAWN_IMAGE.test(part.mimeType);
-  if (role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
+  if (role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^image\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
   const size = picture ? imageSize(part.data) : null;
   const preview = picture ? previews?.(messageId, index, part.data) ?? null : null;
   return {

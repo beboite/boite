@@ -7,13 +7,14 @@ import type { CoreClient } from '../src/client.ts';
 import { decodeInvite, tokenHash } from '../src/contacts/invite.ts';
 import { CONTACT_JOIN_ROUTE, JOIN_INPUT } from '../src/contacts/join.ts';
 import { CONTACT_LINK_ROUTE } from '../src/contacts/store.ts';
+import { unavailable } from '../src/errors.ts';
 import { pack, seal, SEALED } from '../src/group/seal.ts';
 import { newToken } from '../src/ids.ts';
 import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { Driver } from '../src/drivers/types.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
-import { thrown } from './settle.ts';
+import { rejection, thrown } from './settle.ts';
 
 const cores: TestCore[] = [];
 let restore: (() => void) | undefined;
@@ -99,7 +100,7 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id });
   // The host announces what it opened, down the link.
   await waitFor(() => guest.core.contacts.find(hostId)?.offers.some(offer => offer.name === 'alpha') === true, 10000);
-  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha' }]);
+  expect((await guestClient.call('contacts.get', {})).contacts[0]?.offers).toEqual([{ projectId: open.id, name: 'alpha', sharedProject: {ownerCoreId:hostId,coreId:hostId,projectId:open.id} }]);
   const contacts = await guest.core.contacts.forThread(guestThread);
   expect(contacts).toEqual([{ name: guest.core.contacts.find(hostId)!.name, coreId: hostId, projects: ['alpha'], link: 'connected' }]);
 
@@ -129,6 +130,28 @@ test('a granted project is all a contact sees: letters cross both ways, an ungra
   await hostClient.call('contacts.grant', { coreId: guestId, projectId: open.id, readThreads: true });
   expect((await guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostOpen })).contact.threadId).toBe(hostOpen);
   expect(await thrown(guest.core.coordination.read(guestThread, { coreId: hostId, threadId: hostClosed }))).toThrow('not a thread of a project opened to you');
+}, 30000);
+
+test('a grant made while the contact sync is in flight reaches the contact without waiting for the periodic flush', async () => {
+  const { host, guest, guestClient, hostId, guestId } = await linked();
+  await waitFor(() => host.core.contacts.find(guestId)?.capabilities?.humanLetters === 1);
+  const first = await project(guest, guestClient, 'first');
+  const second = await project(guest, guestClient, 'second');
+  // Hold the sync that carries the first grant, so the second lands while it is in flight.
+  const gate = Promise.withResolvers<void>();
+  let holding = false;
+  const request = guest.core.coordination.request.bind(guest.core.coordination);
+  guest.core.coordination.request = async (peer, operation, payload) => {
+    if (operation === 'contact.sync' && !holding && (payload as { offers: unknown[] }).offers.length === 1) { holding = true; await gate.promise; }
+    return request(peer, operation, payload);
+  };
+  restore = () => { guest.core.coordination.request = request; };
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: first.id });
+  await waitFor(() => holding);
+  await guestClient.call('contacts.grant', { coreId: hostId, projectId: second.id });
+  gate.resolve();
+  // The periodic flush runs every 30 seconds; the second grant must not wait for it.
+  await waitFor(() => host.core.contacts.find(guestId)?.offers.length === 2);
 }, 30000);
 
 test('model tiers: a sender below its own owner\'s tier cannot write, and a letter whose attested model is below the recipient\'s tier is refused', async () => {
@@ -174,6 +197,30 @@ test('an ask waits for the owner, who opens a project; the asking thread hears t
   const mine = (await guestClient.call('contacts.get', {})).requests.find(request => request.id === asked.id);
   expect(mine).toMatchObject({ status: 'accepted', decidedBy: 'owner', project: { id: open.id, name: 'alpha' } });
 }, 30000);
+
+test('contact request answers resume automatic pauses while preserving Stop and owner pauses', async () => {
+  const { host, guest, hostClient, guestClient, hostId } = await linked();
+  const mine = await project(guest, guestClient, 'mine');
+  for (const reason of ['stop', 'owner', 'restart', 'failure'] as const) {
+    const guestThread = await thread(guestClient, mine.id, `Paused by ${reason}`);
+    const asked = await guestClient.call('collaboration.ask', { threadId: guestThread, contact: hostId, text: `A request before ${reason}` });
+    if (reason === 'owner') guest.core.coordination.configure(guestThread, { mode: 'brief', remote: true, resources: '', paused: true });
+    else guest.core.coordination.pause(guestThread, reason);
+    await waitFor(() => requestsOf(host).some(request => request.remoteId === asked.id), 10000);
+    const incoming = requestsOf(host).find(request => request.remoteId === asked.id)!;
+    await hostClient.call('contacts.decide', { id: incoming.id, accept: false, reason: 'No matching project.' });
+    await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact'), 10000);
+    const automatic = reason === 'restart' || reason === 'failure';
+    expect(guest.core.coordination.get(guestThread).config.paused).toBe(!automatic);
+    if (automatic) {
+      await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact' && letter.status === 'delivered'));
+      expect(guest.core.coordination.get(guestThread).wakes).toBe(1);
+    } else {
+      expect(letters(guest, guestThread).find(letter => letter.origin === 'contact')?.status).toBe('received');
+      expect(guest.core.coordination.get(guestThread).wakes).toBe(0);
+    }
+  }
+}, 40000);
 
 test('a trusted contact whose git remote matches exactly one project is answered without the owner, and the concierge decides the rest', async () => {
   const { host, guest, hostClient, guestClient, hostId, guestId } = await linked();
@@ -285,12 +332,14 @@ test('revoke rejects letters waiting for the closed project, queued wakes includ
   // A second letter already handed to a provider wake.
   const queued = await send('The dev server one.');
   await waitFor(() => letters(host, hostThread).find(entry => entry.id === queued.id)?.status === 'received', 10000);
-  (host.core.coordination as unknown as { update(letter: AgentLetter, status: string, error: string): void })
-    .update(letters(host, hostThread).find(entry => entry.id === queued.id)!, 'uncertain', 'Queued for provider delivery');
+  // Only `admit`, which protects the letter first, may hand it over.
+  const desk = host.core.coordination as unknown as { admit(threadId: string, letters: AgentLetter[], consume: () => void): void; update(letter: AgentLetter, status: string, error: string): void };
+  const entry = letters(host, hostThread).find(entry => entry.id === queued.id)!;
+  desk.admit(hostThread, [entry], () => desk.update(entry, 'uncertain', 'Queued for provider delivery'));
   await hostClient.call('contacts.revoke', { coreId: guestId, projectId: open.id });
   for (const id of [letter.id, queued.id]) expect(letters(host, hostThread).find(entry => entry.id === id)).toMatchObject({ status: 'rejected', error: 'Project closed to this contact' });
   expect(host.core.coordination.prepareWake(hostThread, 'turn_late')).toBe(false);
-  expect(host.core.contacts.mayReach(guestId, hostThread)).toBe(false);
+  expect(host.core.contacts.reach.mayReach(guestId, hostThread)).toBe(false);
   const late = await send('Still there?');
   await waitFor(() => letters(guest, guestThread).find(entry => entry.id === late.id)?.status === 'rejected', 10000);
   expect(letters(guest, guestThread).find(entry => entry.id === late.id)?.error).toContain('not a thread of a project opened to you');
@@ -340,7 +389,7 @@ test('the link refuses a replayed or stale hello, a contact\'s readable request,
 
   // The guest forgets the host and tries the same link again: the host spent its token at the first join.
   await guestClient.call('contacts.remove', { coreId: hostId });
-  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used or expired');
+  expect(await thrown(guestClient.call('contacts.join', { link: invite.link }))).toThrow('already used, cancelled or expired');
   expect(host.core.contacts.list()).toHaveLength(1);
 }, 30000);
 
@@ -477,6 +526,115 @@ test('an invitation for someone already on this Tailscale carries no share, asks
   expect(await thrown(hostClient.call('contacts.invite', { share: 'no' as never }))).toThrow('share: expected true or false');
 }, 30000);
 
+test('an invitation for another network names the contact routes on Funnel, shares nothing, joins over them, and Funnel comes down with the last contact', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  // Funnel's public origin stands in as the host's loopback URL; a tailnet name is never asked for.
+  host.core.contacts.selfUrl = async () => { throw new Error('the tailnet name was asked for'); };
+  host.core.contacts.internetUrl = async () => host.url;
+  let closed = 0;
+  (host.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => { closed += 1; };
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const invite = await hostClient.call('contacts.invite', { internet: true });
+  expect(invite).toMatchObject({ share: { status: 'none' }, via: 'internet' });
+  expect(decodeInvite(invite.link)).toMatchObject({ url: host.url, share: null });
+  expect(host.core.journal.getSetting('contacts:funnel')).toEqual({ targets: [host.url] });
+  const guestId = guest.core.coordination.card().coreId;
+  expect((await guestClient.call('contacts.join', { link: invite.link })).url).toBe(host.url);
+  await waitFor(() => host.core.contacts.linked(guestId));
+  expect(closed).toBe(0);
+  // Without a contact hosted or an invitation out, nothing needs the routes on the internet.
+  await hostClient.call('contacts.remove', { coreId: guestId });
+  await waitFor(() => closed === 1);
+  await waitFor(() => host.core.journal.getSetting('contacts:funnel') === null);
+  // A refused Funnel makes no invitation, and whatever it mounted comes down with it.
+  host.core.contacts.internetUrl = async () => { throw unavailable('contacts.invite: Funnel refused'); };
+  expect(await thrown(hostClient.call('contacts.invite', { internet: true }))).toThrow('Funnel refused');
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
+  await waitFor(() => closed === 2);
+  expect(await thrown(hostClient.call('contacts.invite', { internet: 'yes' as never }))).toThrow('internet: expected true or false');
+}, 30000);
+
+test('a join to a Funnel name public DNS does not know yet says to wait and leaves the invitation unspent; a host that does not answer is down', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.internetUrl = async () => 'https://desk.tail0000.ts.net:8443';
+  // Never the internet: the host's own check is recorded, not run.
+  const watched: string[] = [];
+  (host.core.contacts.funnel as unknown as { watch: (url: string) => void }).watch = url => { watched.push(url); };
+  (host.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => {};
+  const invite = await host.core.contacts.invite(true, true);
+  expect(watched).toEqual(['https://desk.tail0000.ts.net:8443']);
+  const original = globalThis.fetch;
+  restore = () => { globalThis.fetch = original; };
+  let failure: Error = Object.assign(new TypeError('getaddrinfo ENOTFOUND desk.tail0000.ts.net'), { code: 'ENOTFOUND' });
+  globalThis.fetch = (async () => { throw failure; }) as unknown as typeof fetch;
+  const { reason } = await rejection(guest.core.contacts.join(invite.link));
+  expect(String((reason as Error).message)).toContain('has not published its address on the internet yet');
+  expect(reason).toMatchObject({ data: { retryAfterMs: 30_000 } });
+  expect(host.core.contacts.liveInvites()).toHaveLength(1);
+  expect(guest.core.contacts.list()).toHaveLength(0);
+  failure = new TypeError('Unable to connect. Is the computer able to access the url?');
+  expect(await thrown(guest.core.contacts.join(invite.link))).toThrow('its Boite or its Tailscale Funnel is off');
+}, 30000);
+
+test('two invitations for another network at once: the refused one never takes down the mounts the other saved', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  let closed = 0;
+  (harness.core.contacts.funnel as unknown as { close: () => Promise<void> }).close = async () => { closed += 1; };
+  const opens: { resolve: (url: string) => void; reject: (error: Error) => void }[] = [];
+  harness.core.contacts.internetUrl = () => new Promise((resolve, reject) => { opens.push({ resolve, reject }); });
+  const refusedInvite = thrown(harness.core.contacts.invite(true, true));
+  const madeInvite = harness.core.contacts.invite(true, true);
+  await waitFor(() => opens.length === 2);
+  // Settled in one turn: the refusal's cleanup runs before the other invitation saves its token.
+  opens[0]!.reject(unavailable('contacts.invite: Funnel refused'));
+  opens[1]!.resolve(harness.url);
+  expect(await refusedInvite).toThrow('Funnel refused');
+  expect((await madeInvite).via).toBe('internet');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(closed).toBe(0);
+  expect(harness.core.contacts.liveInvites()).toHaveLength(1);
+  expect(harness.core.journal.getSetting('contacts:funnel')).toEqual({ targets: [harness.url] });
+}, 30000);
+
+test('a tailnet outside tailscale.com invites someone already on it, and refuses to share this machine with another tailnet', async () => {
+  const harness = await startTestCore();
+  cores.push(harness);
+  harness.core.contacts.tailscaleState = async () => ({ fqdn: 'boite.net.example.com', apiKey: false, policy: 'unknown' });
+  expect(await thrown(harness.core.contacts.invite(true))).toThrow('cannot share a machine with another one (Headscale)');
+  const invite = await harness.core.contacts.invite(false);
+  expect(decodeInvite(invite.link).url).toBe(`http://boite.net.example.com:${harness.core.boundEndpoint().port}`);
+  harness.core.contacts.tailscaleState = async () => ({ fqdn: null, apiKey: false, policy: 'unknown' });
+  expect(await thrown(harness.core.contacts.invite(false))).toThrow('contacts.invite:');
+}, 30000);
+
+test('cancelled invitations join nothing, and the tailnet listener closes with the last one', async () => {
+  const host = await startTestCore();
+  const guest = await startTestCore();
+  cores.push(host, guest);
+  host.core.contacts.selfUrl = async () => host.url;
+  const heard: (string | null)[] = [];
+  host.core.network = { also: address => { heard.push(address); return address !== null; } };
+  (host.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
+  const hostClient = await host.connect();
+  const guestClient = await guest.connect();
+  const sent = await hostClient.call('contacts.invite', { share: false });
+  await hostClient.call('contacts.invite', { share: false });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(2);
+  expect(heard.at(-1)).toBe('100.64.0.7');
+  expect(await hostClient.call('contacts.cancelInvites', {})).toEqual({ cancelled: 2 });
+  expect((await hostClient.call('contacts.get', {})).invitations).toBe(0);
+  expect(heard.at(-1)).toBeNull();
+  expect(await thrown(guestClient.call('contacts.join', { link: sent.link }))).toThrow('already used, cancelled or expired');
+  expect(guest.core.contacts.list()).toHaveLength(0);
+  expect(host.core.contacts.list()).toHaveLength(0);
+}, 30000);
+
 test('the tailnet listener opens for an invitation and closes once the last one expires', async () => {
   const harness = await startTestCore();
   cores.push(harness);
@@ -486,9 +644,16 @@ test('the tailnet listener opens for an invitation and closes once the last one 
   (harness.core.group as unknown as { tailnet: { ip: string; name: string | null } }).tailnet = { ip: '100.64.0.7', name: null };
   await harness.core.contacts.invite();
   expect(heard.at(-1)).toBe('100.64.0.7');
+  // Let a tick see the invitation open before it expires.
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  const updates: number[] = [];
+  const off = harness.core.bus.onAny(name => { if (name === 'contacts.updated') updates.push(harness.core.contacts.liveInvites().length); });
   const invites = harness.core.journal.getSetting('contacts:invites') as Record<string, { expiresAt: number }>;
   harness.core.journal.setSetting('contacts:invites', Object.fromEntries(Object.keys(invites).map(hash => [hash, { expiresAt: Date.now() - 1 }])));
   await waitFor(() => heard.at(-1) === null, 5000);
+  // The open count the clients show drops with the expiry, not at the next unrelated change.
+  await waitFor(() => updates.includes(0), 5000);
+  off();
   expect(harness.core.contacts.wantsTailnet()).toBe(false);
   // Told on a change only.
   const told = heard.length;

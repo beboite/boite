@@ -12,6 +12,7 @@ import { codexQuotaDetails } from '../src/quota-details.ts';
 import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { CodexRateLimits } from '../src/drivers/codex/rate-limits.ts';
 import type { CodexRpc } from '../src/drivers/codex/rpc.ts';
+import { nativeScopeOf } from '../src/platform/scoped.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import { TITLE_RETRY } from '../src/threads/retitle.ts';
@@ -812,6 +813,27 @@ describe('codex driver', () => {
     expect(getDriver('codex-appserver').protocol).toBe('codex-appserver');
   });
 
+  test('the independent compaction limit reaches Codex and a warm session reloads changed or disabled limits between turns', async () => {
+    const client = await startCore({ warmProcessMinutes: 5, autoCompact: { tokens: 200_000, moments: [] } });
+    const threadId = await codexThread(client);
+    let sessionId: string | null = null;
+    for (const tokens of [200_000, 250_000, null]) {
+      await client.call('settings.set', { autoCompact: tokens === null ? null : { tokens, moments: [] } });
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: 'keep working' });
+      expect((await finished).status).toBe('done');
+      const thread = await client.call('threads.get', { threadId });
+      if (sessionId === null) sessionId = thread.sessionId;
+      expect(thread.sessionId).toBe(sessionId);
+      const configs = fakeLog().split('\n').filter(line => /^config:thread\/(start|resume) /.test(line));
+      const config = JSON.parse(configs.at(-1)!.slice(configs.at(-1)!.indexOf(' ') + 1));
+      if (tokens === null) expect(config).not.toHaveProperty('model_auto_compact_token_limit');
+      else expect(config.model_auto_compact_token_limit).toBe(tokens);
+    }
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(3);
+    expect(fakeLog()).not.toContain('turn/interrupt');
+  });
+
   test('native plan tools are enabled on new and resumed sessions and populate activity', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
@@ -1152,7 +1174,7 @@ describe('codex driver', () => {
     expect((await finished).usage).toBeNull();
   });
 
-  test('the turn usage sums every model request of the turn once, with no price, and the history counts its cache once', async () => {
+  test('the turn usage sums every model request of the turn once, with no price, and keeps its input apart from the cache', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
 
@@ -1162,18 +1184,20 @@ describe('codex driver', () => {
     const done = await finished;
     expect(done.status).toBe('done');
     // Two requests (8 + 20 input, 2 + 15 cached, 1 written, 4 + 6 output),
-    // neither the thread's earlier history nor the repeated update. The input
-    // keeps Codex's meaning: it still holds the cache reads.
+    // neither the thread's earlier history nor the repeated update. Codex's
+    // input holds both cache counts; the turn keeps only the uncached part,
+    // so the four buckets add up to what the model processed once.
     expect(done.usage).toEqual({
-      inputTokens: 28,
+      inputTokens: 10,
       outputTokens: 10,
       cacheReadTokens: 17,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: null,
     });
-    // The usage page takes the cache reads out of Codex input once.
+    // The usage page reads the turn as it was stored.
     const history = await client.call('usage.history', { edges: [0, Date.now() + 60_000] });
-    expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([11]);
+    expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([10]);
   });
 
   test('stopping a turn interrupts it and the agent process is gone', async () => {
@@ -1222,6 +1246,33 @@ describe('codex driver', () => {
     await runTurn(client, threadId, 'still here');
   });
 
+  test('core shutdown during an accepted turn Codex never completes ends it once, before the journal closes', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_DEAF'] = '1';
+    const finished: { status: string; error: string | null }[] = [];
+    const logs: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name === 'core.log') logs.push((payload as RpcEvents['core.log']).message);
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) finished.push({ status: turn.status, error: turn.error });
+    });
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    const stoppingAt = Date.now();
+    // A drain shorter than the stop grace: the driver shutdown is what closes Codex.
+    void harness!.core.drain(200);
+    await stopCore();
+    const stoppedIn = Date.now() - stoppingAt;
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    // The drain stops the turn, Codex ignores the interrupt, and closing the
+    // session ends it at once: never the stop grace after the journal closed.
+    expect(finished).toEqual([{ status: 'stopped', error: null }]);
+    expect(stoppedIn).toBeLessThan(2_500);
+    expect(logs.filter((line) => /closed database|database is closed/i.test(line))).toEqual([]);
+  }, 20000);
+
   test('a stop that lands while the thread opens sends no prompt', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -1231,7 +1282,7 @@ describe('codex driver', () => {
     await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
     await waitFor(() => fakeLog().includes('thread/start'));
     if (process.platform === 'win32') {
-      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, threadId))?.priority).toBe(0x20);
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     }
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
@@ -1239,7 +1290,7 @@ describe('codex driver', () => {
     expect(done.status).toBe('stopped');
     expect(done.error).toBeNull();
     expect(fakeLog()).not.toContain('turn/start');
-    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, threadId))?.priority).toBe(0x4000);
     // The thread the agent opened is kept for the next turn.
     expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
@@ -1307,11 +1358,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
-    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, warmThread))?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
-    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(nativeScopeOf(harness!.core.procs.platform, warmThread))?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();
@@ -1831,6 +1882,30 @@ describe('codex driver', () => {
     expect(done.error).toBeNull();
     expect(done.status).toBe('done');
   }
+});
+
+test('a persistent agent\'s memory pass on Codex runs read-only, asks nothing, and starts no MCP server, plugin, hook or web search', async () => {
+  const client = await startCore();
+  const { accountId } = await codexAccount(client);
+  process.env['CODEX_FAKE_MCP'] = '{"ssh":{"command":"ssh-mcp"}}';
+  const agent = await client.call('agents.profile.save', { value: {
+    name: 'Ada', domain: '', instructions: 'Keep notes.', avatar: '', status: 'active', projectIds: [],
+    selection: { providerId: 'codex-fake', accountId, model: 'fake-codex', effort: null, permissionMode: 'yolo' },
+  } });
+  const self = harness!.core.workforce.sessionOf(agent.id)!.threadId;
+  const pass = () => harness!.core.journal.listThreads().find(thread => thread.parentThreadId === self);
+  await waitFor(() => pass() !== undefined && harness!.core.journal.listTurns(pass()!.id).length > 0, 20000);
+  const child = pass()!;
+  expect(child.permissionMode).toBe('plan');
+  expect(child.contextMode?.tools).toEqual([]);
+  // The agent itself runs with full access; its pass gets the read-only sandbox and never asks.
+  await waitFor(() => fakeLog().includes('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna\n'), 20000);
+  expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=danger-full-access model=fake-codex');
+  expect(fakeLog()).toContain('config:thread/start {"tools.update_plan.enabled":true,"mcp_optional_startup_grace_ms":10000,"mcp_servers":{"ssh":{"enabled":false}}}');
+  await waitFor(() => harness!.core.procs.liveCount(child.id) > 0 || harness!.core.journal.getTurn(harness!.core.journal.listTurns(child.id)[0]!.id)!.status !== 'running', 20000);
+  const launched = (await client.call('trace.get', { threadId: child.id })).find(process => process.commandLine?.includes('app-server') || process.commandLine?.includes('codex-server'));
+  for (const flag of ['features.hooks=false', 'features.plugins=false', 'features.apps=false', 'project_doc_max_bytes=0', 'web_search="disabled"']) expect(launched?.commandLine).toContain(flag);
+  expect(harness!.core.agents.authenticate(harness!.core.agents.tokenFor(child.id))).toBeNull();
 });
 
 describe('codex hooks', () => {

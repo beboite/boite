@@ -63,6 +63,24 @@ const WORKERS = ['jobs-worker.js', 'guard-worker.js', 'artifact-retention-worker
 const SHIMS = ['boite', 'boite.cmd'];
 const shims = join(repo, 'packages', 'core', 'shims');
 
+/**
+ * Windows only: `boite.exe`, which Windows finds before `boite.cmd` and which
+ * hands each argument to the core without cmd.exe splitting it at an `&`
+ * (`apps/shell/launcher`). Built here, a few hundred kilobytes, in a second.
+ */
+function buildLauncher(): string | null {
+  if (suffix !== '.exe') return null;
+  const manifest = join(shell, 'launcher', 'Cargo.toml');
+  const targetArgs = cross ? ['--target', triple] : [];
+  const built = Bun.spawnSync(['cargo', 'build', '--release', '--locked', '--manifest-path', manifest, ...targetArgs], { stdout: 'inherit', stderr: 'inherit', windowsHide: true });
+  if (built.exitCode !== 0) refuse(`the Windows launcher did not build: cargo build --release --manifest-path ${manifest}`);
+  const metadata = Bun.spawnSync(['cargo', 'metadata', '--no-deps', '--format-version', '1', '--manifest-path', manifest], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  if (metadata.exitCode !== 0) refuse(`cargo metadata failed for ${manifest}: ${metadata.stderr.toString()}`);
+  const targetDir = JSON.parse(metadata.stdout.toString()).target_directory as string;
+  return join(targetDir, ...(cross ? [triple] : []), 'release', 'boite.exe');
+}
+const launcher = buildLauncher();
+
 /** Windows only: the sidecar is the runtime, and the bundle it runs goes in this directory beside it. */
 const RUNTIME_SIDECAR = process.platform === 'win32';
 const BUNDLE_DIR = 'core';
@@ -133,14 +151,18 @@ async function baselineRuntime(): Promise<string> {
 const sidecar = RUNTIME_SIDECAR ? await baselineRuntime() : join(coreDist, 'boite-core');
 
 
-/** Every file of the bundle but the Workers, which stay beside the executable where the core looks first. */
+/**
+ * Every file of the bundle but the Workers, which stay beside the executable where the core looks first.
+ * A `.jar` is the scrcpy server the Device panel's live stream pushes (packages/core/vendor/scrcpy).
+ */
 function stageBundle(targetDir: string): void {
   const bundle = join(targetDir, BUNDLE_DIR);
   // Chunk names carry a hash: what an earlier build left would never be loaded, only shipped.
   rmSync(bundle, { recursive: true, force: true });
   mkdirSync(bundle, { recursive: true });
-  const files = readdirSync(coreDist).filter((name) => name.endsWith('.js') && !WORKERS.includes(name));
+  const files = readdirSync(coreDist).filter((name) => (name.endsWith('.js') && !WORKERS.includes(name)) || name.endsWith('.jar'));
   if (!files.includes('main.js')) refuse(`${join(coreDist, 'main.js')} does not exist. Build it first: bun run build:core`);
+  if (!files.some((name) => name.endsWith('.jar'))) refuse(`${coreDist} has no scrcpy server .jar. Build it again: bun run build:core`);
   let bytes = 0;
   for (const name of files) {
     copyFileSync(join(coreDist, name), join(bundle, name));
@@ -152,7 +174,8 @@ function stageBundle(targetDir: string): void {
 /**
  * The one copy both destinations share: the sidecar under `exeName`,
  * every Worker beside it under its own name, which is the only name the core
- * looks for, and the two `boite` shims the core puts on an agent's PATH.
+ * looks for, and the `boite` shims the core puts on an agent's PATH, with
+ * `boite.exe` on Windows.
  */
 export function stageCore(targetDir: string, exeName: string): void {
   const exeSource = sidecar;
@@ -185,6 +208,11 @@ export function stageCore(targetDir: string, exeName: string): void {
     copyFileSync(source, target);
     if (process.platform !== 'win32' && name === 'boite') chmodSync(target, 0o755);
     console.log(`stage-sidecar: ${target} (${bytes} bytes)`);
+  }
+  if (launcher) {
+    const bytes = sizeOf(launcher, `${launcher} does not exist after its build`);
+    copyFileSync(launcher, join(targetDir, 'boite.exe'));
+    console.log(`stage-sidecar: ${join(targetDir, 'boite.exe')} (${bytes} bytes)`);
   }
 }
 

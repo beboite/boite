@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, LoaderCircle, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import type { PermissionMode, ProviderSummary } from '@boite/contracts';
+  import { effectiveCompaction, type PermissionMode, type ProviderSummary } from '@boite/contracts';
   import { formatTokens, providerName } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
@@ -22,6 +22,7 @@
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
   import type { ComposerTarget } from '../lib/composer-target';
+  import { desktopSettings } from '../lib/settings-tabs';
 
   /**
    * The row under the composer's box: the model, effort, worktree and mode
@@ -36,8 +37,10 @@
     store,
     key,
     target = null,
+    bot = null,
     provider,
     canSend,
+    waiting = false,
     answering = false,
     sendLabel = strings.composer.send,
     choice = $bindable(),
@@ -52,8 +55,12 @@
     /** The open thread's id, or the draft's stash key. */
     key: string;
     target?: ComposerTarget | null;
+    /** The persistent agent this box writes to, by name: its model, effort and mode are its settings, so the bar shows no chips. */
+    bot?: string | null;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    /** Send was pressed while files were still being read: it goes once they are ready. */
+    waiting?: boolean;
     answering?: boolean;
     /** What Send does, when it answers a question rather than sending a message. */
     sendLabel?: string;
@@ -71,7 +78,7 @@
 
   let bound = $derived(!target && store.openThread !== null);
   // Keep the stored visibility preference and reveal a nearly full context.
-  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context, store.settings ? effectiveCompaction(store.settings, store.openThread).autoCompact : null) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(!!target || (provider !== null && provider !== undefined));
 
@@ -98,7 +105,7 @@
    * nowhere, and the sentence behind it is the one a send would answer with.
    */
   const phoneWidth = new MediaQuery('(max-width: 720px)');
-  let providersReachable = $derived(store.owner && (!phoneWidth.current || window.__TAURI_INTERNALS__ !== undefined));
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   /**
    * The thread names an account that was removed and its agent has no other
    * account to move to on the next send: it sends again once another one is picked.
@@ -243,6 +250,13 @@
 <div class="bar" class:answering class:direct={!!target} bind:this={bar}>
   {#if target && !target.selection}
   <div class="chips">{#if target.chips}{@render target.chips()}{/if}</div>
+  {:else if bot !== null && !answering}
+  <!-- A bot's box: the phone's options keep the attachment, nothing else to pick here. -->
+  {#key `${key}:${store.draft?.projectId ?? ''}`}
+  <ComposerOptions busy={picking} levels={[]} effort={null} agentDefault={false} speeds={[]} speed={null} modes={[]} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => {}} />
+  {/key}
+  <!-- The chips' room, empty, so the tools keep their place at the end of the row on both widths. -->
+  <div class="chips" aria-hidden="true"></div>
   {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
@@ -346,13 +360,14 @@
     type="button"
     class="primary icon send"
     data-testid="composer-send"
-    title={sendLabel}
-    aria-label={sendLabel}
+    data-waiting={waiting || undefined}
+    title={waiting ? strings.composer.sendWhenLoaded : sendLabel}
+    aria-label={waiting ? strings.composer.sendWhenLoaded : sendLabel}
     disabled={!canSend}
     onmousedown={keepFocus}
     onclick={() => onsubmit()}
   >
-    <ArrowUp size={16} strokeWidth={2.25} />
+    {#if waiting}<LoaderCircle size={16} strokeWidth={2.25} class="spinner" />{:else}<ArrowUp size={16} strokeWidth={2.25} />{/if}
     {#if answering}<span class="ui-label">{sendLabel}</span>{/if}
   </button>
 </div>
@@ -447,6 +462,8 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  .send :global(.spinner) { animation: spin 1s linear infinite var(--loops); }
+  @media (prefers-reduced-motion: reduce) { .send :global(.spinner) { animation: none; } }
   /* No chips to fill the row: the tools sit beside the send button on the right. */
   .answering { justify-content: flex-end; }
   .answering .stop, .answering .send { margin-left: 0; }

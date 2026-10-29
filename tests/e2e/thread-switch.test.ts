@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { echoThread, startTestCore, waitFor } from '../../packages/core/test/harness';
 import { BrowserPage } from './lib/cdp';
@@ -12,6 +13,8 @@ test('production desktop and phone restore cached reading before a slow core rep
   ensureProductionUi();
   const harness = await startTestCore();
   let page: BrowserPage | undefined;
+  let phase = 'opening the conversation';
+  const getsFinished = new Map<string, number>();
   try {
     const client = await harness.connect();
     const { threadId, accountId } = await echoThread(harness, client, 'Long conversation');
@@ -24,7 +27,6 @@ test('production desktop and phone restore cached reading before a slow core rep
         parts: [...(index === 219 ? [{ type: 'tool' as const, toolId: 'large', name: 'Bash', input: { command: 'report' }, output, status: 'done' as const }] : []), { type: 'text', text: `Message ${index}. A paragraph with **formatted text** and a stable reading position.\n\nThe history stays in its conversation.` }] });
     });
     harness.core.journal.putMessage({ id: 'other-message', threadId: other.id, turnId: 'other-turn', role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'The other conversation.' }] });
-    const getsFinished = new Map<string, number>();
     const dispatch = harness.core.router.dispatch.bind(harness.core.router);
     harness.core.router.dispatch = async (method, params, context) => {
       const result = await dispatch(method, params, context);
@@ -59,16 +61,26 @@ test('production desktop and phone restore cached reading before a slow core rep
     await page.evaluate(frames);
     let phoneView = false;
     for (const phone of [false, true, true, false]) {
+      phase = `saving ${phoneView ? 'phone' : 'desktop'} reading before switching to ${phone ? 'phone' : 'desktop'}`;
       await page.evaluate(frames);
-      await page.evaluate(`(async () => {
+      await page.evaluate(`(() => {
         const box = document.querySelector('${timeline}');
         box.dispatchEvent(new WheelEvent('wheel', { deltaY: -800 }));
         box.scrollTop = box.scrollHeight / 2;
         box.dispatchEvent(new Event('scroll'));
-        await ${frames}; await ${frames};
+      })()`);
+      // The virtual window can still contain only offscreen rows while its measurements settle.
+      // Save a visible, stable row rather than mistaking the first row below the viewport for the reader's anchor.
+      await page.waitFor(`(async () => {
+        const box = document.querySelector('${timeline}');
         const top = box.getBoundingClientRect().top;
         const node = [...box.querySelectorAll('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
-        globalThis.readingProof = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+        if (!node || node.getBoundingClientRect().top >= box.getBoundingClientRect().bottom) return false;
+        const reading = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+        await ${frames};
+        if (!node.isConnected || Math.abs(node.getBoundingClientRect().top - box.getBoundingClientRect().top - reading.offset) > 1) return false;
+        globalThis.readingProof = reading;
+        return true;
       })()`);
       await open(other.id, phoneView);
       await page.waitFor('document.querySelector(\'[data-mid="other-message"]\')');
@@ -78,6 +90,7 @@ test('production desktop and phone restore cached reading before a slow core rep
       await page.evaluate(frames);
       if (phone) await mobileAction(page, 'mobile-conversations');
       const completedBefore = getsFinished.get(threadId) ?? 0;
+      phase = `restoring ${phone ? 'phone' : 'desktop'} cached reading${resized ? ' after resize' : ''}`;
       const painted = await page.evaluate<number>(`(async () => {
         const started = performance.now();
         document.querySelector('${phone ? `[data-testid="mobile-thread-${threadId}"]` : `[data-thread-id="${threadId}"]`}').click();
@@ -98,5 +111,32 @@ test('production desktop and phone restore cached reading before a slow core rep
       console.log(`thread switch ${phone ? 'phone' : 'desktop'}${resized ? ' after resize' : ''}: ${painted.toFixed(1)} ms before a 750 ms reply; drift ${drift.toFixed(1)} px`);
     }
     expect(page.errors()).toEqual([]);
+  } catch (error) {
+    if (page) {
+      try {
+        // Keep the failing viewport and expected row, before cleanup closes the browser.
+        const directory = join(import.meta.dir, '.artifacts');
+        const state = await page.evaluate(`(() => {
+          const box = document.querySelector('${timeline}');
+          const top = box?.getBoundingClientRect().top ?? 0;
+          return {
+            reading: globalThis.readingProof ?? null,
+            viewport: { width: innerWidth, height: innerHeight, covered: !!document.querySelector('.body.mobile-covered') },
+            timeline: box ? { top: box.scrollTop, height: box.scrollHeight, client: box.clientHeight } : null,
+            rows: [...document.querySelectorAll('[data-mid]')].map(node => ({ id: node.dataset.mid, top: node.getBoundingClientRect().top - top })),
+            fonts: document.fonts.status,
+            animations: document.getAnimations().filter(animation => animation.playState !== 'finished').map(animation => animation.animationName ?? animation.transitionProperty ?? animation.id),
+          };
+        })()`, 2000).catch(probe => ({ probeError: String(probe) }));
+        const evidence = { phase, getsFinished: Object.fromEntries(getsFinished), state, errors: page.errors() };
+        console.error('thread switch failure:', JSON.stringify(evidence));
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, 'thread-switch-failure.json'), JSON.stringify(evidence, null, 2));
+        await page.screenshot(join(directory, 'thread-switch-failure.png')).catch(probe => console.error('thread switch screenshot failed:', probe));
+      } catch (probe) {
+        console.error('thread switch diagnostics failed:', probe);
+      }
+    }
+    throw error;
   } finally { await page?.close(); await harness.stop(); }
 }, 90_000);

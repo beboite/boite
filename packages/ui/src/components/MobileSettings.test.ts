@@ -5,6 +5,7 @@ import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { archiveThread } from '../lib/archive';
 import type { FakeClient } from '../lib/fake-client';
+import { workspace } from '../lib/workspace.svelte';
 
 /** The phone has no General page: the archive it can fill must be reachable from its own settings list. */
 
@@ -12,6 +13,8 @@ const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 
 let running: Record<string, unknown> | null = null;
+// jsdom has no scrolling: a page opened on a card scrolls to it.
+Element.prototype.scrollIntoView ??= vi.fn();
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -115,12 +118,36 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   store.showSettings();
   await waitFor(home);
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=mobile-settings-home] .row')].map(row => row.dataset.testid)).toEqual([
-    'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy',
-    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-archived'
+    'mobile-settings-phone', 'settings-tab-appearance', 'mobile-settings-privacy', 'settings-tab-experiments',
+    'mobile-settings-connection', 'settings-tab-usage', 'settings-tab-voice', 'mobile-settings-browser-profiles', 'mobile-settings-compaction', 'mobile-settings-windows', 'mobile-settings-archived',
+    'mobile-settings-secrets'
   ]);
   // The header already says Settings, and the list's display options group the threads.
   expect(document.querySelector('[data-testid=mobile-settings-home] h1')).toBeNull();
   expect(document.querySelector('[data-testid=setting-group-working-threads]')).toBeNull();
+
+  // Experiments are this phone's own: Bots on the computer does not give the phone its tab until it is switched on here.
+  expect(document.querySelector('[data-testid=mobile-agents]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=settings-tab-experiments]').click();
+  await waitFor(() => document.querySelector('[data-testid=experiment-resident-agents]') !== null);
+  query<HTMLInputElement>('[data-testid=experiment-resident-agents]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-tabs] [data-testid=mobile-agents]') !== null);
+  await back();
+
+  query<HTMLButtonElement>('[data-testid=mobile-settings-browser-profiles]').click();
+  await waitFor(() => document.querySelector('[data-testid=browser-profiles-card]') !== null);
+  await back();
+
+  Element.prototype.scrollIntoView ??= vi.fn();
+  query<HTMLButtonElement>('[data-testid=mobile-settings-compaction]').click();
+  await waitFor(() => document.querySelector('[data-testid=compaction-settings]') !== null);
+  for (const type of ['common', 'agent', 'subagent', 'bot']) {
+    expect(document.querySelector(`[data-testid=compaction-target-${type}]`)).not.toBeNull();
+  }
+  query<HTMLButtonElement>('[data-testid=compaction-target-subagent]').click();
+  await waitFor(() => document.querySelector('[data-testid=compaction-inherited]') !== null);
+  expect(query<HTMLInputElement>('[data-testid=compaction-customize]').checked).toBe(false);
+  await back();
 
   // The analytics switches have a screen of their own, out of the notifications.
   query<HTMLButtonElement>('[data-testid=mobile-settings-phone]').click();
@@ -137,9 +164,36 @@ test('the phone settings hold this phone\'s three screens and the machine\'s ess
   await waitFor(() => store.settingsTab === 'limits' && document.querySelector('[data-testid=mobile-usage-tab-limits][aria-selected=true]') !== null);
   await back();
 
-  // Appearance takes the files and previews switch and leaves the desktop's rows behind.
+  // Appearance takes the files and previews and element reference switches, and leaves the desktop's rows behind.
   query<HTMLButtonElement>('[data-testid=settings-tab-appearance]').click();
   await waitFor(() => document.querySelector('[data-testid=appearance-page]') !== null);
   expect(document.querySelector('[data-testid=setting-chat-artifacts]')).not.toBeNull();
-  for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
+  expect(document.querySelector('[data-testid=setting-preview-comments]')).not.toBeNull();
+  for (const id of ['chat-width-comfortable', 'terminal-gpu', 'settings-buttons', 'start-in-drafts', 'setting-edge-scrollbars']) expect(document.querySelector(`[data-testid=${id}]`)).toBeNull();
+});
+
+test('on a phone too, a page of one machine is picked above it without moving the window', async () => {
+  phoneWidth();
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  window.history.replaceState(null, '', '/?fake=1&machines=1');
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  store.booted = false;
+  store.page = 'chat';
+  closeTour();
+  running = mount(App, { target });
+  await waitFor(() => store.booted && workspace.machines.length === 2 && workspace.machines.every((machine) => machine.store.connection === 'ready'));
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  await remote.store.client!.call('settings.set', { muteAgents: true });
+  await store.client!.call('settings.set', { muteAgents: true });
+  store.showSettings('resources');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=setting-mute-agents]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-machine-menu]') !== null);
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  query<HTMLInputElement>('[data-testid=setting-mute-agents]').click();
+  await waitFor(() => remote.store.settings?.muteAgents === false);
+  expect(store.settings?.muteAgents).toBe(true);
+  expect(workspace.active).toBe(store);
 });

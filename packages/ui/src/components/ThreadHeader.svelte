@@ -15,15 +15,26 @@
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
+  import { projectName } from '../lib/format';
+  import { workspace } from '../lib/workspace.svelte';
   import Menu from './Menu.svelte';
+  import { ThreadRename, commitOnUnmount } from '../lib/thread-rename.svelte';
   import { watchStatus } from '../lib/pull-request-watch';
   import ContextModeBadge from './ContextModeBadge.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
   const mobile = new MediaQuery('(max-width: 720px)');
-  let renaming = $state(false);
-  let renameText = $state('');
+  /** Under a phone's title: where the conversation lives, its machine once there are two. */
+  let place = $derived.by(() => {
+    if (!thread) return '';
+    const project = thread.projectId ? store.projects.find(p => p.id === thread!.projectId) : undefined;
+    const machines = workspace.machinesOr(store);
+    return [project ? projectName(project) : null, machines.length > 1 ? machines.find(m => m.store === store)?.label : null].filter(Boolean).join(' · ');
+  });
+  /** The rename in progress, bound to the thread it began on rather than to whatever is open later. */
+  let rename = $state<ThreadRename | null>(null);
+  commitOnUnmount(() => rename);
   let coordinationThreadId = $state<string | null>(null);
   $effect(() => {
     if (thread?.id !== coordinationThreadId) coordinationThreadId = null;
@@ -32,9 +43,16 @@
   function beginRename() {
     const thread = store.openThread;
     if (!thread) return;
-    renameText = thread.title;
-    renaming = true;
+    rename = new ThreadRename(store, thread.id, thread.title);
   }
+
+  // Another surface opened a different thread under the input: the title typed so far still goes to the thread it was typed for.
+  $effect(() => {
+    if (rename && rename.threadId !== thread?.id) {
+      void rename.commit();
+      rename = null;
+    }
+  });
 
   // The palette asks for a rename from outside this header.
   $effect(() => {
@@ -44,9 +62,9 @@
   });
 
   async function commitRename() {
-    const thread = store.openThread;
-    renaming = false;
-    if (thread) await store.rename(thread.id, renameText);
+    const current = rename;
+    rename = null;
+    await current?.commit();
   }
 
   let titleButton = $state<HTMLButtonElement | undefined>(undefined);
@@ -57,7 +75,8 @@
       event.preventDefault();
       void commitRename();
     } else if (event.key === 'Escape') {
-      renaming = false;
+      rename?.cancel();
+      rename = null;
     } else return;
     await tick();
     titleButton?.focus({ preventScroll: true });
@@ -142,10 +161,11 @@
           </button>
           <span class="crumb-sep" aria-hidden="true">/</span>
         {/if}
-        {#if renaming}
+        {#if rename}
           <input
             class="rename"
-            bind:value={renameText}
+            value={rename.text}
+            oninput={(event) => { if (rename) rename.text = event.currentTarget.value; }}
             onkeydown={onRenameKey}
             onblur={() => void commitRename()}
             placeholder={strings.thread.renamePlaceholder}
@@ -167,7 +187,7 @@
           <!-- A small chevron exposes thread actions; on phones it also holds the title. -->
           <span class="title-menu">
             <Menu items={mobile.current ? phoneItems : desktopItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
-              <span class="title-text ui-label">{thread.title}</span><ChevronDown size={14} />
+              <span class="title-lines"><span class="title-text ui-label">{thread.title}</span>{#if place}<span class="title-place ui-label" data-testid="thread-place">{place}</span>{/if}</span><ChevronDown size={14} />
             </Menu>
           </span>
         {/if}
@@ -292,7 +312,7 @@
           <button type="button" class="ghost phone-browser" data-testid="phone-browser-toggle"
             aria-label={strings.rightPanel.browser} aria-pressed={store.panelOpen && store.panel.active?.kind === 'agent-browser'}
             onclick={() => store.panel.open('agent-browser')}>
-            <Globe size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.browser}</span>
+            <Globe size={18} strokeWidth={1.75} />
           </button>
         {/if}
         <button
@@ -358,7 +378,7 @@
     flex: 1;
   }
 
-  .phone-browser { flex: none; gap: 6px; min-height: var(--touch-target); padding: 0 8px; font-size: var(--text-sm); }
+  .phone-browser { flex: none; width: var(--touch-target); min-height: var(--touch-target); padding: 0; justify-content: center; }
 
   .path {
     flex: 0 1 auto;
@@ -417,7 +437,7 @@
 
   .title { min-width: 0; }
   .title-menu { display: flex; flex: none; }
-  .title-text { display: none; }
+  .title-text, .title-lines { display: none; }
   @media (max-width: 720px) {
     /* The title is what tells one conversation from another: the buttons give
        up their words for it, and keep a finger-sized square. */
@@ -440,7 +460,11 @@
     .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
     .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
-    .title-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-lines { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; line-height: 1.25; }
+    /* Two lines stacked: a label's ascender room and its trim to the capitals would pull the second over the first. */
+    .title-lines > .ui-label { margin-block: 0; padding-block: 0; text-box: normal; }
+    .title-text { display: block; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-place { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
     .crumb { min-height: var(--touch-target); }
     .crumb-sep { margin: 0; }

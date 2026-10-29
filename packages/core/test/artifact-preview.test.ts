@@ -80,6 +80,15 @@ test('preview requests cannot reach other threads, dotfiles, adjacent directorie
   expect(await thrown(owner.call('artifacts.preview', { threadId, path: 'preview/index.html' }))).toThrow('active thread');
 });
 
+test('an existing preview refuses inherited legacy protection before an update closes its origin', async () => {
+  const { url } = await owner.call('artifacts.preview', { threadId, path: 'preview/index.html' });
+  expect((await fetch(url)).status).toBe(200);
+  harness.core.journal.setSetting(`shared-file-letters:${threadId}`, { bindings: [], legacy: true, peers: [] });
+  expect((await fetch(url)).status).toBe(404);
+  await owner.call('threads.update', { threadId, title: 'Protected conversation' });
+  expect(await thrown(fetch(url))).toThrow();
+});
+
 test('previews work in a symlinked project folder and stop serving it when the link is replaced', async () => {
   const alias = join(harness.dataDir, 'linked-project');
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';

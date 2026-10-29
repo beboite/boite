@@ -1,4 +1,4 @@
-import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
+import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, BROWSER_PROFILES_MAX, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
 import { FAKE_SELECT, fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
@@ -47,8 +47,8 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     browsers.delete(threadId);
     changed(threadId);
   };
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) closeAll(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => closeAll(threadId));
+  ctx.bus.observe('thread.updated', thread => { if (thread.archived) closeAll(thread.id); });
+  ctx.bus.observe('thread.removed', ({ threadId }) => closeAll(threadId));
 
   const watching = (threadId: ThreadId) => {
     if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
@@ -74,9 +74,26 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     // The demo browser downloads nothing.
     if (action.kind === 'downloads') return { value: { downloads: [] } };
     if (action.kind.startsWith('download-')) throw refusal(`no download ${(action as { downloadId: string }).downloadId} in this conversation; browser downloads lists them`);
+    // Nor does it keep a recipe: no script of the demo is worth running again.
+    if (action.kind === 'recipes') return { value: { recipes: [] } };
+    if (action.kind === 'recipe-save') throw refusal('the demo browser keeps no recipe');
+    if (action.kind.startsWith('recipe-')) throw refusal(`no recipe ${(action as { name: string }).name} on this machine; browser recipe list shows them`);
     if (action.kind === 'profiles') {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
+    }
+    if (action.kind === 'profile-add') {
+      // As the core adds one: a listed name answers that profile.
+      const { profiles } = browserProfilesOf(ctx.settings);
+      const name = action.name.trim();
+      const known = profiles.find(profile => profile.name.toLowerCase() === name.toLowerCase());
+      if (known) return { value: { ...known, created: false } };
+      if (findBrowserProfile(profiles, name) !== null) throw refusal(`a browser profile already uses ${name} as its id; pick another name`);
+      if (profiles.length >= BROWSER_PROFILES_MAX) throw refusal(`this machine already has ${BROWSER_PROFILES_MAX} browser profiles; the owner removes one in Settings`);
+      const profile = { id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, name };
+      ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, profile] };
+      ctx.emit('settings.updated', { ...ctx.settings });
+      return { value: { ...profile, created: true } };
     }
     const current = browser?.tabs.find(one => one.tabId === browser.active);
     if (action.kind === 'open' && action.reuse && action.profile === undefined && browser && current) {
@@ -120,6 +137,10 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       case 'resize': tab.width = action.width; tab.height = action.height; moved(browser, tab); return reply({ width: tab.width, height: tab.height });
       case 'reset-viewport': Object.assign(tab, VIEWPORT); moved(browser, tab); return reply(VIEWPORT);
       case 'diagnostics': return reply({ entries: [], dropped: 0, history: [] });
+      // Its pages are drawn, not loaded: they make no call to capture.
+      case 'network': return reply({ capturing: true, started: false, calls: [] });
+      case 'network-detail': throw refusal(`no call ${action.callId} in this tab's capture; browser network lists them`);
+      case 'network-stop': return reply({ capturing: false });
       case 'preset': case 'appearance': return reply();
       default: throw refusal(`${action.kind} is not available in the demo browser`);
     }

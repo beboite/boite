@@ -17,10 +17,10 @@
  * the core is the one that sends those.
  */
 
-import { NOTIFICATION_KINDS, notifiesOnFinish, threadBusy, type NotificationKind, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, threadBusy, type NotificationKind, type NotificationLabel, type QuotaAlert, type ThreadSummary, type Turn } from '@boite/contracts';
 import type { Client } from './client';
 import { PUSH_ENABLED_KEY } from './pwa';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
 export const NOTIFICATION_MUTED_STORAGE_KEY = 'boite.notifications.muted';
@@ -49,13 +49,18 @@ export function shouldNotify(input: NotifyDecision): boolean {
 /**
  * Whether a finished turn is news at all, the core's push rule
  * (`notifiesOnFinish`) applied to the threads this client holds. A thread it
- * does not hold yet keeps the old answer: a done or a failure is news.
+ * does not hold yet reads as a top-level one with nothing at work under it.
+ * `upkeep`: the memory passes its machine named (`upkeepOf`).
  */
-export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution'>): boolean {
+export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution' | 'quiet'> & { finishedAt?: number | null }, upkeep: ReadonlySet<string> = new Set()): boolean {
   const thread = threads.find((t) => t.id === turn.threadId);
-  if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
+  if (thread === undefined) return notifiesOnFinish({ parentThreadId: null }, turn, 0);
+  // A persistent agent's memory pass is a child the core starts as the turn
+  // ends: its answer waits on nothing there. The snapshot names it once read;
+  // until then, a child of an agent's thread born after the turn ended is one.
+  const upkept = (t: ThreadSummary) => upkeep.has(t.id) || (!!thread.agentSessionId && typeof turn.finishedAt === 'number' && t.createdAt >= turn.finishedAt);
   // A child waiting on its own background work is still at work: its result has not come back.
-  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t)).length;
+  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadBusy(t) && !upkept(t)).length;
   return notifiesOnFinish(thread, turn, activeChildren);
 }
 
@@ -119,8 +124,10 @@ export interface Toast {
    * data a push of that machine would, so a tap opens it there.
    */
   core?: string;
-  /** The thread a click on the toast opens. */
+  /** The thread a click on the toast opens, or a limit alert's `limitsKey`. */
   threadId: string;
+  /** A limit alert: through the worker, it carries the data of the core's push, which opens Limits. */
+  limits?: true;
 }
 
 /**
@@ -133,9 +140,32 @@ export function toastFor(kind: NotifyKind, threadId: string, title: string, deta
   return { title, body, threadId };
 }
 
-/** The words a push labelled by the core is shown with, in the language this app speaks. */
+/** The words a push labelled by the core is shown with, in the language this app speaks; `sw.js` fills `{percent}`. */
 export function notificationWords(): Record<NotificationLabel, string> {
-  return { done: strings.notify.done, failed: strings.notify.failed, needsYou: strings.notify.needsYou, connected: strings.notify.connected };
+  return { done: strings.notify.done, failed: strings.notify.failed, needsYou: strings.notify.needsYou, connected: strings.notify.connected,
+    limitFiveHour: strings.notify.limitFiveHour, limitWeekly: strings.notify.limitWeekly };
+}
+
+/** What a toast about limits carries in place of a thread: a click opens Settings, Limits, on that machine. */
+const LIMITS_KEY = 'boite-limits:';
+
+export function limitsKey(machineId: string | null): string {
+  return `${LIMITS_KEY}${machineId ?? ''}`;
+}
+
+/** The machine a limits toast is about, `''` for the one serving the page; null for a thread's key. */
+export function limitsMachine(key: string): string | null {
+  return key.startsWith(LIMITS_KEY) ? key.slice(LIMITS_KEY.length) : null;
+}
+
+/**
+ * The words of the core's push (`limitNews`): the account in the title, with
+ * the model or group a scoped window names, and the period and share in the body.
+ */
+export function limitToast(alert: QuotaAlert, key: string): Toast {
+  const percent = String(quotaAlertLeft(alert));
+  const body = fill(alert.period === 'weekly' ? strings.notify.limitWeekly : strings.notify.limitFiveHour, { percent });
+  return { title: quotaAlertTitle(alert), body, threadId: key, limits: true };
 }
 
 /** Where `sw.js` reads them. Not a `boite-ui-` cache: those go with each new build. */
@@ -290,6 +320,19 @@ async function webSender(toast: Toast): Promise<void> {
   // on a page, and the phone app's page serves no machine. The tag and data are
   // the ones a push about that thread uses (`sw.js`), so a later push replaces
   // this notice and a tap opens the thread where it is.
+  if (toast.limits && navigator.serviceWorker) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        const core = toast.origin === location.origin ? undefined : toast.core;
+        await registration.showNotification(toast.title, {
+          body: toast.body, tag: `limit-${toast.threadId}-${toast.title}`, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+          data: core ? { limits: true, core } : { limits: true }
+        });
+        return;
+      }
+    } catch { /* A missing worker must not disable the browser fallback. */ }
+  }
   if (toast.coreThreadId && navigator.serviceWorker) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();

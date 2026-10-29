@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
 import { chromiumArgs, drawsWithGpu, findChromium, trimProfile } from '../src/browser/chromium.ts';
+import { BrowserEngines } from '../src/browser/engines.ts';
+import type { BrowserHost } from '../src/browser/host.ts';
+import type { Cdp } from '../src/browser/cdp.ts';
+import type { Engine } from '../src/browser/types.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 import { thrown } from './settle.ts';
 
@@ -89,6 +93,56 @@ test('a profile loses its downloaded components and caches once, never its cooki
     trimProfile(profile);
     expect(existsSync(join(profile, 'Default', 'Cache'))).toBe(true);
   } finally { rmSync(profile, { recursive: true, force: true }); }
+});
+
+test('a profile whose browser dropped its connection opens again only once that browser exited', async () => {
+  const { harness } = browserFixture;
+  const engines = new BrowserEngines(harness.core, { attached: false } as BrowserHost, () => ({ path: 'chromium' }), 'test', 'browser:test', () => {}, () => {}, { prepare: () => harness.dataDir, lost() {} });
+  const gate = () => { let open!: () => void; return { promise: new Promise<void>((resolve) => { open = resolve; }), open: () => open() }; };
+  const started: { exit(): void; disconnect(): void }[] = [];
+  engines.launch = async (profile) => {
+    const exited = gate(), closed = gate();
+    started.push({ exit: exited.open, disconnect: closed.open });
+    return { key: profile, profile, hosted: false, dir: '', cdp: { closed: closed.promise, close() {}, send: async () => ({}) } as unknown as Cdp, kill() {}, exited: exited.promise, tabs: new Set(), throwaway: false, identity: null } satisfies Engine;
+  };
+  const first = await engines.get('default');
+  // The connection drops; the process still holds the profile's folder.
+  started[0]!.disconnect();
+  let reopened: Engine | null = null;
+  const reopening = engines.get('default').then((engine) => { reopened = engine; return engine; });
+  await Bun.sleep(50);
+  expect(started).toHaveLength(1);
+  expect(reopened).toBeNull();
+  started[0]!.exit();
+  expect(await reopening).not.toBe(first);
+  expect(started).toHaveLength(2);
+});
+
+test('a profile whose browser failed while starting opens again only once that browser exited', async () => {
+  const { harness } = browserFixture;
+  const engines = new BrowserEngines(harness.core, { attached: false } as BrowserHost, () => ({ path: 'chromium' }), 'test', 'browser:test', () => {}, () => {}, { prepare: () => harness.dataDir, lost() {} });
+  const launch = engines.launch.bind(engines);
+  engines.launch = (profile) => launch(profile, false);
+  const gate = () => { let open!: () => void; return { promise: new Promise<void>((resolve) => { open = resolve; }), open: () => open() }; };
+  const exits: (() => void)[] = [];
+  engines.start = async () => {
+    const exited = gate();
+    const first = exits.length === 0;
+    exits.push(exited.open);
+    // The first browser answers, then its connection fails while it is set up.
+    const send = async (method: string) => { if (first && method === 'Target.setDiscoverTargets') throw new Error('connection lost'); return {}; };
+    return { cdp: { closed: new Promise(() => {}), close() {}, send } as unknown as Cdp, kill: () => exited.promise, exited: exited.promise };
+  };
+  const failing = engines.get('default').catch((error: Error) => error);
+  await Bun.sleep(50);
+  const during = engines.get('default').catch((error: Error) => error);
+  await Bun.sleep(50);
+  expect(exits).toHaveLength(1);
+  exits[0]!();
+  expect(String(await failing)).toContain('connection lost');
+  expect(String(await during)).toContain('connection lost');
+  await engines.get('default');
+  expect(exits).toHaveLength(2);
 });
 
 test('a deleted profile loses its folder even when its browser had already closed', async () => {

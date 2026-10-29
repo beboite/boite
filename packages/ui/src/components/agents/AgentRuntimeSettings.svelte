@@ -5,7 +5,7 @@
   import { X } from '@lucide/svelte';
   import type { AgentProfile, AgentRuntimeConfig, AgentSelection, DelegationProfile } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
-  import { Autosave, typed, whole } from '../../lib/autosave.svelte';
+  import { Autosave, TYPING_MS, typed } from '../../lib/autosave.svelte';
   import type { PickPatch } from '../../lib/store.svelte';
   import { strings } from '../../lib/strings';
   import ModelPicker from '../ModelPicker.svelte';
@@ -22,7 +22,7 @@
    * reads the core and merges instead of writing on the revision blindly.
    */
   let base: { config: AgentRuntimeConfig; revision: number; behind: boolean } | null = null;
-  const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'compactAfterTurns', 'maxRunMinutes', 'autoMemory'] as const;
+  const FIELDS = ['defaultRoute', 'allowedRoutes', 'subagents', 'autoMemory', 'eventWakes', 'dailyBudgetUsd'] as const;
   /** Equal values whatever the order of their keys: the core writes a route's keys in its own order. */
   const canon = (value: unknown) => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
   const same = (a: unknown, b: unknown) => canon(a) === canon(b);
@@ -36,14 +36,15 @@
       const { permissionMode: _mode, ...rest } = r as R & { permissionMode?: unknown };
       return { ...rest, ...(r.name === undefined ? {} : { name: r.name.trim() }), effort: r.effort ?? null };
     };
-    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false } as AgentRuntimeConfig;
+    return { ...value, defaultRoute: { ...value.defaultRoute, effort: value.defaultRoute.effort ?? null }, allowedRoutes: value.allowedRoutes.map(route), subagents: { ...value.subagents, profiles: value.subagents.profiles.map(route) }, autoMemory: value.autoMemory !== false, eventWakes: value.eventWakes === true, dailyBudgetUsd: value.dailyBudgetUsd ?? null } as AgentRuntimeConfig;
   }
   /** Read from the data, not the form: a card leaving the page has no form left to ask. */
   function problem(): string | null {
     if (!config) return null;
     // The core's own limit: a name it already holds may be longer than the field lets anyone type.
     const names = [...config.allowedRoutes, ...config.subagents.profiles].every(route => route.name.trim() && route.name.length <= 100);
-    return names && whole(config.compactAfterTurns, 2, 100) && whole(config.maxRunMinutes, 1, 120) ? null : strings.settings.autosave.invalid;
+    const budget = config.dailyBudgetUsd ?? null;
+    return names && (budget === null || Number.isFinite(budget) && budget > 0) ? null : strings.settings.autosave.invalid;
   }
   const labels = $derived(strings.agents);
   const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'] as const;
@@ -86,9 +87,20 @@
   function pickDefault(patch: Partial<AgentSelection>) {
     if (!config) return;
     try {
+      const previous = config.defaultRoute;
       config.defaultRoute = { ...config.defaultRoute, ...patch };
       // The core refuses a default outside the allowed list; picking a new default allows it.
       const d = config.defaultRoute;
+      // Replacing a missing provider or account also repairs its allowed route;
+      // keeping that removed route would make the whole configuration fail validation.
+      const missing = !view.store.providerOf(previous.providerId) || !view.store.accounts.some(a => a.id === previous.accountId);
+      if (missing && d.model && (d.providerId !== previous.providerId || d.accountId !== previous.accountId)) {
+        const model = d.model;
+        config.allowedRoutes = config.allowedRoutes.map(route => {
+          const replaced = route.providerId === previous.providerId && route.accountId === previous.accountId && route.model === previous.model;
+          return replaced ? { ...route, ...d, model } : route;
+        }).filter(route => view.store.providerOf(route.providerId) && view.store.accounts.some(a => a.id === route.accountId));
+      }
       if (d.model && !config.allowedRoutes.some(r => r.providerId === d.providerId && r.accountId === d.accountId && r.model === d.model)) {
         config.allowedRoutes.push({ id: secureId(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });
       }
@@ -179,12 +191,14 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.engine}<SaveStatus {save} at="engine" /></h2>
+      <label class="switch-row"><span class="text">{labels.eventWakes}<span class="hint">{labels.eventWakesHint}</span></span><input type="checkbox" role="switch" checked={config.eventWakes === true} onchange={event => { if (config) { config.eventWakes = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-event-wakes" /></label>
       <!-- Missing on configurations saved before it existed: on. -->
       <label class="switch-row"><span class="text">{labels.autoMemory}<span class="hint">{labels.autoMemoryHint}</span></span><input type="checkbox" role="switch" checked={config.autoMemory !== false} onchange={event => { if (config) { config.autoMemory = event.currentTarget.checked; save.change('engine'); } }} data-testid="agent-auto-memory" /></label>
-      <div class="agent-columns">
-        <label class="agent-field">{labels.compactEvery}<input type="number" min="2" max="100" step="1" bind:value={config.compactAfterTurns} required {...typed(save, 'engine')} /></label>
-        <label class="agent-field">{labels.runMinutes}<input type="number" min="1" max="120" step="1" bind:value={config.maxRunMinutes} required {...typed(save, 'engine')} /></label>
-      </div>
+      <!-- Blank is no cap: the user's own messages always run, only its wakes stop for the day. -->
+      <label class="agent-field">{labels.dailyBudget}<span class="hint">{labels.dailyBudgetHint}</span>
+        <input class="agent-number" type="number" min="0.01" step="0.01" placeholder={labels.noBudget} value={config.dailyBudgetUsd ?? ''}
+          oninput={event => { if (config) { const value = event.currentTarget.valueAsNumber; config.dailyBudgetUsd = Number.isNaN(value) ? null : value; save.change('engine', TYPING_MS); } }}
+          onchange={() => void save.flush()} data-testid="agent-daily-budget" /></label>
     </fieldset>
 
   </form>

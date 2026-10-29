@@ -22,6 +22,7 @@ export const fr: Translation = {
     file: 'Fichier',
     tasks: 'Tâches',
     device: 'Appareil',
+    window: 'Fenêtre',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
     untitled: 'Navigateur'

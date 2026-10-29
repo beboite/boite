@@ -60,6 +60,12 @@ export function enhancedDetails(fields: Record<string, unknown>): EnhancedDetail
   return result;
 }
 
+/** A delegated call carries only its public selection, never task or thread data. */
+export function subagentDetails(fields: Record<string, unknown>): Pick<EnhancedDetails, 'model' | 'effort' | 'speed'> {
+  const { model, effort, speed } = enhancedDetails(fields);
+  return { model, effort, speed };
+}
+
 /**
  * The host's OS release as the OS itself names it ("Windows 11 Pro 26200",
  * "macOS 15.1", "ubuntu 24.04"). The host builds it from fixed system fields;

@@ -3,10 +3,9 @@ import { mount, unmount } from 'svelte';
 import { setExperiment } from './experiments';
 import { FakeClient } from './fake-client';
 import { rightPanel } from './right-panel.svelte';
+import { openQuestionPage } from './question-page';
 import { Store } from './store.svelte';
-import type { AgentsView } from './agents.svelte';
 import ThreadActivity from '../components/ThreadActivity.svelte';
-import AgentPendingQuestions from '../components/agents/AgentPendingQuestions.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => {
@@ -49,19 +48,14 @@ test('in the thread, Open on a question asked with --open shows its page in the 
   await shown(client, store, 't-trace', 'https://ci.example/login');
 });
 
-test('on the Agents page, Open goes to the session thread and shows its page in that thread\'s panel', async () => {
+test('from the Agents page, Open on an ordinary thread\'s question opens that thread in the chat with its page in the panel', async () => {
   setExperiment('resident-agents', true);
   const { client, store } = await setup();
-  // A persistent agent's session thread, not the one open in the chat.
-  const hidden = store.threads.find((thread) => thread.id !== 't-trace' && !thread.archived)!.id;
-  await ask(client, hidden, 'https://ci.example/login');
+  const other = store.threads.find((thread) => thread.id !== 't-trace' && !thread.archived && !thread.agentSessionId)!.id;
+  const { questionId } = await ask(client, other, 'https://ci.example/login');
   store.showAgents();
-  const scope = { kind: 'agent' as const, id: 'a-ada' };
-  const view = { store, snapshot: { profiles: [], groups: [], work: [], sessions: [{ id: 's-1', agentId: 'a-ada', scope, threadId: hidden }] } };
-  mounted = mount(AgentPendingQuestions, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
-  await vi.waitFor(() => expect(document.querySelector('[data-testid=question-open]')).not.toBeNull());
-  document.querySelector<HTMLButtonElement>('[data-testid=question-open]')!.click();
-  await shown(client, store, hidden, 'https://ci.example/login');
+  await openQuestionPage(store, other, questionId);
+  await shown(client, store, other, 'https://ci.example/login');
   expect(store.page).toBe('chat');
-  expect(store.openThread?.id).toBe(hidden);
+  expect(store.openThread?.id).toBe(other);
 });

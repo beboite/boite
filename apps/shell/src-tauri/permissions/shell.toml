@@ -23,6 +23,7 @@ commands.allow = [
   "app_update_check",
   "app_update_download",
   "app_update_install",
+  "app_update_install_quietly",
   "app_update_cancel_install",
   "quota_window",
   "window_material",

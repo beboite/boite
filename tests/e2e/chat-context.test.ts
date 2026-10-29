@@ -135,6 +135,59 @@ test('context opens on hover, shows exact segments, and compaction needs its own
   expect(await page.evaluate(`window.__compactCalls`)).toBe(1);
 }, 30000);
 
+test('context meter uses the auto-compaction threshold on desktop and phone', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  await update(`thread.context = {tokens:212569,window:1000000,at:Date.now()}; thread.sessionId = 'test-session'; store.settings = {...store.settings,autoCompact:null};`);
+  await page.click('[data-testid="context-trigger"]');
+  await page.waitFor(`document.querySelector('[data-testid="context-popup"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-meter"]').dataset.percent`)).toBe('21');
+  await capture('auto-compact-context-before-desktop');
+  await update(`store.settings = {...store.settings,autoCompact:{tokens:250000,moments:['turn-end']}};`);
+  await page.waitFor(`document.querySelector('[data-testid="context-meter"]').dataset.percent === '85'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .total .mono').textContent`)).toBe('212,569 / 250,000');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-remaining"]').textContent`)).toBe('37,431 tokens before auto-compaction');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .reading-detail').hidden`)).toBe(true);
+  await capture('auto-compact-context-desktop');
+  await page.click('[data-testid="context-info"]');
+  await page.waitFor(`!document.querySelector('[data-testid="context-popup"] .reading-detail').hidden`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-auto-compact"]').textContent`)).toBe('Auto-compaction threshold. The model supports 1,000,000 tokens.');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .reading-detail').textContent`)).toContain('Last measurement');
+  await capture('auto-compact-context-info-desktop');
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await page.waitFor(`document.querySelector('[data-testid="context-popup"] .reading-detail').hidden`);
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:true});
+  await capture('auto-compact-context-phone');
+  expect(await page.evaluate(`(() => {const r = document.querySelector('[data-testid="context-popup"]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;})()`)).toBe(true);
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('fr'))`);
+  await page.waitFor(`document.querySelector('[data-testid="context-remaining"]').textContent.includes('tokens avant compaction automatique')`);
+  await capture('auto-compact-context-phone-fr');
+  await page.click('[data-testid="context-info"]');
+  await page.waitFor(`!document.querySelector('[data-testid="context-popup"] .reading-detail').hidden`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-auto-compact"]').textContent.startsWith('Seuil de compaction automatique.')`)).toBe(true);
+  await capture('auto-compact-context-info-phone-fr');
+  await page.click('[data-testid="context-info"]');
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('en'))`);
+  await update(`thread.context = {...thread.context,tokens:100000,window:128000};`);
+  await page.waitFor(`document.querySelector('[data-testid="context-meter"]').dataset.percent === '78'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-auto-compact"]') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .total .mono').textContent`)).toBe('100,000 / 128,000');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-remaining"]').textContent`)).toBe('28,000 tokens available');
+  await capture('auto-compact-context-smaller-model-phone');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  await update(`thread.context = {...thread.context,tokens:212569,window:0};`);
+  await page.waitFor(`document.querySelector('[data-testid="context-auto-compact"]')?.textContent === 'Auto-compaction threshold.'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-meter"]').dataset.percent`)).toBe('85');
+  expect(await page.evaluate(`document.querySelector('[data-testid="context-popup"] .total .mono').textContent`)).toBe('212,569 / 250,000');
+  await capture('auto-compact-context-unknown-window-desktop');
+  await update(`store.settings = {...store.settings,autoCompact:null};`);
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
+}, 30000);
+
 test('compaction stays distinct on desktop and phone, then yields to normal work', async () => {
   await update(`
     window.__compactionAnswer = JSON.parse(JSON.stringify(thread.messages.find(m=>m.role==='assistant')));

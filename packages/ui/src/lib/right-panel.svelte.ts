@@ -8,23 +8,27 @@ import { secureId } from './secure-id';
  */
 
 import type { PanelSurface } from '@boite/contracts';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteSet } from 'svelte/reactivity';
 import { DEFAULT_BROWSER_PROFILE } from '@boite/contracts';
 import { browserBridge, type BrowserEvent } from './browser-bridge';
 import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 import { CONTACTS_RAIL_WIDTH, contactsRail } from './contacts-rail.svelte';
+import { FileDocuments, type FileDocument, type FileSaved, type FileWrite } from './file-documents.svelte';
 
 /**
  * `browser` is a page in this desktop's own webview, the user's browser.
  * `agent-browser` watches the headless browser the conversation's agent drives
- * on the machine that runs it, from any client.
+ * on the machine that runs it, from any client. `desk` is a persistent
+ * agent's desk, beside its own thread: what it does now, its work, routines,
+ * memory and day.
  */
-export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
+export type SurfaceKind = 'desk' | 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device' | 'window';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  'desk',
   'agents',
   'messages',
   'trace',
@@ -34,14 +38,15 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'files',
   'file',
   'tasks',
-  'device'
+  'device',
+  'window'
 ];
 
 /**
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['desk', 'agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device', 'window'];
 
 export interface Surface {
   id: string;
@@ -206,11 +211,14 @@ export class RightPanelStore {
   floating = $state(false);
 
   /**
-   * The unsaved text of each file tab, per thread. Switching tabs, hiding the
-   * panel or opening another thread unmounts the editor, and the edit used to
-   * go with it. Held in memory only: the layout is stored, a draft is not.
+   * The files the editors show, per thread and path, with the edit over each.
+   * Switching tabs, hiding the panel or opening another thread unmounts the
+   * editor, and the edit used to go with it. Held in memory only: the layout
+   * is stored, a draft is not.
    */
-  readonly drafts = new SvelteMap<string, SvelteMap<string, string>>();
+  readonly documents = new FileDocuments((key, path) =>
+    this.threads[key]?.surfaces.some((surface) => surface.kind === 'file' && surface.path === path) ?? false
+  );
 
   /**
    * The threads a phone-width load shut, kept beside the stored layout rather
@@ -338,7 +346,7 @@ export class RightPanelStore {
       }
       delete kept[key];
       this.#bound.delete(key);
-      this.drafts.delete(key);
+      this.documents.forget(key);
       this.phoneShut.delete(key);
       changed = true;
     }
@@ -495,20 +503,46 @@ export class BoundPanel {
     else this.open('trace');
   }
 
+  /** The document of a file tab, by its surface id. */
+  #file(id: string): FileDocument | undefined {
+    return id.startsWith('file:') ? this.#root.documents.get(this.#key, id.slice('file:'.length)) : undefined;
+  }
+
   /** The unsaved text of a file tab, when it has any. */
   draft(id: string): string | undefined {
-    return this.#root.drafts.get(this.#key)?.get(id);
+    return this.#file(id)?.draft ?? undefined;
   }
 
   /** Held while it differs from the disk; null forgets it, after a save or a discard. */
   keepDraft(id: string, text: string | null): void {
-    const held = this.#root.drafts.get(this.#key);
-    if (text === null) {
-      held?.delete(id);
-      return;
-    }
-    if (held) held.set(id, text);
-    else this.#root.drafts.set(this.#key, new SvelteMap([[id, text]]));
+    if (!id.startsWith('file:')) return;
+    if (text === null) this.#file(id)?.edit(null);
+    else this.#root.documents.hold(this.#key, id.slice('file:'.length)).edit(text);
+  }
+
+  /** What the disk holds for a file, as its last read or answered write left it. */
+  disk(path: string): string | undefined {
+    return this.#root.documents.get(this.#key, path)?.disk ?? undefined;
+  }
+
+  /** The text the file's writes leave with last, while one is out or waiting. */
+  outgoing(path: string): string | null {
+    return this.#root.documents.get(this.#key, path)?.outgoing ?? null;
+  }
+
+  /** A read of the file through `fetch`, whose answer the document orders against its other reads and writes. */
+  read<T>(path: string, fetch: () => Promise<T>, textOf: (answer: T) => string | null): Promise<T> {
+    return this.#root.documents.hold(this.#key, path).read(fetch, textOf);
+  }
+
+  /** An editor's text, held as the file's draft until the disk confirms it. */
+  edited(path: string, text: string): void {
+    this.#root.documents.hold(this.#key, path).edit(text);
+  }
+
+  /** A save of the file through `send`, which leaves once the file's write out answered. */
+  save(path: string, text: string, send: (text: string) => Promise<FileWrite>): Promise<FileSaved> {
+    return this.#root.documents.hold(this.#key, path).save(text, send);
   }
 
   /** The ids a close action takes away, so the question asked and the tabs closed agree. */
@@ -524,15 +558,16 @@ export class BoundPanel {
 
   /** The tabs among these holding an edit that was never saved. */
   unsaved(ids: readonly string[]): Surface[] {
-    const held = this.#root.drafts.get(this.#key);
-    if (!held) return [];
-    return this.state.surfaces.filter((surface) => ids.includes(surface.id) && held.has(surface.id));
+    return this.state.surfaces.filter((surface) => ids.includes(surface.id) && this.#file(surface.id)?.draft != null);
   }
 
-  /** A closed tab's draft goes with it: reopening the file reads the disk again. */
+  /** A closed tab's edit goes with it: reopening the file reads the disk again, once nothing of it is out. */
   #drop(ids: readonly string[]): void {
-    const held = this.#root.drafts.get(this.#key);
-    for (const id of ids) held?.delete(id);
+    for (const id of ids) {
+      // Only a file tab's path names a file: the changes tab's is its selected row.
+      const surface = this.state.surfaces.find((one) => one.id === id);
+      if (surface?.kind === 'file' && surface.path !== undefined) this.#root.documents.close(this.#key, surface.path);
+    }
   }
 
   /** Closing the active surface hands the panel to the one on its left. */

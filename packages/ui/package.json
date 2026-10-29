@@ -27,7 +27,10 @@
     "@xterm/xterm": "6.0.0",
     "highlight.js": "11.12.0",
     "jsqr": "1.4.0",
-    "qrcode": "^1.5.4"
+    "markdown-it": "15.0.3",
+    "pele": "1.10.0",
+    "qrcode": "^1.5.4",
+    "temml": "0.14.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.1",

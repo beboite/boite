@@ -34,6 +34,30 @@ async function open(edit?: (rows: PluginState[]) => void): Promise<void> {
   await vi.waitFor(() => expect(row('bots')).not.toBeNull());
 }
 
+test('an update that lands while the list is out is not undone by the older list', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const call = client.call.bind(client), on = client.on.bind(client);
+  const rows = await call('plugins.list', {});
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let update!: (value: PluginState) => void;
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'plugins.list') { await held; return rows; }
+    return call(method as never, params as never);
+  }) as never);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (value: PluginState) => void) => {
+    if (event === 'plugins.updated') update = handler;
+    return on(event as never, handler as never);
+  }) as never);
+  mounted = mount(PluginsPage, { target: document.body, props: { store: { client, providers: [] } as unknown as Store } });
+  await vi.waitFor(() => expect(update).toBeDefined());
+  update({ ...rows.find(plugin => plugin.id === 'bots')!, availableVersion: '99.0.0', version: '99.0.0' });
+  release();
+  await vi.waitFor(() => expect(row('bots')).not.toBeNull());
+  expect(row('bots')!.textContent).toContain('99.0.0');
+});
+
 function type(selector: string, value: string): void {
   const input = q(selector) as HTMLInputElement;
   input.value = value;
@@ -201,10 +225,10 @@ test('uninstalling a URL plugin takes its row away; the recommended one goes bac
 
     (row('bots')!.querySelector('[data-testid="plugin-uninstall"]') as HTMLElement).click();
     await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
-    // Not installed: the Install button is all it needs, no state line, no update check.
+    // Not installed: keep Install and the source check, without an installed state line.
     expect(row('bots')?.querySelector('.state')).toBeNull();
-    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).toBeNull();
-    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-updates"]')).not.toBeNull();
+    expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).not.toBeNull();
 
     (row('bots')!.querySelector('[data-testid="plugin-install"]') as HTMLElement).click();
     await vi.waitFor(() => expect(q('[data-testid="plugins-installed"]')?.contains(row('bots'))).toBe(true), { timeout: 3000 });
@@ -235,6 +259,40 @@ test('a recommended plugin with an update source says what it last found, and a 
   await vi.waitFor(() => expect(bots().getAttribute('data-status')).toBe('installed'), { timeout: 3000 });
   await vi.waitFor(() => expect(bots().querySelector('h3')?.textContent).toContain('v0.1.10'), { timeout: 3000 });
   expect(bots().querySelector('[data-testid="plugin-update"]')).toBeNull();
+});
+
+test('opening recommendations checks their sources without installing or blocking the list', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  const call = client.call.bind(client);
+  let finish!: (rows: PluginState[]) => void;
+  const latest = new Promise<PluginState[]>((resolve) => { finish = resolve; });
+  let recommendation!: PluginState;
+  const calls = vi.spyOn(client, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method === 'plugins.checkUpdates') return latest;
+    const result = await call(method as never, params as never);
+    if (method === 'plugins.list') {
+      recommendation = (result as PluginState[]).find((plugin) => plugin.id === 'bots')!;
+      Object.assign(recommendation, { version: null, status: 'not-installed', app: null });
+    }
+    return result;
+  }) as never);
+  const store = { client, providers: [] } as unknown as Store;
+  mounted = mount(PluginsPage, { target: document.body, props: { store } });
+
+  await vi.waitFor(() => expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true));
+  expect(row('bots')?.querySelector('[data-testid="plugin-install"]')).not.toBeNull();
+  await vi.waitFor(() => expect(calls).toHaveBeenCalledWith('plugins.checkUpdates', { id: 'bots' }));
+  expect(calls.mock.calls.filter(([method]) => method === 'plugins.checkUpdates')).toHaveLength(1);
+  expect(row('bots')?.querySelector('[data-testid="plugin-check-updates"]')).not.toBeNull();
+
+  finish([{ ...recommendation, availableVersion: '0.1.21', updates: {
+    ...recommendation.updates!, checkedAt: Date.now(), available: { version: '0.1.21', commit: 'c'.repeat(40), checkedAt: Date.now() },
+  } }]);
+  await vi.waitFor(() => expect(row('bots')?.querySelector('h3')?.textContent).toContain('v0.1.21'));
+  expect(row('bots')?.querySelector('[data-testid="plugin-updates-line"]')?.textContent).toContain('Found at github.com/Skollheim/bots');
+  expect(calls.mock.calls.some(([method]) => method === 'plugins.install')).toBe(false);
+  expect(q('[data-testid="plugins-recommended"]')?.contains(row('bots'))).toBe(true);
 });
 
 test('an ignored release and a failed check read as quiet notes, never alarms', async () => {
@@ -269,55 +327,4 @@ test('Douane\'s row shows its gateway on loopback, stops and starts it, and its 
   expect(ask.mock.calls[0]![0].body).toMatch(/sign-ins, settings and database stay in .*douane/);
   expect(strip()).not.toBeNull();
   ask.mockRestore();
-});
-
-test('opens on this PC rather than on the server the chat is on, and switches machine from its header', async () => {
-  const pc = new FakeClient({ delayMs: 0 });
-  const server = new FakeClient({ delayMs: 0 });
-  await Promise.all([pc.connect(), server.connect()]);
-  const pcCall = pc.call.bind(pc);
-  // The PC answers Stop only when the test lets it, after the page has moved to the server.
-  let answer: () => void = () => {};
-  const held = new Promise<void>((resolve) => { answer = resolve; });
-  vi.spyOn(pc, 'call').mockImplementation((async (method: string, params: unknown) => {
-    if (method === 'plugins.app') await held;
-    return pcCall(method as never, params as never);
-  }) as never);
-  const serverList = server.call.bind(server);
-  // Nothing is installed on the server.
-  vi.spyOn(server, 'call').mockImplementation((async (method: string, params: unknown) => {
-    const result = await serverList(method as never, params as never);
-    return method === 'plugins.list' ? (result as PluginState[]).filter((plugin) => plugin.origin === 'recommended').map((plugin) => ({ ...plugin, version: null, status: 'not-installed', app: null, gateway: null, pools: [] })) : result;
-  }) as never);
-  // Class instances, as real stores are: the workspace's state does not proxy them.
-  class Fake {}
-  const pcStore = Object.assign(new Fake(), { client: pc, providers: [], owner: true, localCore: true, endpointUrl: null, core: { hostname: 'nuno-pc' } }) as unknown as Store;
-  const serverStore = Object.assign(new Fake(), { client: server, providers: [], owner: true, endpointUrl: 'https://server.test', core: { hostname: 'server' } }) as unknown as Store;
-  workspace.machines = [
-    { id: 'local', label: 'nuno-pc', store: pcStore },
-    { id: 'https://server.test', label: 'server', store: serverStore },
-  ];
-  try {
-    mounted = mount(PluginsPage, { target: document.body, props: { store: serverStore } });
-    await vi.waitFor(() => expect(row('bots')?.closest('[data-testid="plugins-installed"]') ?? null).not.toBeNull());
-    expect(q('[data-testid="plugins-machine"]')?.textContent).toContain('nuno-pc');
-    await vi.waitFor(() => expect(appButton('bots', 'stop')).not.toBeNull());
-    appButton('bots', 'stop')!.click();
-
-    q('[data-testid="plugins-machine"]')!.click();
-    flushSync();
-    q('[data-testid="plugins-machine-menu"] [data-value="https://server.test"]')!.click();
-    await vi.waitFor(() => expect(row('bots')?.closest('[data-testid="plugins-recommended"]') ?? null).not.toBeNull());
-    expect(q('[data-testid="plugins-machine"]')?.textContent).toContain('server');
-
-    // The PC's late answer stays out of the server's page.
-    answer();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    flushSync();
-    expect(row('bots')?.closest('[data-testid="plugins-recommended"]') ?? null).not.toBeNull();
-    expect(app('bots')).toBeNull();
-  } finally {
-    workspace.machines = [];
-    pc.close(); server.close();
-  }
 });

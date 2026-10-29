@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
+import { effectiveCompaction } from '@boite/contracts';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { stripAnsi } from './ansi.ts';
@@ -8,7 +9,8 @@ import { invalidParams, messageOf, notFound, refused, unavailable } from './erro
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { antigravityCertificates } from './drivers/antigravity.ts';
 import { loginFolders, publishLoginCatalog } from './account-login.ts';
-import { probeThreadId } from './providers/probe.ts';
+import { AccountOperations } from './account-operations.ts';
+import { openCodeBackgroundCompaction } from './providers/opencode.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, profileFor, resolveExecutable, resolveLaunch } from './providers/resolve.ts';
 import { sqliteHasRows } from './providers/sqlite-login.ts';
@@ -112,7 +114,10 @@ export class AccountStore {
   /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
   private readonly shareLog = new Map<AccountId, string>();
 
-  constructor(private readonly core: Core) {}
+  /** Checks, discovery, quota reads and resets: what removal stops and waits for. */
+  readonly operations: AccountOperations;
+
+  constructor(private readonly core: Core) { this.operations = new AccountOperations(core); }
 
   list(): Account[] {
     return this.core.journal.listAccounts();
@@ -168,7 +173,7 @@ export class AccountStore {
         const config = this.core.workforce.resident.config(agent.id);
         return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
       })) {
-        throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
+        throw refused('this account is used by a bot; choose another account in its settings first', { accountId });
       }
     };
     // A conversation that only names the account keeps it by name and asks for
@@ -187,8 +192,7 @@ export class AccountStore {
     this.removing.add(accountId);
     try {
       await this.cancelLoginRun(accountId);
-      await this.core.procs.stopAndWait(`check:${accountId}`);
-      await this.core.procs.stopAndWait(probeThreadId(account.providerId, accountId));
+      await this.operations.drain(accountId);
       await this.checks.get(accountId)?.catch(() => {});
       checkAgentReferences();
       // Cancelling yields to RPC work; a turn may have started on this account.
@@ -268,9 +272,8 @@ export class AccountStore {
     const profile = profileFor(provider);
     const launch = resolveLaunch(profile);
     if (!launch) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
-    const threadId = `check:${accountId}`;
     let result: Pick<Account, 'status' | 'identity'>;
-    this.core.providers.installs.acquire(provider.id);
+    const operation = this.operations.open(accountId, provider.id, `check:${accountId}`, message => this.core.log('warn', `checking ${accountId}: ${message}`));
     try {
       const read = provider.protocol === 'codex-appserver'
         ? (await import('./drivers/codex/auth.ts')).readCodexAccount
@@ -278,18 +281,14 @@ export class AccountStore {
       result = await read({ executable: launch.executable, args: [...launch.prefix, ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
         spawnChild: (cmd, args, opts) => {
-          this.require(accountId);
           if (this.logins.get(accountId)?.cancelled) throw refused('Sign-in cancelled', { accountId });
-          return this.core.procs.spawnChild(threadId, cmd, args, opts);
+          return operation.spawnChild(cmd, args, opts);
         }, onLine: () => {},
       });
     } catch (error) {
       this.saveCheck(accountId, { status: 'error', identity: null });
       throw refused(`connection check failed: ${messageOf(error)}`, { accountId });
-    } finally {
-      try { await this.core.procs.stopAndWait(threadId); }
-      finally { this.core.providers.installs.release(provider.id); }
-    }
+    } finally { await operation.close(); }
     return this.saveCheck(accountId, result);
   }
 
@@ -321,7 +320,7 @@ export class AccountStore {
    * with a directory of its own does. Preparing the account is part of it, so
    * the seed files and the browser launcher are on disk before any spawn.
    */
-  accountEnv(account: Account, provider: ProviderDescriptor): Record<string, string> {
+  accountEnv(account: Account, provider: ProviderDescriptor, thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'> = {}): Record<string, string> {
     const profile = profileFor(provider);
     if (profile === undefined) return {};
     this.prepare(account, provider);
@@ -336,7 +335,8 @@ export class AccountStore {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
     if (provider.quirks?.includes('antigravity') === true) Object.assign(env, antigravityCertificates(currentOs(), process.env, existsSync));
-    return { ...env, ...subscriptionProxyEnv(this.core, provider) };
+    // OpenCode 2 compacts in the background by itself once asked to; a process started afterwards takes the change.
+    return openCodeBackgroundCompaction(provider.id, effectiveCompaction(this.core.settings.get(), thread).backgroundCompaction, { ...env, ...subscriptionProxyEnv(this.core, provider) });
   }
 
   /**

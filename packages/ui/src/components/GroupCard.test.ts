@@ -158,29 +158,31 @@ test('clicking the group name edits it, Enter shares the rename, and Escape canc
   await vi.waitFor(() => { flushSync(); expect(second.group?.name).toBe('Office'); });
 });
 
-test('a member says how it is reached, and one switch keeps every connected one like the selected machine', async () => {
-  await grouped();
+test('a member says how it is reached, and the default machine is picked once for every member, an older one named', async () => {
+  const first = await grouped();
   const second = await joined();
   const row = () => document.querySelector('[data-core-id="core-second"]')!.textContent;
-  // Not a machine of this window yet: nothing to copy to, and the row says why once the links know.
-  expect(one('group-sync')).toBeNull();
   workspace.groups.states = { 'core-second': 'unreachable' };
   await vi.waitFor(() => { flushSync(); expect(row()).toContain(strings.group.unreachable); });
   workspace.groups.states = {};
-
   workspace.machines = [...workspace.machines, { id: 'second', label: 'Second', store: second }];
   await vi.waitFor(() => { flushSync(); expect(row()).toContain(strings.group.connected); });
-  const [source, target] = workspace.machines;
-  const box = one<HTMLInputElement>('group-sync')!;
-  expect(box.checked).toBe(false);
-  box.click();
+
+  // Nothing chosen: each machine keeps its own, and the picker says so.
+  expect(one('group-home-pick')!.textContent).toContain(strings.machines.homeNone);
+  one<HTMLButtonElement>('group-home-pick')!.click();
   flushSync();
-  expect(workspace.settingsSync.source(target!)).toBe(source);
-  expect(box.checked).toBe(true);
-  box.click();
+  const options = [...document.querySelectorAll<HTMLElement>('[data-testid="group-home-pick-menu"] [data-value]')].map((item) => item.dataset.value);
+  expect(options).toEqual(['none', 'core-first', 'core-second']);
+  document.querySelector<HTMLElement>('[data-testid="group-home-pick-menu"] [data-value="core-second"]')!.click();
+  await vi.waitFor(() => { flushSync(); expect([first.group?.settingsHome, second.group?.settingsHome]).toEqual(['core-second', 'core-second']); });
+  expect(one('group-home-pick')!.textContent).toContain('Second');
+  expect(one('group-home-older')).toBeNull();
+
+  // A member whose Boite predates the choice is named: it keeps its own settings until updated.
+  second.core = { ...second.core!, features: { ...second.core!.features, settingsHome: false } };
   flushSync();
-  expect(workspace.settingsSync.enabled(target!)).toBe(false);
-  workspace.groups.states = {};
+  expect(one('group-home-older')!.textContent).toContain('Second');
 });
 
 test('removing a member asks first, then takes it off the list', async () => {

@@ -1,8 +1,9 @@
-import { checkSettingsPatch, keepLaterFavorites, readSettings, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings, type SubscriptionProxy } from '@boite/contracts';
+import { checkSettingsPatch, followedPatch, keepLaterFavorites, readSettings, MACHINE_SETTINGS, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
 import { DOUANE_PLUGIN } from './plugins/gateway.ts';
+import { announceMachineSetting } from './threads/group-spawn.ts';
 import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -91,6 +92,12 @@ export class SettingsStore {
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
     this.core.threads.cards.settleSettings(next);
+    for (const key of MACHINE_SETTINGS) {
+      if ((previous[key] === true) === (next[key] === true)) continue;
+      // Turned off, the bots of the other machines lose this machine's projects before anyone hears of it.
+      if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);
+      announceMachineSetting(this.core, key, next[key] === true);
+    }
     if (checked.subscriptionProxy !== undefined) {
       for (const account of this.core.accounts.list()) {
         const provider = this.core.providers.get(account.providerId);
@@ -116,10 +123,17 @@ export function localProxy(proxy: SubscriptionProxy, port: number): Subscription
 export function registerSettingsMethods(core: Core): void {
   core.router.register('settings.get', () => core.settings.get());
   core.router.register('settings.set', (params) => core.settings.set(params));
+  // One read and one write in the same turn of the event loop: no save from another window lands between them.
+  core.router.register('settings.follow', (params) => {
+    const patch: unknown = params?.patch;
+    if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) throw invalidParams('patch: expected an object of settings', { field: 'patch' });
+    const followed = followedPatch(core.settings.get(), patch);
+    return Object.keys(followed).length === 0 ? core.settings.get() : core.settings.set(followed);
+  });
   core.router.register('agent.settings', () => ({ app: core.clients.app(), settings: readSettings(core.settings.get(), core.clients.current()) }));
   core.router.register('client.preferences', (params, ctx) => {
     core.clients.report(ctx.connection, params);
-    return { ok: true } as const;
+    return { ok: true, desktop: core.clients.desktopExperiments() } as const;
   });
   core.router.register('settings.request', (params) => core.threads.cards.requestSetting(params));
 }

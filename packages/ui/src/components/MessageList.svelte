@@ -10,7 +10,11 @@
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
-  import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
+  import WakeMarker from './WakeMarker.svelte';
+  import TurnFoldRow from './TurnFoldRow.svelte';
+  import { AgentTimeline, memoryPassOf, summaryMarks } from '../lib/agent-turns';
+  import { groupTimeline } from '../lib/timeline-group';
+  import { agentMailFor } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
   import UserMessage from './UserMessage.svelte';
@@ -41,8 +45,8 @@
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
   import { MessageReveal } from '../lib/message-reveal.svelte';
-  import { placeViews, turnViews, viewPart } from '../lib/inline-view';
-  import { filesLast, firstAssistantByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
+  import { ViewPlacement, turnViews, viewPart } from '../lib/inline-view';
+  import { filesLast, firstAssistantByTurn, firstByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -63,10 +67,7 @@
   function releaseHeld(): void {
     for (const url of held) if (!viewing?.items.some(item => item.src === url)) { URL.revokeObjectURL(url); held.delete(url); }
   }
-  provideViewerHost({
-    open: (gallery) => { viewing = gallery; releaseHeld(); },
-    release: (url) => { held.add(url); releaseHeld(); }
-  });
+  provideViewerHost({ open: (gallery) => { viewing = gallery; releaseHeld(); }, release: (url) => { held.add(url); releaseHeld(); } });
   onDestroy(() => { viewing = null; releaseHeld(); });
   /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
   let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
@@ -89,24 +90,15 @@
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
   /** The turns of the thread this list shows, open or delegated. */
   const shownTurns = $derived(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []);
-  /** Rows that follow the message sharing their millisecond: agent mail and a launch card, anchored with `<=`. */
-  const after = (row: Message) => row.id.startsWith('coordination:') || row.id.startsWith('delegation:');
-  const grouped = $derived.by(() => {
-    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map(), notices: new Map<string, MemoryEvent[]>() };
-    const activity: Message[] = [...launches.values()].map(({ id, createdAt }) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt }));
-    const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
-    const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    // Output that already existed in this millisecond precedes its exchange.
-    const sorted = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
-      a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
-    const { rows, notices } = mergeNoticeRows(sorted, memoryRows);
-    return { ...groupAgentMail(rows, mail), notices };
-  });
+  const grouped = $derived.by(() => groupTimeline(messages, threadId, shownTurns, mail, launches, workflowRows, memoryRows));
   /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
-  /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line. */
-  const timeline = $derived(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns));
+  /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line; an agent's own thread folds its finished turns (`lib/agent-turns.ts`). */
+  const agentTimeline = new AgentTimeline(), viewPlacement = new ViewPlacement();
+  const placed = $derived(viewPlacement.build(filesLast(grouped.timeline, shownTurns), shownTurns, views));
+  const shaped = $derived(agentTimeline.build(quietKeepalives(placed, shownTurns), shownTurns, memoryPassOf(store, threadId)));
+  const timeline = $derived(shaped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -538,7 +530,7 @@
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
-    const resized = height !== scrolledHeight;
+    const resized = height !== scrolledHeight, shrank = height < scrolledHeight;
     scrolledHeight = height;
     // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
     const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
@@ -556,8 +548,8 @@
       if (distance > 1) return;
       endGlide(false);
     }
-    // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
-    if (rose && pinned && distance > 1) leftBottom = true;
+    // A busy phone can deliver touchstart after its scroll; content growth alone cannot clamp it upward.
+    if (rose && pinned && distance > 1 && !shrank && !relaid) leftBottom = true;
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
@@ -711,6 +703,7 @@
   const firstAssistantInTurn = $derived(firstAssistantByTurn(messages));
   /** The last row of each turn: a later message of the same turn replaces an earlier one. */
   const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
+  const firstInTurn = $derived(firstByTurn(messages));
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
   const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
@@ -724,16 +717,18 @@
   }
 
   /**
-   * Edit, retry and fork go through the core's rewind and fork, which a
-   * persistent agent's session refuses, and only on a thread at rest: a turn
-   * still running is stopped first (Escape).
+   * Edit and retry go through the core's rewind, fork through its fork, and
+   * only on a thread at rest: a turn still running is stopped first (Escape).
+   * A persistent agent's thread rewinds like any other, but has no project to
+   * fork into.
    */
-  const branchable = $derived(store.openThread?.id === threadId && !store.openThread.agentSessionId && store.openThread.projectId !== null);
+  const branchable = $derived(store.openThread?.id === threadId && (!!store.openThread.agentSessionId || store.openThread.projectId !== null));
+  const forkable = $derived(branchable && !store.openThread?.agentSessionId);
   // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
-    if (await editWhole(store, threadId, message)) focusComposer();
+    if (await editWhole(store, threadId, message)) focusComposer({ typing: true });
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
@@ -766,7 +761,8 @@
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
-        {@const closes = row.last && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
+        {@const quietFold = shaped.folds.get(message.id)}
+        {@const closes = row.last && !quietFold && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article
           use:track={{ row, joined }}
@@ -778,7 +774,9 @@
           data-role={group ? 'agent-mail' : message.role} data-turn={message.turnId}
         >
           {#if row.failures}
-            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && branchable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+          {:else if quietFold}
+            <TurnFoldRow fold={quietFold} at={message.createdAt} wake={turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event' ? turn.execution.operation : undefined} />
           {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
@@ -792,6 +790,8 @@
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
+          {:else if message.role !== 'assistant' && firstInTurn.get(message.turnId) === message.id && (turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event')}
+            <WakeMarker {message} kind={turn.execution.operation} />
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
@@ -801,12 +801,13 @@
           {#if turn && closes}
             {@const files = filesOf(turn)}
             {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
-            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}
+              {...summaryMarks(shaped, turn.id, () => store.panel.open('desk'))}>
               {#snippet actions()}
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
-                  fork={!narrow.current && branchable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
+                  fork={!narrow.current && forkable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
                 />
               {/snippet}
             </MessageTurnSummary>

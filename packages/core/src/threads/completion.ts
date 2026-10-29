@@ -11,13 +11,14 @@ import { refused } from '../errors.ts';
 export type CompletionRequest = 'explicit' | 'automatic';
 
 /** What still holds a member of the family, in words a refusal can show. */
-function pending(core: Core, id: ThreadId, status: string, scheduled: Set<ThreadId>, request: CompletionRequest): string | null {
+function pending(core: Core, id: ThreadId, scheduled: Set<ThreadId>, request: CompletionRequest): string | null {
   const threads = core.threads;
-  if (['running', 'waiting', 'queued'].includes(status) || scheduled.has(id) || threads.runner.handles.has(id) || threads.runner.steering.has(id)) return 'a turn is still running';
+  if (threads.isBusy(id) || scheduled.has(id) || threads.runner.steering.has(id)) return 'a turn is still running';
   if (threads.agentState.background.get(id)?.length) return 'background work is still running';
   if (threads.moves.pendingOf(id)) return 'a move is still in progress';
   if (threads.deferred.deferredAnswers.get(id)?.length || threads.deferred.pendingWakes.has(id)) return 'a message is still waiting to be delivered';
-  if (core.workflows.active(id)) return 'a workflow is still running';
+  // Done stops a paused run, as archiving does; only an automatic pass keeps it for its resume.
+  if (request === 'explicit' ? core.workflows.atWork(id) : core.workflows.active(id)) return 'a workflow is still running';
   if (request === 'explicit' ? threads.focus.hasReportedInput(id) : threads.focus.hasProtectedInput(id)) return 'unsent input is still open on a device';
   if (threads.sideQuestions.active(id)) return 'a side question is still open';
   if (threads.cards.listPermissions(id).length
@@ -34,7 +35,7 @@ export function assertIdleFamily(core: Core, threadId: ThreadId, request: Comple
   for (const { id } of family) {
     const thread = core.journal.getThread(id);
     if (!thread) continue;
-    const reason = pending(core, id, thread.status, scheduled, request);
+    const reason = pending(core, id, scheduled, request);
     if (reason === null) continue;
     const where = id === threadId ? '' : ` in "${thread.title}"`;
     throw refused(`threadId: ${reason}${where}; expected an idle conversation family`, {

@@ -1,3 +1,4 @@
+import { threadActive } from '@boite/contracts';
 import { realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { resolve, sep } from 'node:path';
@@ -5,6 +6,7 @@ import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, Provider
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
+import { currentOs } from '../paths.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmCli, npmInstallOf, unwritableDir, type NpmCommand } from './npm.ts';
 import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
@@ -52,7 +54,7 @@ export { compareVersions } from './install-latest.ts';
 
 /** True when the path sits under that directory, a sibling sharing its first letters left out. */
 export function inside(dir: string, path: string): boolean {
-  const fold = (value: string): string => (process.platform === 'linux' ? value : value.toLowerCase());
+  const fold = (value: string): string => (currentOs() === 'linux' ? value : value.toLowerCase());
   return fold(path).startsWith(fold(dir.endsWith(sep) ? dir : dir + sep));
 }
 
@@ -820,7 +822,7 @@ export class HarnessUpdates {
   /** True while any turn of any agent is queued, running or waiting. */
   private anyBusy(): boolean {
     return this.core.journal.unfinishedTurns().length > 0 ||
-      this.core.journal.listThreads().some((thread) => ['queued', 'running', 'waiting'].includes(thread.status));
+      this.core.journal.listThreads().some((thread) => threadActive(thread.status));
   }
 
   private newer(entry: Pick<Entry, 'route' | 'current' | 'latest'>): boolean {

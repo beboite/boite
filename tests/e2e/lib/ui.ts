@@ -15,7 +15,7 @@ export const fixtureBridge = {
   name: 'boite-e2e-fixture-controls',
   transform(code: string, id: string) {
     if (id.replaceAll('\\', '/') !== join(root, 'src/main.ts').replaceAll('\\', '/')) return;
-    return `${code}\nimport { workspace } from './lib/workspace.svelte.ts';\nimport { setTheme } from './lib/theme.ts';\nimport { appUpdater } from './lib/app-update.svelte.ts';\nglobalThis.__boiteTest = { workspace, setTheme, appUpdater };\n`;
+    return `${code}\nimport { workspace } from './lib/workspace.svelte.ts';\nimport { setTheme } from './lib/theme.ts';\nimport { setLocaleSetting } from './lib/i18n.svelte.ts';\nimport { appUpdater } from './lib/app-update.svelte.ts';\nglobalThis.__boiteTest = { workspace, setTheme, setLocaleSetting, appUpdater };\n`;
   },
 };
 

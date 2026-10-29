@@ -11,8 +11,10 @@
   import { fill, strings } from '../lib/strings';
   import { workspace } from '../lib/workspace.svelte';
   import { longPress } from '../lib/long-press';
+  import { archiveKindOf } from '../lib/project-threads.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
+  import ThreadState from './ThreadState.svelte';
 
   /**
    * A done or archived conversation, drawn like a thread row: the provider,
@@ -40,6 +42,8 @@
     : thread.pullRequest ?? null);
   const prLabel = $derived(pr ? fill(pr.state === 'MERGED' ? strings.sidebar.prMerged : pr.state === 'CLOSED' ? strings.sidebar.prClosed : strings.sidebar.prOpen, { number: String(pr.number) }) : '');
   const meta = $derived(showProject || pr !== null);
+  /** Archived by hand, not finished: work left to pick up reads as plainly as an open row. */
+  const pending = $derived(archiveKindOf(thread) === 'archived');
 
   function restore(): void {
     void lock.restore(owner, thread.id);
@@ -79,7 +83,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="done-thread" class:open class:meta data-testid="done-thread" data-thread-id={thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu} use:longPress>
+<div class="done-thread" class:open class:meta class:pending data-testid="done-thread" data-thread-id={thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu} use:longPress>
   <button type="button" class="ghost row" data-testid="done-thread-open" title={thread.title} disabled={deleting} onclick={select}>
     <span class="headline">
       {#if showMachine}
@@ -89,7 +93,7 @@
       <span class="title ui-label">{thread.title}</span>
       <!-- The project shows below, outside the button: named here too, so two same-titled threads read apart. -->
       {#if showProject}<span class="visually-hidden">{projectName(entry.project)}</span>{/if}
-      <time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>
+      {#if thread.status !== 'idle'}<ThreadState {thread} {now} away={owner.connection !== 'ready'} />{:else}<time datetime={new Date(archivedTime(thread)).toISOString()} title={exactTime(archivedTime(thread))}>{ago(archivedTime(thread), now)}</time>{/if}
     </span>
   </button>
   {#if meta}
@@ -147,7 +151,8 @@
     transition: color var(--dur-2) var(--ease-out-quint);
   }
   .done-thread:hover .title, .done-thread:focus-within .title, .done-thread.open .title { color: var(--color-foreground); }
-  .done-thread:hover .provider, .done-thread:focus-within .provider { opacity: 1; }
+  .done-thread:hover .provider, .done-thread:focus-within .provider, .pending .provider { opacity: 1; }
+  .pending .title { color: var(--color-foreground); }
   time { flex: none; color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .metadata {
@@ -182,11 +187,13 @@
   /* Restoring takes the time's place under the pointer, the way a thread row shows its menu. */
   .restore { position: absolute; top: 5px; right: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
   .done-thread:hover .restore, .done-thread:focus-within .restore { opacity: 1; }
-  .done-thread:hover time, .done-thread:focus-within time { opacity: 0; }
+  .done-thread:hover time, .done-thread:focus-within time,
+  .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 0; }
   /* No hover on a touch screen: the time stays, restoring is in the long-press menu. */
   @media (hover: none), (pointer: coarse) {
     .restore { display: none; }
-    .done-thread:hover time, .done-thread:focus-within time { opacity: 1; }
+    .done-thread:hover time, .done-thread:focus-within time,
+    .done-thread:hover :global(.when), .done-thread:focus-within :global(.when) { opacity: 1; }
   }
   @media (max-width: 720px) {
     .row { min-height: var(--touch-target); }

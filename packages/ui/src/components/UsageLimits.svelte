@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { Clock3, RotateCcw, Wallet } from '@lucide/svelte';
+  import { Bell, BellRing, Clock3, RotateCcw, Wallet } from '@lucide/svelte';
+  import QuotaAlerts, { alertPeriods } from './QuotaAlerts.svelte';
   import QuotaExtras from './QuotaExtras.svelte';
   import QuotaWindow from './QuotaWindow.svelte';
   import QuotaReset from './QuotaReset.svelte';
   import type { Store } from '../lib/store.svelte';
-  import type { AccountQuota } from '@boite/contracts';
+  import type { AccountQuota, QuotaAlertPeriod } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { creditBalance, exactTime, quotaResetTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
   import { quotaAccountName, quotaTone, remainingPercent } from '../lib/quota-reader.svelte';
@@ -15,9 +16,22 @@
    * One card per signed-in account, named by its label beside the provider's
    * logo. Its primary window comes first and largest, with its reset; the
    * other windows follow, compact. While a new reading loads, the old one
-   * stays desaturated until that account answers.
+   * stays desaturated until that account answers. With `onalert`, a bell in
+   * the header folds out the account's alerts.
    */
-  let { rows, loading = false, completed = [], store }: { rows: AccountQuota[]; loading?: boolean; completed?: string[]; store?: Store } = $props();
+  let { rows, loading = false, completed = [], store, onalert }: {
+    rows: AccountQuota[]; loading?: boolean; completed?: string[]; store?: Store;
+    onalert?: (accountId: string, period: QuotaAlertPeriod, thresholds: number[]) => Promise<void>;
+  } = $props();
+  /** The cards whose alerts are folded out. */
+  let opened = $state<string[]>([]);
+
+  /** What the bell says on hover: each alert set, or what it opens. */
+  function bellTitle(row: AccountQuota): string {
+    const set = alertPeriods(row).flatMap((period) => !row.alerts?.[period]?.length ? []
+      : [fill(strings.quotas.alertSet, { period: strings.quotas.alertPeriods[period], percents: row.alerts[period].map((left) => fill(strings.quotas.alertAt, { percent: String(left) })).join(', ') })]);
+    return set.length ? `${strings.quotas.alerts}: ${set.join(', ')}` : strings.quotas.alerts;
+  }
 </script>
 
 <div class="limits" class:loading data-testid="usage-limits">
@@ -41,7 +55,16 @@
           {/if}
           {#if at !== null}<small class="checked" title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}><Clock3 size={11} aria-hidden="true" /><span class="ui-label">{observed ? exactTime(at) : weekdayTime(at)}</span></small>{/if}
         </div>
+        {#if onalert && alertPeriods(row).length > 0}
+          {@const set = row.alerts !== undefined && Object.keys(row.alerts).length > 0}
+          {@const open = opened.includes(row.accountId)}
+          <button type="button" class="ghost icon bell" class:set aria-expanded={open} aria-label={bellTitle(row)} title={bellTitle(row)} data-testid="quota-alert-bell"
+            onclick={() => { opened = open ? opened.filter((id) => id !== row.accountId) : [...opened, row.accountId]; }}>
+            {#if set}<BellRing size={16} />{:else}<Bell size={16} />{/if}
+          </button>
+        {/if}
       </header>
+      {#if onalert}<QuotaAlerts {row} {name} open={opened.includes(row.accountId)} {onalert} />{/if}
       <!-- Bars without a fresh answer: the last good reading, kept after a failure or before a re-read. -->
       <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={pending} class:stale>
         {#if shown.primary}
@@ -91,6 +114,9 @@
   header { display: flex; align-items: center; gap: 11px; min-width: 0; }
   .logo { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-3); }
   .identity { flex: 1; min-width: 0; display: grid; gap: 3px; }
+  .bell { flex: none; align-self: flex-start; color: var(--color-muted-foreground); }
+  .bell.set { color: var(--color-accent); }
+  .bell[aria-expanded='true'] { background: var(--color-active); }
   header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--text-md); }
   .checked { display: flex; align-items: center; gap: 5px; }
   .checked :global(svg) { flex: none; opacity: 0.7; }

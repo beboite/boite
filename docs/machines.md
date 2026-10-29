@@ -4,6 +4,15 @@ Boite connects to several cores at once. Each machine owns its projects, files,
 accounts and execution. Opening a thread selects its machine for the chat,
 composer and settings. It does not move the thread or its processes.
 
+Thread links resolve against the machine that owns the rendered answer, including
+archived conversations absent from its active list. An explicit machine or core
+name stays scoped to that owner; unresolved or ambiguous names show an error.
+Navigation made while an address is being resolved takes precedence.
+
+Selecting a thread in the command palette or a saved draft switches directly to
+that destination. A draft retains its ID, project, text and attachments; a machine
+switch without a destination still restores the previous conversation.
+
 ## Connecting a machine
 
 Machines connect through a [group](groups.md): one invitation per machine,
@@ -82,17 +91,44 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
-The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
-On a remote host, 25 seconds without any
-frame while no call waits for its answer sends a `hello`, which the core
+Each machine keeps its own clock. The hello's answer carries the core's
+(`CoreInfo.now`), and the client takes the difference from the middle of the
+round trip as that machine's `clockOffset`. A running turn's counters (working
+for, compaction elapsed) count the core's timestamps against the device's
+clock plus that offset, so a desktop 11 seconds behind its server no longer
+shows "Elapsed: 0s" for the first 11 seconds. Each liveness probe's `hello`
+measures it again, so a device that sets its clock right on a live socket,
+back from sleep, follows within one probe; a change under a second is
+round-trip noise and is ignored. The middle of a trip is off by at most half
+of it: a sample no more precise than the current offset replaces it only when
+their two ranges cannot meet, so slow probes held behind an upload never swap
+one guess for another, while a clock set right still shows. An older core
+sends no clock and the offset stays zero.
+
+The client detects silent remote sockets (`packages/ui/src/lib/ws-client.ts`).
+On a remote host, 25 seconds without any frame sends a `hello`, which the core
 answers on an open connection with its info and nothing else. That `hello`
 carries no token and no device signature, since the core reads none of its
-params once the socket is authenticated. If no frame of
-any kind arrives within 15 seconds, the socket is replaced and the calls it
-carried fail with "connection lost; check the conversation before resending".
-While a call waits, silence may be its answer still downloading, one frame of
-up to 16 MB behind which the probe's answer would queue, so only that call's
-own 120 second timeout starts the check, on any host. Returning to the page, an `online` event or
+params once the socket is authenticated. A call that hears no frame at all for
+3 seconds sends the same `hello`, so a click on a conversation of a machine
+whose link died shows that machine offline within 13 seconds. The call counts
+frames rather than reading the clock, since a frame and a call can share a
+millisecond. If no frame of any kind arrives within 10 seconds of a `hello`,
+the socket is replaced and the calls it carried fail as dropped. A remote
+client asks the core to slice every answer (`progress`,
+`features.chunkedAnswers`): each 64 KiB slice is a frame, so a long answer on a
+slow link keeps the socket alive while a dead link stays silent. Requests are
+not sliced, and the `hello` queues behind what the client still uploads: past
+the first 64 KiB sent since the last frame arrived, the deadline grows by the
+time those bytes take at 32 KiB/s, so a prompt with 2 MiB of pictures gets 62
+seconds more. A core without sliced answers may still be sending one frame of up to
+16 MB: there, while a call waits, only that call's own 120 second timeout
+starts the check. Until 2026-10-22 that rule held on every core, and a VPN
+that dropped under an open conversation left the machine reading as connected
+for over two minutes while every call made there waited. A failure that only
+says the machine went away is not shown in red: the machine's status, its
+greyed rows and the composer already say it, and a conversation opened as the
+link went shows offline until the reconnect opens it again. Returning to the page, an `online` event or
 a page restored from the back/forward cache also send the `hello` first, and
 replace the socket only if it stays silent for 4 seconds, so a tab switch no
 longer drops a healthy connection or reloads the lists. An `offline` event asks
@@ -141,29 +177,48 @@ when renaming.
 
 ## The machines page
 
-Settings, Machines and updates shows each machine on one row: its icon, its
-name, whether it is connected and one word about its updates. The row's chevron
-opens its details: its address, Boite's version on that machine with its
-update (on another Windows PC, its desktop app as its window reports it,
-[updated from here](updates.md#the-desktop-app-of-another-pc)), its agents
-with theirs and the automatic update switch, Settings for
-this machine and Remove machine. A machine alone on its list shows its details
-without a click. Before this, a machine appeared twice, once as an updates
-card listing every agent version and once as a connection.
+Settings, Machines and updates folds nothing. Its first card is Boite's
+updates: the version this desktop app runs, the release found with its
+changelog, the channel (Nightly or Release; Release stays disabled until a
+stable release is published), Check for updates and Update. Check reads
+everything again: the app, Boite on every machine connected with full control,
+another Windows PC's desktop app as its window reports it
+([updated from here](updates.md#the-desktop-app-of-another-pc)), and the agents
+there. Under it, every other pending update is listed by machine, and Update
+starts all of them ([update everything](updates.md#update-everything)); a
+server still downloading or waiting can be cancelled from its line. Once the
+app's own release is downloaded and nothing else waits, the button restarts
+into it after its confirmation. A browser has no app updater: the card shows
+the version of the machine the page is on.
 
-One Check for updates button at the top reads everything again: the desktop
-app, Boite on every machine connected with full control, and the agents there.
-Update all beside it, shown while something can update, installs all of it
-([update everything](updates.md#update-everything)).
-The row's word is the most pressing of what it finds: a failed update, then
-one in progress, then one available, then a check in progress, then Up to
-date. A row says nothing until something has answered.
+The group card lists each machine on one row, then the phones and browsers:
+its icon, its name, whether it is connected, its Boite version and one word
+about its updates. The row's word is the most pressing of what it finds: a
+failed update, then one in progress, then one available, then a check in
+progress, then Up to date. A row says nothing until something has answered. A
+Docker, hand-made or too old server says how it updates in a tip on its row.
+This computer goes by its host name while it keeps the default name, and by
+the name it was given once renamed; either way lists add "(you)" after it. A
+core started with `BOITE_MACHINE_NAME` goes by that name instead of its host
+name, on the roster and wherever it names itself (`machineName` in
+`packages/core/src/paths.ts`); the [Android server](android-server.md) sets it,
+since every phone's host name is `localhost`. **Add a device**, in the card's
+header, draws the QR code and offers the link ([groups](groups.md#using-it)).
 
-The group card lists the machines, then the phones and browsers of the group,
-and has one button, **Add a device**, which draws the QR code and offers the
-link ([groups](groups.md#using-it)). Phone app keeps the Tailscale HTTPS switch and
-Reachable on the local network in view, and folds the address of a reverse
-proxy of one's own under Use another HTTPS address.
+Once the group has two machines, each machine's row this window controls
+carries a **Threads from the other machines** switch (`groupThreads`), off by
+default: on, the agents of the other machines may start threads in its
+projects with `boite thread new --machine` ([CLI](cli.md#commands)). The
+setting belongs to that machine and is saved there, so the PC with the printer
+can accept them while the server does not. Beside it, **Bots from the other
+machines** (`groupBots`, off by default) lets a bot of another machine look
+after the projects of this one its owner entrusted to it; off, it cuts them
+off at once ([bots](bots.md#projects-of-the-other-machines-of-the-group)). A
+row shown away hides both.
+Agent versions and their automatic update switch are on each machine's
+Providers page. How a phone reaches this machine without a server of the
+group (Tailscale HTTPS, the local network, a reverse proxy of one's own) is the
+Phone app card under Advanced.
 
 ## Agent links
 
@@ -179,42 +234,64 @@ of pairwise links.
 
 ## Automatic settings synchronization
 
-The group card has one checkbox to keep its machines
-synchronized with the named source. Checking it copies settings
-immediately, then copies changes while this client is open, including when
-Settings is closed. The source stays the one chosen when checking the box;
-switching the visible machine does not reverse the direction. Cyclic links are
-refused.
+The group card's **Default machine** picks one member whose settings every
+other member follows, or None. The choice is the group's (`group.settingsHome`,
+kept in the roster beside its name and merged the same way: the latest choice
+wins), so every member on current Boite shows the same one, and a member that
+leaves the group stops being the default. A core before `features.settingsHome`
+reports no choice and keeps its own settings; the card names it.
 
-The preference is saved on this client using each core's host, data directory
-and channel. Both machines need full control and a live connection. A reconnect
-or a client reload copies the latest values again. Unchecking stops future
-copies, including a pending copy that has not started writing. The remote core
-persists what it receives and keeps executing independently when the source or
-this client is offline.
+A window that owns both machines makes the copy: at once, then after each
+change on the default machine and after each reconnect, while that window is
+open, Settings closed or not. The remote core persists what it receives and
+keeps executing independently when the default machine or this window is
+offline. Copies saved per window by earlier versions are dropped.
 
-The client copies:
+The client copies (`SYNCED_SETTINGS` in the contracts):
 
-- deleted-history retention, process guards and question mode;
+- deleted-history retention, process guards, question mode, short answers,
+  tool summaries, automatic compaction and the cache keepalive;
+- **Install updates by itself when nothing runs** (`autoInstallUpdates`), so a
+  server as default machine, which cannot update itself, still carries the
+  choice to every desktop ([updates](updates.md#installing-by-itself));
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
-- the brain's Use with agents, instructions, guide and automatic pull switches
+- the brain's Share instructions automatically, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
 Resource limits, memory protection, process retention, automatic agent updates,
 worktree storage, network access, public URLs, browser origins and provider
-sign-ins stay on their own machine. Each owner machine card has a Settings for
-this machine button beside its synchronization control. It opens resource and
-execution settings for that core without changing the active conversation.
-Agent update checks, versions and the automatic update switch sit under that
-machine's details ([the machines page](#the-machines-page)).
-Checking synchronization leaves the machine list open. The button is available
-on desktop and phone; offline machines cannot be edited. The report names
-providers that still need signing in on the target
-and opens that machine's Providers page. Methods absent on an older core are
-skipped for that part. Automatic brain changes require the source core's
-`brain.configured` event. A failure names its stage; earlier changes stay copied,
-and the next source change or reconnect tries again.
+sign-ins stay on their own machine. So does **Threads from the other
+machines**: it says what one machine lets the others do, a choice made per
+machine, and a copy would open every follower as soon as the default machine
+opened.
+
+A synced setting changed on a following machine stays there: the change also
+adds it to that machine's `syncOverrides` (a setting's key,
+`keybinding:<command>` or `brain:<switch>`), which the copy skips. The settings
+part of the copy goes through `settings.follow`, which leaves out what the
+follower keeps at the moment it writes, so a change saved there from another
+window meanwhile stays. The page
+shows it with a star in the accent colour; clicking the star gives it back and
+copies the default machine's value at once when that machine is connected in
+this window, at its next connection otherwise. Only a change made on that machine
+marks it; the copy itself never does.
+
+Every settings page that belongs to one machine (General, Keyboard, Voice,
+Providers, Plugins, Brain, Limits, Task manager, Protection, Advanced and
+Diagnostics) has a machine picker above it once this window has more than one
+machine to pick. Picking another machine shows and
+changes that machine's settings without moving the window or its open
+conversation; Plugins opens on this PC, the others on the window's machine.
+On a machine that follows the default one, a note under the picker says so;
+the default machine says it is the default. Appearance and Experiments belong
+to the window, Machines to the group, and Usage keeps its own machine filter,
+which can read every machine at once.
+
+Methods absent on an older core are skipped for that part. Automatic brain
+changes require the default machine's `brain.configured` event. A failure names
+its stage; earlier changes stay copied, and the next change or reconnect tries
+again.
 
 ## Remote terminals
 
@@ -257,6 +334,9 @@ with the mouse or, on a phone, after holding a header still for a moment; a
 line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps
 the saved custom arrangement. The view and custom order belong to this device.
+So do folded projects: a project folded under its header stays folded after a
+restart, kept per core in localStorage (`boite.foldedProjects.v1`). A draft
+opened in a folded project, or a conversation moved into it, unfolds it.
 
 Recent flattens the list. Its All projects picker can limit conversations and
 drafts to one project on one machine. The new-conversation button and Ctrl+N
@@ -280,13 +360,19 @@ a green underlined number. A card that has that row also names the thread's
 worktree branch there; a branch alone does not add the row. The phone list
 always has a second line and appends the branch to it. Connecting another machine leaves cards without project or PR metadata
 at their single-machine height. No placeholder appears when there is no PR. PR
-metadata comes from the execution machine's `gh pr list`, using the branch
+metadata comes from the execution machine's `gh`, using the branch
 associated with the thread. A shared checkout's current branch alone does not
 identify a thread's PR. Non-repositories and detached checkouts have no PR.
 Lookups share the common Git directory across worktrees: `git remote -v` is
-cached for five minutes and the newest 200 PRs for 15 seconds; a failed read is
-kept 15 seconds. The merged-PR archive reads the same two caches.
-A missing branch gets its own lookup only when that list was full. At most two
+cached for five minutes. Each GitHub repository has one page, the 100 PRs
+updated last (`gh api graphql`, one rate-limit point), kept 15 seconds; a
+failed read is kept 15 seconds. The merged-PR archive reads the same two caches.
+Badges and linked PRs answer from the pages: a branch or a link the pages never
+showed gets its own `gh pr list --head` or `gh pr view` once, then the pages
+carry its changes. That holds while each page reaches back past the newest
+change of the previous one, with five minutes of overlap; after a gap, or on
+Refresh PR, the branch is read alone again. Rounds cost one `gh` per
+repository, whatever the number of threads. At most two
 commands run at once, each with a ten-second deadline through `procs` as
 `pull-request:<threadId>`. Folded projects defer lookups until opened. A client
 asks again every 15 seconds while the thread works and once a minute at rest,
@@ -302,21 +388,37 @@ offline. When the machine is back, the reconnect reopens the thread, reads its
 team, workflows and coordination, then sends the outbox.
 
 The outbox is the thread's queue with a request on each entry
-(`OutboxRequest` in `store/composer.svelte.ts`): a `clientRequestId` drawn when
-the prompt is written, and the model, effort and speed it was written with.
-The drafts journal keeps it per machine with the unsent text, in IndexedDB
-and its localStorage backup, attachments included, so it survives closing the
-app. Each entry is its own turn and goes through the composer's own send path,
-in order, never steered into a running turn. The core answers a
-`clientRequestId` it already took with that turn, so an entry whose answer was
-lost is not sent twice. A refusal from the core marks the entry as failed with
-its reason and holds the entries written after it; Send again retries it under
-the same id, and the cross removes it. A tap takes it back into the box, and
-sending it from there draws a new id. A thread that moved to another model
-meanwhile is put back on the written one first; a choice for another agent or
-account is ignored. A new thread needs the core, so a
-draft keeps its text until the machine returns. A machine offline since the app
-started has no cards to open: the client keeps no copy of the thread list.
+(`OutboxRequest` in `store/composer.svelte.ts`), a stable ID and the agent,
+account, model, effort and speed chosen when it was written. The device's
+IndexedDB journal and text backup retain input until synchronization succeeds.
+The owning core then stores the queue and broadcasts its revised record to
+owner and paired devices. Once accepted, it runs without the app open. Each
+outbox entry starts its own turn, in order; it is never steered into a running
+turn. Execution uses the captured selection without replacing the current
+picker. Permissions and blocking questions still hold delivery.
+
+Ordinary follow-ups typed during a running turn use the same server storage,
+but retain native steering at tool boundaries and Send now. Delivery receipts
+prevent a stale cache from replaying consumed entries. A refused or ambiguous
+submission pauses the queue with its reason; unconfirmed delivery is never
+retried automatically. Taking an entry back into the box and sending it again
+creates a new request. A machine offline since the app started has no cards to
+open: the client keeps no copy of the thread list.
+
+A new conversation waits the same way. Sending a draft while its core is
+offline keeps its first prompt and captured selection on the device. A client
+must reconnect to synchronize that input. After the core accepts it, it creates
+the conversation and transfers the queue and draft deletion in one transaction;
+a restart cannot create a second conversation from that accepted draft. New
+text typed while creation was pending remains a draft. The sidebar's clock
+and tooltip identify a pending start and its machine. Cancel the start returns
+an unsent prompt to the box; an in-flight start remains locked while its result
+is unknown.
+
+Incognito drafts and replies stay in client memory, with no durable upload or
+cross-device synchronization. Older cores without `composerPersistence` keep
+the client-owned outbox and draft launch path
+(`packages/ui/src/lib/store/draft-launch.svelte.ts`).
 
 Archiving or restoring a project of a machine that is offline still works: the
 project moves at once and the choice is kept on this device, per core, in
@@ -340,7 +442,7 @@ Reconnecting clears the capability check so an updated core is detected.
 ## Back and forward
 
 On a desktop, a mouse's back and forward buttons walk the views this window
-showed, in order: a thread, a draft, a settings tab or the Agents page, on
+showed, in order: a thread, a draft, a settings tab or the Bots page, on
 whichever machine each one was. Back from a thread on another machine returns
 to that machine as well as to the view. A view opened after going back replaces
 what was ahead of it, as in a browser.

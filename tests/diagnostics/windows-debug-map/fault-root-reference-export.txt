@@ -1,0 +1,28 @@
+// Only the pinned launcher registry can discharge this exact tracked root.
+export function ownershipFaultRootReference(compiler: string, compilerNonce: string, directory: string, traceDirectory: string, controlDirectory: string) {
+  const current = (pid: number) => ownershipTrace.preserve(() => {
+      const entry = tracked.get(pid), job = entry && threadJobs.get(entry.threadId);
+      const ref = entry && ownershipTrace.reference(entry.handle);
+      if (!entry || !job || !ref || ref.entry.pid !== pid || ref.entry.incarnation !== entry.identity?.incarnation || entry.identity?.incarnation !== ref.identity.incarnation) return undefined;
+      return {handle: entry.handle, pid: ref.identity.pid ?? 0, created: ref.identity.incarnation ?? '', exitCode: ref.identity.exitCode,
+        owner: ownershipTrace.owner, role: ownershipTrace.role, id: ref.entry.id, threadId: entry.threadId,
+        threadJob: String(job.handle), jobKey: job.key, globalJob: String(globalJob), nestingRefused,
+        complete: ref.complete, closeFailed: !!ref.entry.closeFailed, stage: ref.entry.stage};
+    });
+  return new FaultRootOwner({compiler, compilerNonce, now: () => Date.now(), current,
+    authorizeLive: (request, sample) => ownershipTrace.preserve(() => authorizeLiveFence(request, sample, current(request.helper.pid),
+      readFileSync(join(controlDirectory, `${request.label}.ready.bin`)), traceRows(traceDirectory), Date.now())),
+    removed: pid => !tracked.has(pid),
+    authorize: (request, sample) => ownershipTrace.preserve(() => validateFaultNativeEvidence(request, sample,
+      readFileSync(join(directory, `lpac-ANCHOR-FAULT-${request.label}.log`), 'utf8'), traceRows(traceDirectory))),
+    retire: sample => ownershipTrace.preserve(() => {
+      const entry = tracked.get(sample.pid), ref = entry && ownershipTrace.reference(entry.handle);
+      if (!entry || entry.handle !== sample.handle || entry.threadId !== sample.threadId ||
+          entry.identity?.incarnation !== sample.created || !ref || !ref.complete || ref.entry.closeFailed ||
+          ref.entry.id !== sample.id || ref.identity.pid !== sample.pid || ref.identity.incarnation !== sample.created || ref.identity.exitCode !== 125)
+        throw new Error('fault root reference identity changed before reportExit');
+      reportExit(sample.threadId, sample.pid);
+      return ownershipTrace.closeResult(sample.id);
+    }),
+  });
+}

@@ -50,12 +50,11 @@ test('browser Add project keeps refused paths and Escape returns to its button',
   }
 });
 
-test('the phone list header holds the project picker, the new thread and the menu, and no project management', async ({ app: _app }) => {
+test('the phone list header holds the project picker, the bottom bar the new thread, and neither manages a project', async ({ app: _app }) => {
   store.startDraft('p-boite');
   await showMobileThreads();
-  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('boite') === true);
-  expect(document.querySelector('[data-testid=mobile-new]')).not.toBeNull();
-  expect(document.querySelector('[data-testid=mobile-menu]')).not.toBeNull();
+  await waitFor(() => query('[data-testid=mobile-project]').getAttribute('aria-label')?.includes('boite') === true);
+  expect(document.querySelector('[data-testid=mobile-tabs] [data-testid=mobile-new]')).not.toBeNull();
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
   // Adding a project is the picker's last row.
   query<HTMLButtonElement>('[data-testid=mobile-project]').click();

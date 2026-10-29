@@ -4,12 +4,29 @@ import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
 
 async function agent(client: FakeClient, name = 'Mira'): Promise<AgentProfile> {
-  return client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', tools: [], projectIds: [],
+  return client.call('agents.profile.save', { value: { name, domain: '', instructions: '', avatar: '', status: 'active', projectIds: [],
     selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null, permissionMode: 'default' } } });
 }
 
 const prompts = async (client: FakeClient, threadId: string) => (await client.call('threads.get', { threadId })).messages
   .filter((message) => message.role === 'user').map((message) => (message.parts[0]?.type === 'text' ? message.parts[0].text : ''));
+
+test('fake eventWakes settings use the same boolean card and preserve the active bot', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'Configure the bot.' });
+  await client.settled();
+  const read = await client.call('agents.settings.read', { threadId, agent: mira.id });
+  expect(read.settings.find(s => s.key === 'eventWakes')?.value).toBe(false);
+  for (const value of [true, false]) {
+    const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'eventWakes', value, reason: 'Batch project news' });
+    expect(card.setting.previous).toBe(!value);
+    const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
+    expect(saved.status).toBe('active');
+    expect((await client.call('agents.runtime.get', { agentId: mira.id })).eventWakes).toBe(value);
+  }
+});
 
 test('fake agent setting cards: read, request, refusals, apply with an edit and the answer the thread reads', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
@@ -49,6 +66,22 @@ test('fake agent setting cards: read, request, refusals, apply with an edit and 
   await expect(client.call('agents.settings.apply', { threadId, questionId })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
 });
 
+test('a bot may propose a robot with every shared part, or a four-part code, and nothing else', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await agent(client);
+  const thread = async () => {
+    const { id } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    await client.call('turns.start', { threadId: id, prompt: 'hello' });
+    await client.settled();
+    return id;
+  };
+  const threadId = await thread();
+  await expect(client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'avatar', value: 'bot:a.1.2.3.4.5', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'avatar' } });
+  const { setting } = await client.call('agents.settings.request', { threadId, agent: 'Mira', key: 'avatar', value: 'bot:d.5.16.12.14.3.2.1', reason: 'A new face' });
+  expect(setting.value).toBe('bot:d.5.16.12.14.3.2.1');
+  expect((await client.call('agents.settings.request', { threadId: await thread(), agent: 'Mira', key: 'avatar', value: 'bot:c.1.2.3.0', reason: 'The old one' })).setting.value).toBe('bot:c.1.2.3.0');
+});
+
 test('fake agent setting cards settle from the agent\'s own settings, and the [agent-settings] marker asks for a project', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const mira = await agent(client);
@@ -70,4 +103,62 @@ test('fake agent setting cards settle from the agent\'s own settings, and the [a
   const read = (await prompts(client, threadId)).join('\n\n');
   expect(read).toContain(`> ${card!.text}\n\napplied: Mira's projects are now ["notes"]`);
   expect(read).toContain('> Quicker answers\n\nchanged: the user set Mira\'s effort to "high", not "low"');
+});
+
+test("fake agents.create: the core's refusals, then the bot made at once on the thread's route with full access", async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await agent(client);
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  const live = async () => (await client.call('agents.snapshot', {})).profiles.map((profile) => profile.name);
+
+  await expect(client.call('agents.create', { threadId, name: 'mira' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'name' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', projects: ['nowhere'] })).rejects.toMatchObject({ data: { field: 'projects' } });
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 'gpt-9' })).rejects.toMatchObject({ data: { field: 'model' } });
+  // A model that is not text is refused, not read as omitted (which would take the thread's route).
+  await expect(client.call('agents.create', { threadId, name: 'Scribe', model: 123 as unknown as string })).rejects.toMatchObject({ data: { field: 'model' } });
+  expect(await live()).not.toContain('Scribe');
+
+  // Bounds hold on the trimmed text, as the name's do.
+  const { agent: scribe, threadId: conversation } = await client.call('agents.create', { threadId, name: 'Scribe', domain: ` ${'d'.repeat(500)} `, effort: 'high', projects: ['notes'] });
+  expect(scribe).toMatchObject({ name: 'Scribe', domain: 'd'.repeat(500), status: 'active', projectIds: ['p-notes'], selection: { providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: 'high', permissionMode: 'bypassPermissions' } });
+  expect(conversation).not.toBeNull();
+  expect(await client.call('questions.list', { threadId })).toEqual([]);
+
+  // A thread on its provider's default model gives the bot the model marked default, not the first listed.
+  const { models } = await client.call('providers.probe', { providerId: 'claude', accountId: 'a-claude-main' });
+  const onDefault = await client.call('threads.create', { projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main' });
+  expect(models[0]!.default).not.toBe(true);
+  expect((await client.call('agents.create', { threadId: onDefault.id, name: 'Herald' })).agent.selection.model).toBe(models.find((model) => model.default === true)!.id);
+});
+
+test('fake model cards name the provider and move an agent to another one, allowing the route', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const mira = await agent(client);
+  // Two routes the owner named already hold the card's reference as their ids.
+  const policy = await client.call('agents.runtime.get', { agentId: mira.id });
+  const own = policy.allowedRoutes[0]!;
+  await client.call('agents.runtime.configure', { agentId: mira.id, expectedRevision: mira.revision, config: { ...policy, allowedRoutes: [{ ...own, id: 'codex/default' }, { ...own, id: 'codex/default-3', effort: 'low' }] } });
+  const { id: threadId } = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  await client.call('turns.start', { threadId, prompt: 'Move the bot.' });
+  await client.settled();
+  const read = (await client.call('agents.settings.read', { threadId, agent: mira.id })).settings.find(s => s.key === 'model')!;
+  expect(read.value).toBe('echo/echo-1');
+  expect(read.choices?.slice(0, 3)).toEqual([{ id: 'echo/echo-1', label: 'Echo' }, { id: 'opencode/default', label: 'OpenCode default' }, { id: 'codex/default', label: 'Codex default' }]);
+  await expect(client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'echo-1', reason: 'r' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'value', key: 'model' } });
+  // The refusal names why the model is out of reach, as the core's does.
+  const ask = (value: string) => client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value, reason: 'r' });
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: false });
+  await expect(ask('codex/default')).rejects.toThrow('codex is not installed or is turned off');
+  await client.call('providers.setEnabled', { providerId: 'codex', enabled: true });
+  await client.call('accounts.remove', { accountId: 'a-opencode' });
+  await expect(ask('opencode/default')).rejects.toThrow('opencode has no signed-in account');
+  await expect(ask('codex/gpt-9')).rejects.toThrow('the provider does not offer this model');
+
+  const card = await client.call('agents.settings.request', { threadId, agent: mira.id, key: 'model', value: 'codex/default', reason: 'Reviews need a larger model' });
+  expect(card.setting).toMatchObject({ key: 'model', previous: 'echo/echo-1', value: 'codex/default' });
+  const saved = await client.call('agents.settings.apply', { threadId, questionId: card.questionId });
+  expect(saved.selection).toMatchObject({ providerId: 'codex', model: 'default' });
+  const config = await client.call('agents.runtime.get', { agentId: mira.id });
+  expect(config.defaultRoute).toMatchObject({ providerId: 'codex', model: 'default' });
+  expect(config.allowedRoutes.map(route => `${route.id}: ${route.providerId}/${route.model}`)).toEqual(['codex/default: echo/echo-1', 'codex/default-3: echo/echo-1', 'codex/default-2: codex/default']);
 });

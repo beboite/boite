@@ -3,14 +3,11 @@
   import type { ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import type { Store } from '../lib/store.svelte';
-  import { agentLabel } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
-  import { agentDirectory } from '../lib/agent-directory.svelte';
   import { strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
-  import ProviderLogo from './ProviderLogo.svelte';
+  import ThreadPicture from './ThreadPicture.svelte';
   import ThreadState from './ThreadState.svelte';
-  import AgentAvatar from './agents/AgentAvatar.svelte';
 
   /**
    * A thread row's first line, in the sidebar and in a phone's list: who runs
@@ -24,7 +21,8 @@
     now,
     machine,
     open = false,
-    wrap = false
+    wrap = false,
+    picture = true
   }: {
     owner: Store;
     thread: ThreadSummary;
@@ -36,11 +34,10 @@
     open?: boolean;
     /** A phone's list: the title wraps over several lines instead of ending in an ellipsis. */
     wrap?: boolean;
+    /** A phone's row draws the picture itself, in a tile beside the lines. */
+    picture?: boolean;
   } = $props();
-  let agent = $derived(agentLabel(owner, thread));
   let draft = $derived(!open && hasUnsentDraft(owner.composerStates[thread.id]));
-  /** A persistent agent's thread, a sub-thread and an entrusted thread wear that agent's picture where the logo goes. */
-  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : agentDirectory(owner).entrustmentOf(thread.id)?.agent ?? null);
 </script>
 
 <span class="headline" class:wrap class:unread={thread.unread && !wrap}>
@@ -50,15 +47,7 @@
       <MachineIcon icon={machine.icon} os={owner.core?.os} />
     </span>
   {/if}
-  {#if runner}
-    <span class="picture" data-testid="thread-agent" role="img" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
-      <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
-    </span>
-  {:else}
-    <span class="picture" data-testid="thread-provider" role="img" title={agent} aria-label={agent}>
-      <ProviderLogo providerId={thread.providerId} size={wrap ? 13 : 12} />
-    </span>
-  {/if}
+  {#if picture}<ThreadPicture {owner} {thread} size={wrap ? 13 : 12} />{/if}
   <span class="title" class:ui-label={!wrap}>{thread.title}</span>
   {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
   {#if thread.pinned}<span class="pin"><Pin size={12} /></span>{/if}
@@ -86,7 +75,6 @@
   .unread .title {
     font-weight: 600;
   }
-  .picture,
   .machine,
   .draft,
   .pin {
@@ -117,7 +105,7 @@
     white-space: normal;
     font-weight: inherit;
   }
-  .wrap .picture {
+  .wrap :global(.picture) {
     margin-right: 6px;
     vertical-align: -2px;
   }

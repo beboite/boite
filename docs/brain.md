@@ -9,11 +9,18 @@ same repository can live at different locations on different computers.
 
 Only owners can inspect or configure a brain and synchronize it. A paired
 device cannot call these methods. An owner using a phone-sized browser has the
-same controls. The connected folder shows Synchronize and a Use with agents
+same controls. The connected folder shows Synchronize and a Share instructions automatically
 switch, which saves immediately. Change folder reveals the path editor and
 Disconnect, which removes the setting and leaves the files alone.
 Instructions, Skills and Plugins each have a tab with a count. Select a file
 to expand its description and path; Git details stay under Sync details.
+
+Manual skills marked `disable-model-invocation: true` appear in the composer's
+slash menu as soon as a folder is connected. Sending `/name` expands the skill
+body, preserving any following arguments. A native agent command with the same
+name takes precedence. Turning automatic sharing off keeps these commands
+available without adding the brain's instructions or skill catalog to each
+turn. Disconnect the folder to remove its manual commands as well.
 
 ## Detection
 
@@ -120,26 +127,26 @@ Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
 
 ### Short answers
 
-Settings > General > Short answers, on by default, puts one line before every
-normal turn: work silently, with no text before or between tool calls, and
-write once when the work is done or when the user's decision or hands are
-needed; the result first in short plain sentences, without preamble, recap or
-hedging, and every fact, number, path and command kept. It goes every turn
+Settings > General > Short answers, on by default, puts one paragraph before every
+normal turn: reduce text before or between tool calls and make the final reply
+self-contained with the result and everything the user needs to know. It asks
+for short plain sentences, without preamble or hedging, while keeping every
+fact, number, path and command the user needs. It goes every turn
 rather than once a session because harnesses ask for progress notes and a
 style said once fades within a few answers. It is `SHORT_ANSWERS` in
-`packages/core/src/agent-guide.ts`, about 450 bytes. Context modes without
+`packages/core/src/agent-guide.ts`. Context modes without
 guides, compaction and native slash commands do not receive it, and turning the
 Boite guide off removes it with the rest of Boite's own text.
 
 The setting also starts Claude with `CLAUDE_CODE_SILENT_TURN_REMINDER=0`. The
 CLI otherwise slips "the user hasn't heard from you in a while" into a long
-silent turn, which asks for the progress lines this setting forbids. It applies
+silent turn, which asks for routine progress notes this setting reduces. It applies
 when a Claude process starts, so a warm session keeps its value until then.
 
 ## Global instructions
 
 Global AGENTS.md links the brain's root `AGENTS.md` into the user profiles on
-the core's machine. The switch is off by default and requires Use with agents.
+the core's machine. The switch is off by default and requires automatic sharing.
 These links also apply outside Boite, when the harness loads its global rules.
 
 | Harness | Default destination |
@@ -168,6 +175,15 @@ Boite repairs missing managed links at core startup and after synchronization.
 Closing Boite leaves the links working. Git can replace `AGENTS.md` atomically
 without breaking them. Windows requires file-symlink permission, normally
 provided by Developer Mode; a refusal stays visible per harness.
+When Windows refuses a file symlink with a privilege error, Connected harnesses
+shows recovery steps in the app's language. On the computer hosting the brain,
+press Win+R, open `ms-settings:developers`, enable Developer Mode and accept the
+Windows confirmation. Return to Brain and select Try again to reapply the saved
+configuration without switching sharing off. If Windows requires administrator
+approval or an organization manages this setting, contact that computer's
+administrator. Other link or restore errors also offer Try again, with their
+original error and destination preserved. Failed installations restore the
+original file where possible and keep any pending backup tracked.
 
 The source must be a readable, nonempty file within the brain, at most 64 KiB.
 Harness-specific size limits and discovery settings still apply. A running
@@ -209,7 +225,7 @@ Automatic pulls fetch and fast-forward only; they never push local commits.
 They use the same dirty-folder and divergence checks as Synchronize. A failure
 appears in the inventory and the next interval retries. The interval starts after
 the previous attempt finishes, and a manual synchronization takes priority.
-These settings apply even when Use with agents is off. Disconnect stops pulls;
+These settings apply even when automatic sharing is off. Disconnect stops pulls;
 closing the core cancels the timer and drains its Git processes.
 
 This version does not clone repositories, commit edits or copy files directly

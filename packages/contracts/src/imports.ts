@@ -11,6 +11,8 @@ import type { ThreadSummary } from './threads';
 export interface ImportableSession {
   providerId: ProviderId;
   accountId: AccountId;
+  /** Accounts that can import this same file; older cores supply only accountId. */
+  accountIds?: AccountId[];
   /** The agent's own id for the session, what a resumed turn hands back to it. */
   sessionId: string;
   /** The transcript file, absolute. */

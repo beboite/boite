@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Bus } from '../src/bus.ts';
 import type { Core } from '../src/core.ts';
-import { linuxVersion, macosVersion, RELAY, relayFor, Telemetry, telemetryEvent, windowsVersion } from '../src/telemetry.ts';
+import { linuxVersion, macosVersion, registerTelemetry, RELAY, relayFor, Telemetry, telemetryEvent, windowsVersion } from '../src/telemetry.ts';
 import relay, { buildBatch, type Env } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 import { thrown } from './settle.ts';
@@ -326,4 +326,341 @@ test('enhanced turn metrics use the frozen execution and keep missing usage abse
   expect(event).toMatchObject({ model: 'claude-sonnet-4-5', effort: 'high', speed: 'fast', permission_mode: 'plan', operation: 'compact', queue_ms: 150, duration_ms: 1000, input_tokens: 1200, output_tokens: 500, cache_read_tokens: 2800 });
   expect(event.cache_write_tokens).toBeUndefined();
   expect(JSON.stringify(event)).not.toContain('private');
+});
+
+test('subagent calls count started child turns with the frozen model and effort, only after opt-in', async () => {
+  const f = fixture();
+  Object.assign(f.host, { journal: { getThread: (id: string) => id === 'child' ? { parentThreadId: 'private-parent', model: 'private/new-selection', effort: 'low' } : { parentThreadId: null } } });
+  const turn = {
+    id: 'private-turn', threadId: 'child', status: 'running', queuedAt: 100, startedAt: 250,
+    execution: { providerId: 'codex', model: 'codex/gpt-6.1-sol', effort: 'high', speed: 'standard', operation: 'delegation' },
+  } as any;
+  await f.telemetry.flush();
+  f.bus.emit('turn.started', turn);
+  await f.telemetry.flush();
+  expect(f.requests.at(-1)!.body.events.some((event: any) => event.name === 'subagent_started')).toBe(false);
+  await f.telemetry.configure('enhanced'); await f.telemetry.flush();
+  f.bus.emit('turn.started', { ...turn, threadId: 'parent' });
+  f.bus.emit('turn.started', { ...turn, execution: { ...turn.execution, operation: 'compact' } });
+  f.bus.emit('turn.started', { ...turn, execution: { ...turn.execution, operation: 'keepalive' } });
+  f.bus.emit('turn.started', turn);
+  // Follow-up and workflow retry turns are calls too, without waiting for completion.
+  f.bus.emit('turn.started', { ...turn, id: 'private-followup', execution: { ...turn.execution, effort: 'xhigh' } });
+  await f.telemetry.flush();
+  const events = f.requests.at(-1)!.body.events;
+  expect(events).toHaveLength(2);
+  expect(events[0]).toMatchObject({ name: 'subagent_started', provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', speed: 'standard' });
+  expect(events[1].effort).toBe('xhigh');
+  expect(events[0].operation).toBeUndefined();
+  expect(JSON.stringify(events)).not.toContain('private');
+});
+
+test('the relay drops basic subagent calls and rebuilds enhanced calls from closed fields', () => {
+  const ids = { eventIdentifier: 'daily', pingIdentifier: 'stable' };
+  const event = { ...telemetryEvent('turn_finished', '2.0.0'), name: 'subagent_started', provider: 'codex', model: 'codex/gpt-6.1-sol', effort: 'high', speed: 'fast', task: 'PRIVATE', parentThreadId: 'PRIVATE', input_tokens: 100, permission_mode: 'plan' };
+  expect(buildBatch('A', [event], ids, 'FR', new Date().toISOString())).toEqual([]);
+  const batch = buildBatch('B', [event], ids, 'FR', new Date().toISOString());
+  expect(batch).toHaveLength(1);
+  expect(batch[0]!.properties).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol', effort: 'high', speed: 'fast' });
+  expect(batch[0]!.properties.input_tokens).toBeUndefined();
+  expect(batch[0]!.properties.permission_mode).toBeUndefined();
+  expect(JSON.stringify(batch)).not.toContain('PRIVATE');
+  const hostile = buildBatch('B', [{ ...event, model: '/PRIVATE/model', effort: 'PRIVATE', speed: 'PRIVATE' }], ids, 'FR', new Date().toISOString())[0]!.properties;
+  expect(hostile).toMatchObject({ model: 'other', effort: 'other', speed: 'other' });
+  expect(JSON.stringify(hostile)).not.toContain('PRIVATE');
+});
+
+
+test('explicit choices count all modes once, including unchanged basic, without identifying a refusal', async () => {
+  const f = fixture();
+  for (const mode of ['basic', 'enhanced', 'off'] as const) {
+    await f.telemetry.configure(mode, true);
+    await f.telemetry.flush();
+    const choices = f.requests.filter(r => r.path === '/consent');
+    expect(choices).toHaveLength(mode === 'basic' ? 1 : mode === 'enhanced' ? 2 : 3);
+    expect(choices.at(-1)!.body).toEqual({ mode, receipt_id: expect.any(String) });
+    expect(choices.at(-1)!.body.receipt_id).toMatch(/^[0-9a-f-]{36}$/);
+    await f.telemetry.configure(mode, true);
+    await f.telemetry.flush();
+    expect(f.requests.filter(r => r.path === '/consent')).toHaveLength(choices.length);
+  }
+  f.requests.length = 0;
+  f.telemetry.track('project_added');
+  await f.telemetry.flush();
+  await f.telemetry.close();
+  expect(f.requests).toEqual([]);
+});
+
+test('startup, legacy callers, saved off and inert builds never invent a choice', async () => {
+  const f = fixture();
+  await f.telemetry.flush();
+  await f.telemetry.configure('enhanced');
+  await f.telemetry.configure('off');
+  await f.telemetry.close();
+  const restarted = new Telemetry(f.host, 'https://relay.example', f.send);
+  await restarted.close();
+  expect(f.requests.filter(r => r.path === '/consent')).toEqual([]);
+  f.requests.length = 0;
+  const inert = new Telemetry(f.host, '', f.send);
+  try {
+    for (const mode of ['basic', 'enhanced', 'off'] as const) {
+      await inert.configure(mode, true);
+      expect(JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8')).choice).toBeUndefined();
+    }
+  } finally { await inert.close(); }
+  expect(f.requests).toEqual([]);
+  const enabled = new Telemetry(f.host, 'https://relay.example', f.send);
+  try {
+    await enabled.flush();
+    // A deletion queued by Enhanced -> Off still retries, independently of choices.
+    expect(f.requests.filter(r => r.path !== '/forget')).toEqual([]);
+    f.requests.length = 0;
+    // Reporting starts only after a new explicit selection with an available relay.
+    await enabled.configure('off', true);
+    await enabled.flush();
+    expect(f.requests).toEqual([{ path: '/consent', body: { mode: 'off', receipt_id: expect.any(String) } }]);
+  } finally { await enabled.close(); }
+});
+
+test('inert mode changes discard superseded pending choices while retaining the deletion ledger', async () => {
+  for (const countChoice of [true, false]) {
+    const f = fixture(async path => Response.json({}, { status: path === '/consent' || path === '/forget' ? 502 : 200 }));
+    await f.telemetry.configure('enhanced', true);
+    await f.telemetry.flush();
+    const oldId = f.requests.find(r => r.path === '/track')!.body.install_id;
+    await f.telemetry.close();
+    f.requests.length = 0;
+    const inert = new Telemetry(f.host, '', f.send);
+    try { await inert.configure('off', countChoice); } finally { await inert.close(); }
+    const saved = JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8'));
+    expect(saved.choice).toBeUndefined();
+    expect(saved.forget).toEqual([oldId]);
+    expect(f.requests).toEqual([]);
+    const enabled = new Telemetry(f.host, 'https://relay.example', f.send);
+    try { await enabled.flush(); } finally { await enabled.close(); }
+    expect(f.requests.filter(r => r.path === '/consent')).toEqual([]);
+    expect(f.requests.some(r => r.path === '/forget' && r.body.install_id === oldId)).toBe(true);
+  }
+});
+
+test('choice retries survive restart with one receipt and acknowledgement survives another restart', async () => {
+  let fail = true;
+  const f = fixture(async path => Response.json({}, { status: path === '/consent' && fail ? 502 : 200 }));
+  await f.telemetry.configure('off', true);
+  await f.telemetry.flush();
+  await f.telemetry.close();
+  const first = f.requests.find(r => r.path === '/consent')!.body;
+  expect(JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8')).choice).toMatchObject({ mode: 'off', pending: true });
+  fail = false;
+  const restarted = new Telemetry(f.host, 'https://relay.example', f.send);
+  try { await restarted.flush(); } finally { await restarted.close(); }
+  expect(f.requests.filter(r => r.path === '/consent').every(r => JSON.stringify(r.body) === JSON.stringify(first))).toBe(true);
+  expect(JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8')).choice.pending).toBe(false);
+  f.requests.length = 0;
+  const acknowledged = new Telemetry(f.host, 'https://relay.example', f.send);
+  try { await acknowledged.configure('off', true); await acknowledged.flush(); } finally { await acknowledged.close(); }
+  expect(f.requests).toEqual([]);
+});
+
+test('latest choice replaces unsent receipt and stale responses cannot acknowledge a newer choice', async () => {
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>(resolve => { started = resolve; });
+  const settled = new Promise<void>(resolve => { release = resolve; });
+  const f = fixture(async path => {
+    if (path === '/consent' && !releaseOld) { started(); await settled; }
+    return Response.json({ ok: true });
+  });
+  let releaseOld = false;
+  await f.telemetry.configure('basic', true);
+  await f.telemetry.configure('off', true);
+  const upload = f.telemetry.flush();
+  await waiting;
+  // Saving another choice must finish even when the fetch ignores abort.
+  const changed = f.telemetry.configure('enhanced', true);
+  try {
+    const result = await Promise.race([changed.then(() => 'saved'), Bun.sleep(100).then(() => 'blocked')]);
+    expect(result).toBe('saved');
+  } finally { releaseOld = true; release(); await upload; await changed; }
+  expect(f.requests.filter(r => r.path === '/consent').map(r => r.body.mode)).toEqual(['off']);
+  expect(JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8')).choice).toMatchObject({ mode: 'enhanced', pending: true });
+  await f.telemetry.flush();
+  const receipts = f.requests.filter(r => r.path === '/consent');
+  expect(receipts.map(r => r.body.mode)).toEqual(['off', 'enhanced']);
+  expect(receipts[0]!.body.receipt_id).not.toBe(receipts[1]!.body.receipt_id);
+  await f.telemetry.configure('off', true); await f.telemetry.flush();
+  expect(f.requests.filter(r => r.path === '/consent')).toHaveLength(3);
+});
+
+test('a failed deletion cannot suppress the anonymous refusal or lose its deletion ledger', async () => {
+  const f = fixture(async path => Response.json({}, { status: path === '/forget' ? 502 : 200 }));
+  await f.telemetry.configure('enhanced');
+  await f.telemetry.flush();
+  const oldId = f.requests.find(r => r.path === '/track')!.body.install_id;
+  await f.telemetry.configure('off', true);
+  await f.telemetry.flush();
+  expect(f.requests.filter(r => r.path === '/consent').map(r => r.body)).toEqual([{ mode: 'off', receipt_id: expect.any(String) }]);
+  const saved = JSON.parse(readFileSync(join(f.dataDir, 'telemetry.json'), 'utf8'));
+  expect(saved.forget).toEqual([oldId]);
+  expect(saved.choice.pending).toBe(false);
+  expect(f.telemetry.state().pendingDeletion).toBe(true);
+});
+
+test('configure validates countChoice and the real RPC forwards explicit reporting', async () => {
+  const f = fixture();
+  expect(await thrown(f.telemetry.configure('off', 'yes' as any))).toThrow('countChoice: expected a boolean');
+  const handlers: Record<string, (params: any) => any> = {};
+  Object.assign(f.host, { telemetry: f.telemetry, router: { register: (name: string, handler: any) => { handlers[name] = handler; } } });
+  registerTelemetry(f.host);
+  await handlers['telemetry.configure']!({ mode: 'off', countChoice: true });
+  await f.telemetry.flush();
+  expect(f.requests.filter(r => r.path === '/consent')).toHaveLength(1);
+});
+
+function consentRelayEnv(): Env {
+  return {
+    RL_TRACK: { limit: async () => ({ success: true }) }, RL_RGPD: { limit: async () => ({ success: true }) },
+    RL_GLOBAL: { limit: async () => ({ success: true }) }, RL_NOTIFY: { limit: async () => ({ success: false }) },
+    HASH_SECRET: 'test-only', POSTHOG_PROJECT_API_KEY: 'test-only', POSTHOG_PERSONAL_API_KEY: '', POSTHOG_PROJECT_ID: '',
+    POSTHOG_INGEST_HOST: 'https://posthog.example', POSTHOG_API_HOST: '', ENVIRONMENT: 'test', BATCH_MAX_EVENTS: '200',
+    RESEND_API_KEY: '', ALERT_EMAIL: '', ALERT_FROM: '', UA_PREFIX: 'Boite/', ALLOWED_ORIGINS: 'https://app.example',
+  };
+}
+
+test('relay consent rebuilds anonymous events, preserves receipt UUIDs on retries and drops every extra field', async () => {
+  const uploaded: any[] = [];
+  const request = spyOn(globalThis, 'fetch').mockImplementation((async (_url, init) => {
+    uploaded.push(...JSON.parse(String(init?.body)).batch);
+    return Response.json({ ok: true });
+  }) as typeof fetch);
+  try {
+    for (const mode of ['off', 'basic', 'enhanced']) {
+      const receipt_id = crypto.randomUUID();
+      for (let retry = 0; retry < 2; retry++) {
+        const req = new Request('https://relay.example/consent', {
+          method: 'POST', headers: { 'User-Agent': 'Boite/test', 'CF-Connecting-IP': '192.0.2.1', Origin: 'https://app.example' },
+          body: JSON.stringify({ mode, receipt_id, anonymous_id: 'PRIVATE', install_id: 'PRIVATE', os: 'PRIVATE', country: 'PRIVATE', app_version: 'PRIVATE', account: 'PRIVATE', events: ['PRIVATE'] }),
+        });
+        Object.assign(req, { cf: { country: 'FR' } });
+        const res = await relay.fetch(req, consentRelayEnv(), { waitUntil: () => {} });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://app.example');
+      }
+      const events = uploaded.slice(-2);
+      for (const event of events) expect(event).toEqual({
+        event: 'consent_choice', distinct_id: 'anonymous-consent', uuid: receipt_id, timestamp: expect.any(String),
+        properties: { distinct_id: 'anonymous-consent', $process_person_profile: false, $ip: '0.0.0.0', $geoip_disable: true, choice: mode, receipt_id },
+      });
+    }
+    expect(uploaded).toHaveLength(6);
+    expect(JSON.stringify(uploaded)).not.toContain('PRIVATE');
+    expect(JSON.stringify(uploaded)).not.toContain('192.0.2.1');
+  } finally { request.mockRestore(); }
+});
+
+test('relay consent validates inputs and uses existing body, UA, per-IP and global limits', async () => {
+  const env = consentRelayEnv();
+  const request = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+  const globalLimit = spyOn(env.RL_GLOBAL, 'limit');
+  const perIp = spyOn(env.RL_TRACK, 'limit');
+  const receipt_id = crypto.randomUUID();
+  const invoke = (body: unknown, headers: Record<string, string> = {}, method = 'POST') => relay.fetch(new Request('https://relay.example/consent', {
+    method, headers: { 'User-Agent': 'Boite/test', 'CF-Connecting-IP': '192.0.2.1', ...headers },
+    ...(method === 'POST' ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
+  }), env, { waitUntil: () => {} });
+  try {
+    expect((await invoke(null, {}, 'GET')).status).toBe(405);
+    expect((await invoke({ mode: 'off', receipt_id }, { 'User-Agent': 'other' })).status).toBe(400);
+    for (const body of [null, [], '{', { mode: 'other', receipt_id }, { mode: ['off'], receipt_id }, { mode: 'off', receipt_id: 'bad' }, { mode: 'off' }])
+      expect((await invoke(body)).status).toBe(400);
+    expect((await invoke(' '.repeat(65537))).status).toBe(413);
+    expect(globalLimit).not.toHaveBeenCalled();
+    perIp.mockResolvedValue({ success: false });
+    expect((await invoke({ mode: 'off', receipt_id })).status).toBe(429);
+    expect(perIp).toHaveBeenCalledWith({ key: '192.0.2.1' });
+    perIp.mockResolvedValue({ success: true });
+    globalLimit.mockResolvedValue({ success: false });
+    expect((await invoke({ mode: 'off', receipt_id })).status).toBe(503);
+    expect(globalLimit).toHaveBeenCalledWith({ key: 'global' });
+    expect(request).not.toHaveBeenCalled();
+  } finally { request.mockRestore(); }
+});
+
+
+test('failed consent and acknowledgement writes preserve both the choice receipt and deletion ledger', async () => {
+  let obstructAck = false;
+  const f = fixture(async path => {
+    if (path === '/consent' && obstructAck) mkdirSync(join(f.dataDir, 'telemetry.json.tmp'));
+    return Response.json({ ok: true });
+  });
+  await f.telemetry.configure('enhanced');
+  await f.telemetry.flush();
+  const oldId = f.requests.find(r => r.path === '/track')!.body.install_id;
+  const file = join(f.dataDir, 'telemetry.json');
+  const before = readFileSync(file, 'utf8');
+  const temporary = `${file}.tmp`;
+  mkdirSync(temporary);
+  try {
+    expect(await thrown(f.telemetry.configure('off', true))).toThrow();
+    expect(f.telemetry.state().mode).toBe('enhanced');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+  await f.telemetry.configure('off', true);
+  obstructAck = true;
+  try {
+    await f.telemetry.flush();
+    const saved = JSON.parse(readFileSync(file, 'utf8'));
+    expect(saved.forget).toEqual([oldId]);
+    expect(saved.choice.pending).toBe(true);
+    expect(f.telemetry.state().pendingDeletion).toBe(true);
+  } finally { obstructAck = false; rmSync(temporary, { recursive: true, force: true }); }
+  await f.telemetry.flush();
+  const receipts = f.requests.filter(r => r.path === '/consent');
+  expect(receipts).toHaveLength(2);
+  expect(receipts[0]!.body).toEqual(receipts[1]!.body);
+  expect(f.requests.filter(r => r.path === '/forget').map(r => r.body.install_id)).toEqual([oldId, oldId]);
+  expect(f.telemetry.state().pendingDeletion).toBe(false);
+});
+
+
+test('a responsive mode change defers launch counters until an aborted upload settles', async () => {
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>(resolve => { started = resolve; });
+  const settled = new Promise<void>(resolve => { release = resolve; });
+  let blocked = true;
+  const f = fixture(async path => {
+    if (path === '/consent' && blocked) { started(); await settled; }
+    return Response.json({ ok: true });
+  });
+  await f.telemetry.configure('off', true);
+  const file = join(f.dataDir, 'telemetry.json');
+  // A fresh saved Off state has never emitted usage counters.
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  saved.firstRun = false; saved.pingDay = '';
+  writeFileSync(file, JSON.stringify(saved));
+  // Close the original without sending its receipt through the gated transport.
+  blocked = false;
+  await f.telemetry.close();
+  writeFileSync(file, JSON.stringify(saved));
+  blocked = true;
+  f.requests.length = 0;
+  const telemetry = new Telemetry(f.host, 'https://relay.example', f.send);
+  cleanups.unshift(async () => { await telemetry.close(); });
+  const upload = telemetry.flush();
+  await waiting;
+  const changed = telemetry.configure('basic', true);
+  try {
+    expect(await Promise.race([changed.then(() => 'saved'), Bun.sleep(100).then(() => 'blocked')])).toBe('saved');
+    const during = JSON.parse(readFileSync(file, 'utf8'));
+    expect(during.firstRun).toBe(false);
+    expect(during.pingDay).toBe('');
+  } finally { blocked = false; release(); await upload; await changed; }
+  try {
+    await telemetry.flush();
+    const events = f.requests.filter(r => r.path === '/track').flatMap(r => r.body.events).map(event => event.name);
+    expect(events.filter(name => name === 'first_run')).toHaveLength(1);
+    expect(events.filter(name => name === 'app_launched')).toHaveLength(1);
+    expect(events.filter(name => name === 'ping')).toHaveLength(1);
+  } finally { await telemetry.close(); }
 });

@@ -21,6 +21,24 @@ const UNITS: Partial<Record<RequestableSetting, { unit: string; display: 'short'
   threadDeletionRetentionDays: { unit: 'day', display: 'long' },
 };
 
+/**
+ * The experiments that left the Experiments page, for a card asked about one
+ * before: the name the user knows it by now, and whether a switch is left.
+ */
+function graduated(key: string): { title: string; switched: boolean } | null {
+  const id = key.startsWith('experiment.') ? key.slice('experiment.'.length) : null;
+  if (id === 'open-chat-links') return { title: strings.features.openChatLinks.title, switched: true };
+  if (id === 'preview-comments') return { title: strings.features.previewComments.title, switched: true };
+  if (id === 'edge-scrollbars') return { title: strings.features.edgeScrollbars.title, switched: true };
+  if (id === 'press-preload') return { title: strings.settingRequest.loadOnPress, switched: false };
+  return null;
+}
+
+/** What a card about a graduated experiment says instead of offering Apply. */
+export function retiredHint(key: string): string {
+  return graduated(key)?.switched === false ? strings.settingRequest.retiredAlwaysOn : strings.settingRequest.retired;
+}
+
 /** The card's title, in the dock's row and on the card. */
 export function settingHeading(setting: SettingAsk): string {
   const words = strings.settingRequest;
@@ -30,6 +48,8 @@ export function settingHeading(setting: SettingAsk): string {
 export function settingLabel(key: RequestableKey): string {
   const experiment = experimentOf(key);
   if (experiment !== null) return experimentCopy()[experiment].title;
+  const former = graduated(key);
+  if (former !== null) return former.title;
   return strings.settingRequest.keys[key as RequestableSetting] ?? key;
 }
 
@@ -115,10 +135,14 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
     limits: strings.protection.limits,
     tasks: strings.protection.tasks,
     machines: strings.machines.heading,
+    updates: strings.appUpdate.updates,
+    'agent-updates': strings.harnessUpdates.heading,
     phone: strings.phone.heading,
     execution: settings.execution,
     origins: strings.machines.browserOrigins,
     'auto-compact': settings.autoCompact,
+    'device-stream': settings.deviceStream,
+    'background-compaction': settings.backgroundCompaction,
   };
   return labels[section] ?? null;
 }
@@ -126,7 +150,7 @@ export function settingsSectionLabel(section: string, providers: readonly Provid
 /** Pages a paired device's Settings leaves out: `OWNER_TABS` in `SettingsShell.svelte`. */
 const OWNER_PAGES: readonly SettingsPage[] = ['accounts', 'plugins', 'resources', 'brain'];
 /** Cards of the shared pages that only the owner's Settings draws there. */
-const OWNER_SECTIONS: readonly string[] = ['worktrees', 'privacy', 'execution', 'origins', 'auto-compact'];
+const OWNER_SECTIONS: readonly string[] = ['worktrees', 'privacy', 'execution', 'origins', 'auto-compact', 'device-stream', 'background-compaction'];
 /**
  * What a phone browser's Settings (`MobileSettings.svelte`) draws: the pages
  * it opens whole, then the cards it has of the others. Keep it in step with

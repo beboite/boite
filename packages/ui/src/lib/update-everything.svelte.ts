@@ -2,7 +2,7 @@ import type { DesktopUpdateStatus, HarnessUpdate, Os, ProviderId, ServerUpdateSt
 import { appUpdater, showAppUpdateUi, type UpdateChannel, type UpdatePhase } from './app-update.svelte';
 import { harnessOffered } from './machine-updates';
 import { strings } from './strings';
-import { workspace, type Machine } from './workspace.svelte';
+import { listedName, workspace, type Machine } from './workspace.svelte';
 
 /** One machine as the update-everything button reads it. */
 export interface MachineReading {
@@ -232,7 +232,7 @@ function readingOf(machine: Machine): MachineReading {
   const store = machine.store;
   return {
     id: machine.id,
-    label: machine.label,
+    label: listedName(machine),
     local: isLocal(machine),
     ready: store.connection === 'ready' && store.owner,
     server: store.localCore ? null : store.serverUpdater.snapshot,

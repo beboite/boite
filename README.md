@@ -3,13 +3,14 @@
 </p>
 <h1 align="center">boite <sub>[bwat]</sub></h1>
 <p align="center">
-  <a href="https://github.com/beboite/boite/releases">Download</a> ·
+  <a href="https://github.com/mtsu-dev/boite/releases">Download page</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="docs/server.md">Self-host</a>
 </p>
 
 boite is a desktop app and self-hosted server for coding agents. Run Claude Code,
 Codex or [another supported agent](docs/providers.md) with your existing accounts.
+Keep your projects, conversations and agents together, across your computers and phone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/boite-dark.png" />
@@ -28,23 +29,37 @@ Codex or [another supported agent](docs/providers.md) with your existing account
 ## Features
 
 - Choose a provider, model and account for each conversation.
-- Read streamed responses and tool calls beside files, diffs and previews.
-- Isolate tasks in Git worktrees and follow delegated agents.
-- Add a phone to your machines with one code, or connect a headless server.
+- Read streamed responses and tool calls beside files, diffs, previews and an agent's browser.
+- Isolate tasks in Git worktrees, delegate to subagents and run workflows.
+- Follow the same work from your desktop, a paired phone or the Android app.
+- Connect machines and headless servers; each runs agents beside its own projects.
+- Enable experimental bots for ongoing work, scheduled routines and project monitoring.
 
 ## Get started
 
-Boite is open source and in beta. Desktop builds are available for Windows,
-macOS and Linux, including Apple Silicon and Linux ARM64.
+Boite is open source and in beta. The [download page](https://github.com/mtsu-dev/boite/releases)
+lists builds for Windows, macOS and Linux, including Apple Silicon and Linux ARM64.
+New release notes put the download links under each platform, above the changelog.
 
-1. [Download a desktop release](https://github.com/beboite/boite/releases).
+> [!WARNING]
+> Current downloads are nightly prereleases. Nightly builds are unstable and may contain
+> bugs or unfinished changes. Back up your Boite data before installing or switching channels.
+
+1. Open the [download page](https://github.com/mtsu-dev/boite/releases) and choose your system and processor.
 2. Install and sign in to your agents, then connect them in Settings, Providers.
 3. Open a project, choose a model and start a conversation.
 
-See [installation and platform notes](docs/portability.md),
-[phone pairing](docs/phone.md) or [the self-hosting guide](docs/server.md).
-Nightly releases use the same projects and accounts as the regular channel;
-[desktop updates](docs/updates.md) explains switching between them.
+See [installation and platform notes](docs/portability.md), [phone pairing](docs/phone.md)
+or [the Android app](docs/android.md). To run agents on another machine, use the
+[self-hosting guide](docs/server.md) or [Android server setup](docs/android-server.md).
+[Desktop updates](docs/updates.md) explains channels and installing updates.
+
+## Documentation
+
+The [documentation index](docs/README.md) groups guides by task. Start with
+[accounts and agent setup](docs/accounts.md), [projects and machines](docs/machines.md)
+or [bots](docs/bots.md). [Architecture](docs/architecture.md) and
+[development](docs/development.md) cover the implementation.
 
 ## Development
 

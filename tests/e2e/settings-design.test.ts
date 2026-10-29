@@ -119,7 +119,7 @@ test("settings home keeps every tile's words inside it and centres its column", 
       expect({ width, heights: layout.heights }).toEqual({ width, heights: [layout.heights[0]] });
       if (width >= 1440) expect(Math.abs(layout.left - layout.right)).toBeLessThanOrEqual(2);
     }
-    // A page with its own root styles (Machines, a machine's settings) centres the same way.
+    // A page with its own root styles (Machines, Protection under its machine bar) centres the same way.
     await page.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 900, deviceScaleFactor: 1, mobile: false });
     const centred = async (selector: string) => {
       const sides = JSON.parse(String(await page.evaluate(`(() => {
@@ -132,11 +132,12 @@ test("settings home keeps every tile's words inside it and centres its column", 
     await page.click("[data-testid=settings-tab-machines]");
     await page.waitFor('document.querySelector("[data-testid=machines-page] > section")');
     await centred("[data-testid=machines-page] > section");
-    await page.click("[data-testid=machine-details-toggle]");
-    await page.waitFor('!document.querySelector("[data-testid=machine-settings-open]")?.closest("[inert]")');
-    await page.click("[data-testid=machine-settings-open]");
-    await page.waitFor('document.querySelector("[data-testid=machine-settings] > header")');
-    await centred("[data-testid=machine-settings] > header");
+    // A page under the machine bar centres too, and the bar starts where the page does.
+    await page.click("[data-testid=settings-tab-resources]");
+    await page.waitFor('document.querySelector("[data-testid=settings-machine-bar] [data-testid=settings-machine]") && document.querySelector("[data-testid=resources-page] > *")');
+    await centred("[data-testid=resources-page] > *");
+    const edges = JSON.parse(String(await page.evaluate(`JSON.stringify([document.querySelector('[data-testid=settings-machine]').getBoundingClientRect().left, document.querySelector('[data-testid=resources-page] > *').getBoundingClientRect().left])`)));
+    expect(Math.abs(edges[0] - edges[1])).toBeLessThanOrEqual(2);
   } finally {
     await page.close();
     await server.close();

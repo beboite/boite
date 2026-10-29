@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { crc32, deflateSync } from 'node:zlib';
-import type { Message, RpcResult } from '@boite/contracts';
+import { INITIAL_PAGE_BYTES, type Message, type RpcResult } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -96,7 +96,77 @@ const previews = (threadId: string) =>
   (harness.core.journal.db.query('SELECT COUNT(*) AS n FROM media_previews WHERE thread_id = ?').get(threadId) as { n: number }).n;
 
 describe('deferred pictures', () => {
-  test('a light page gives each deferred picture its size and, from the first opening, its blur', async () => {
+  for (const method of ['threads.get', 'messages.list'] as const) {
+    test(`${method} answers while image previews are still being prepared`, async () => {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client);
+      seed(threadId);
+      const placeholder = Bun.Image.prototype.placeholder;
+      let entered = false;
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      Bun.Image.prototype.placeholder = async function () {
+        entered = true;
+        await gate;
+        return placeholder.call(this);
+      };
+      try {
+        const page = method === 'threads.get'
+          ? client.call(method, { threadId, compactImages: true, open: {} })
+          : client.call(method, { threadId, from: 0, compactImages: true });
+        await waitFor(() => entered);
+        // Another RPC can complete while the worker is held. The page must already be available too.
+        const first = await Promise.race([page.then(() => 'page'), client.call('settings.get', {}).then(() => 'barrier')]);
+        expect(first).toBe('page');
+        const shot = (await page).messages.find(message => message.id === 'msg_shot')!.parts[1];
+        expect(shot).toMatchObject({ data: '', dataDeferred: true, width: 320, height: 180 });
+        expect(shot).not.toHaveProperty('preview');
+      } finally {
+        release();
+        Bun.Image.prototype.placeholder = placeholder;
+        await waitFor(() => previews(threadId) >= 2);
+      }
+    });
+  }
+
+  test('video and audio bytes stay out of light pages and live events', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const data = Buffer.alloc(2 * 1024 * 1024, 97).toString('base64');
+    const parts: Message['parts'] = [
+      { type: 'text', text: 'The conversation is readable before the media arrives.' },
+      { type: 'file', mimeType: 'video/mp4', data, name: 'walkthrough.mp4' },
+      { type: 'file', mimeType: 'audio/mpeg', data, name: 'notes.mp3' },
+    ];
+    harness.core.journal.putMessage({ id: 'msg_media', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 2_000, parts });
+    const page = await client.call('threads.get', { threadId, compactFiles: true, compactImages: true, open: {} });
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(INITIAL_PAGE_BYTES);
+    expect(page.messages[0]!.parts[0]).toEqual(parts[0]);
+    for (const partIndex of [1, 2]) {
+      const part = parts[partIndex]!;
+      expect(page.messages[0]!.parts[partIndex]).toMatchObject({ data: '', dataDeferred: true, bytes: 2 * 1024 * 1024 });
+      const event = client.next('message.part', event => event.messageId === 'msg_live_media');
+      harness.core.bus.emit('message.part', { threadId, messageId: 'msg_live_media', partIndex, part });
+      expect((await event).part).toMatchObject({ data: '', dataDeferred: true });
+      const ticket = await client.call('messages.attachment', { threadId, messageId: 'msg_media', partIndex, ticket: true });
+      expect(ticket.data).toBe('');
+      expect(ticket.url).toMatch(/^\/file\//);
+      const response = await fetch(`${harness.url}${ticket.url}`);
+      expect(response.headers.get('content-type')).toBe(part.type === 'file' ? part.mimeType : '');
+      expect(Buffer.from(await response.arrayBuffer()).toString('base64')).toBe(data);
+      const range = await fetch(`${harness.url}${ticket.url}`, { headers: { range: 'bytes=100-199' } });
+      expect(range.status).toBe(206);
+      expect(range.headers.get('content-range')).toBe('bytes 100-199/2097152');
+      expect((await range.arrayBuffer()).byteLength).toBe(100);
+      const tail = await fetch(`${harness.url}${ticket.url}`, { headers: { range: 'bytes=-64' } });
+      expect(tail.status).toBe(206);
+      expect((await tail.arrayBuffer()).byteLength).toBe(64);
+      const invalid = await fetch(`${harness.url}${ticket.url}`, { headers: { range: 'bytes=2097152-' } });
+      expect(invalid.status).toBe(416);
+    }
+  });
+
+  test('a light page gives each deferred picture its size, and later reads reuse its background blur', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     seed(threadId);
@@ -105,20 +175,24 @@ describe('deferred pictures', () => {
     const light = await client.call('threads.get', { threadId, compactImages: true });
     const shot = light.messages.find((message) => message.id === 'msg_shot')!.parts[1];
     expect(shot).toMatchObject({ type: 'image', data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
-    expect(shot?.type === 'image' && shot.preview?.startsWith('data:image/png;base64,')).toBe(true);
     const tall = light.messages.find((message) => message.id === 'msg_tall')!.parts[1];
     expect(tall).toMatchObject({ width: 90, height: 160 });
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1 })).data).toBe(SHOT);
 
+    await waitFor(() => previews(threadId) === 2);
+    const ready = await client.call('threads.get', { threadId, compactImages: true });
+    const blurred = ready.messages.find(message => message.id === 'msg_shot')!.parts[1];
+    expect(blurred?.type === 'image' && blurred.preview?.startsWith('data:image/png;base64,')).toBe(true);
+
     // An older page of the same thread carries them too.
     const older = await client.call('messages.list', { threadId, before: 'msg_tall', compactImages: true });
-    expect(older.messages[0]!.parts[1]).toMatchObject({ width: 320, height: 180, preview: (shot as { preview: string }).preview });
+    expect(older.messages[0]!.parts[1]).toMatchObject({ width: 320, height: 180, preview: (blurred as { preview: string }).preview });
     // Without the flag nothing changes: the bytes, and no size or blur.
     const full = (await client.call('threads.get', { threadId })).messages.find((message) => message.id === 'msg_shot')!.parts[1];
     expect(full).toEqual({ type: 'image', mimeType: 'image/png', data: SHOT, alt: 'msg_shot.png' });
   });
 
-  test("an agent's attached picture is deferred with its size and blur, while its video keeps its bytes", async () => {
+  test("an agent's picture and video are deferred, with a background blur kept for later picture reads", async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     const video = Buffer.from('a short clip').toString('base64');
@@ -132,8 +206,10 @@ describe('deferred pictures', () => {
     const light = await client.call('threads.get', { threadId, compactFiles: true, compactImages: true });
     const [picture, clip] = light.messages.find((message) => message.id === 'msg_attached')!.parts;
     expect(picture).toMatchObject({ type: 'file', name: 'street.png', data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
-    expect(picture?.type === 'file' && picture.preview?.startsWith('data:image/png;base64,')).toBe(true);
-    expect(clip).toEqual({ type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' });
+    expect(clip).toEqual({ type: 'file', mimeType: 'video/mp4', data: '', dataDeferred: true, bytes: 12, name: 'drive.mp4' });
+    await waitFor(() => previews(threadId) === 1);
+    const ready = await client.call('threads.get', { threadId, compactFiles: true, compactImages: true });
+    expect(ready.messages[0]!.parts[0]).toMatchObject({ preview: expect.stringContaining('data:image/png;base64,') });
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_attached', partIndex: 0 })).data).toBe(SHOT);
   });
 
@@ -166,7 +242,7 @@ describe('deferred pictures', () => {
     expect(paged?.type === 'image' && paged.preview?.startsWith('data:image/png;base64,')).toBe(true);
     expect((await light.call('messages.attachment', { threadId, messageId: sent.id, partIndex: sent.parts.indexOf(image!) })).data).toBe(SHOT);
 
-    // An agent's picture part is deferred too; its video keeps its bytes.
+    // An agent's picture and video are deferred in live events too.
     const video = Buffer.from('a short clip').toString('base64');
     const parts = [
       { type: 'file' as const, mimeType: 'image/png', data: SHOT, name: 'street.png' },
@@ -178,7 +254,7 @@ describe('deferred pictures', () => {
       harness.core.bus.emit('message.part', { threadId, messageId: 'msg_agent', partIndex, part });
       expect((await wholePart).part).toEqual(part);
       if (partIndex === 0) expect((await lightPart).part).toMatchObject({ data: '', dataDeferred: true, width: 320, height: 180 });
-      else expect((await lightPart).part).toEqual(part);
+      else expect((await lightPart).part).toMatchObject({ ...part, data: '', dataDeferred: true, bytes: 12 });
     }
   });
 
@@ -387,10 +463,9 @@ describe('deferred pictures', () => {
     const { threadId } = await echoThread(harness, client);
     seed(threadId);
     await client.call('threads.get', { threadId, compactImages: true });
-    // A blur per picture, and the mark that each message was looked at.
-    expect(previews(threadId)).toBe(4);
+    await waitFor(() => previews(threadId) === 2);
     harness.core.journal.db.transaction(() => harness.core.journal.truncateMessages(threadId, harness.core.journal.messageRowid(threadId, 'msg_tall')!))();
-    expect(previews(threadId)).toBe(2);
+    expect(previews(threadId)).toBe(1);
     harness.core.journal.deleteThreads([threadId]);
     expect(previews(threadId)).toBe(0);
   });

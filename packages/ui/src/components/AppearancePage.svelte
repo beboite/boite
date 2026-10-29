@@ -244,11 +244,23 @@
       <span class="text ui-label">{strings.settings.expandDiffs}</span>
       <input type="checkbox" role="switch" checked={chatPrefs.expandDiffs} data-testid="chat-expand-diffs" onchange={event => setChatPref('expandDiffs', event.currentTarget.checked)} />
     </label>
+    {#if !phone}
+      <label class="switch-row" for="{uid}-edge-scrollbars">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-edge-scrollbars-name">{strings.features.edgeScrollbars.title}</span><InfoTip topic={strings.features.edgeScrollbars.title} text={strings.features.edgeScrollbars.hint} /></span>
+        <input id="{uid}-edge-scrollbars" aria-labelledby="{uid}-edge-scrollbars-name" type="checkbox" role="switch" checked={featureOn('edge-scrollbars')} data-testid="setting-edge-scrollbars"
+          onchange={event => setFeature('edge-scrollbars', event.currentTarget.checked)} />
+      </label>
+    {/if}
     {#if phone}
       <label class="switch-row" for="{uid}-chat-artifacts">
         <span class="text ui-label-box"><span class="ui-label" id="{uid}-chat-artifacts-name">{strings.features.chatArtifacts.title}</span><InfoTip topic={strings.features.chatArtifacts.title} text={strings.features.chatArtifacts.hint} /></span>
         <input id="{uid}-chat-artifacts" aria-labelledby="{uid}-chat-artifacts-name" type="checkbox" role="switch" checked={featureOn('chat-artifacts')} data-testid="setting-chat-artifacts"
           onchange={event => setFeature('chat-artifacts', event.currentTarget.checked)} />
+      </label>
+      <label class="switch-row" for="{uid}-preview-comments">
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-preview-comments-name">{strings.features.previewComments.title}</span><InfoTip topic={strings.features.previewComments.title} text={strings.features.previewComments.hint} /></span>
+        <input id="{uid}-preview-comments" aria-labelledby="{uid}-preview-comments-name" type="checkbox" role="switch" checked={featureOn('preview-comments')} data-testid="setting-preview-comments"
+          onchange={event => setFeature('preview-comments', event.currentTarget.checked)} />
       </label>
     {/if}
     {#if hasMaterial}

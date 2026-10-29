@@ -8,9 +8,27 @@ import type { AgentAddress, AgentLetter, AgentRelation } from '@boite/contracts'
 import { excerpt, type LetterContext } from './coordination-letter.ts';
 import type { Core } from './core.ts';
 
+export function projectName(core: Core, threadId: string): string | undefined {
+  const projectId = core.journal.getThread(threadId)?.projectId;
+  return projectId ? core.journal.getProject(projectId)?.name.slice(0, 200) : undefined;
+}
+
+/** Old local letters predate project metadata. Fill it without rewriting history. */
+export function withProjects(core: Core, local: string, letter: AgentLetter): AgentLetter {
+  return { ...letter,
+    from: letter.from.coreId === local && letter.from.project === undefined ? { ...letter.from, project: projectName(core, letter.from.threadId) } : letter.from,
+    toProject: letter.toProject ?? (letter.to.coreId === local ? projectName(core, letter.to.threadId) : undefined),
+  };
+}
+
 /** How `other` relates to `threadId`: who started whom, delegation, the agent the project is entrusted to, else where it is. */
 export function relationOf(core: Core, localCore: string, threadId: string, other: AgentAddress): AgentRelation {
-  if (other.coreId !== 'local' && other.coreId !== localCore) return 'machine';
+  if (other.coreId !== 'local' && other.coreId !== localCore) {
+    // `boite thread new --machine`: the two ends still know who started whom.
+    if (core.threads.spawns.originCore(threadId) === other.coreId && core.threads.spawns.originOf(threadId)?.threadId === other.threadId) return 'starter';
+    if (core.threads.spawns.startedOn(threadId, other.coreId, other.threadId)) return 'started';
+    return 'machine';
+  }
   const self = core.journal.getThread(threadId);
   const peer = core.journal.getThread(other.threadId);
   if (!self || !peer) return 'other-project';
@@ -59,7 +77,7 @@ export function senderContext(core: Core, localCore: string, threadId: string): 
     // A row older than its field, or a peer that left it out, must not stop delivery.
     const resources = typeof letter.from.resources === 'string' ? letter.from.resources.trim() : '';
     // An ordinary letter reached this thread because its sender is a contact it may already read with
-    // `boite agents read`; the conversation of the agent a project is entrusted to spans the user's other work, so it says nothing more.
+    // `boite threads read`; the conversation of the agent a project is entrusted to spans the user's other work, so it says nothing more.
     const about = resources ? excerpt(resources) : local && letter.origin !== 'resident' ? openingRequest(core, letter.from.threadId) : undefined;
     const answered = letter.replyTo
       ? core.journal.db.query("SELECT data FROM coordination_letters WHERE id = ? AND thread_id = ? AND direction = 'out'").get(letter.replyTo, threadId) as { data: string } | null

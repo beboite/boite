@@ -380,3 +380,52 @@ test('a release another machine asks for installs without a dialog, and only the
   expect(native.install).toHaveBeenCalledOnce();
   stop();
 });
+
+test('with autoInstallUpdates, the timer downloads the release it found and installs it quietly, and a busy machine waits for the next tick', async () => {
+  const clock = new FakeClock();
+  let busy = true;
+  const native = backend({
+    check: vi.fn(async (channel) => snapshot({ phase: 'available', channel, version: '2.1.0' })),
+    download: vi.fn(async () => snapshot({ phase: 'ready', version: '2.1.0' })),
+    installQuietly: vi.fn(async () => !busy)
+  });
+  const updater = new AppUpdater(native, clock, () => true);
+  updater.autoInstall = true;
+  const stop = updater.start();
+  await updater.settled();
+
+  // The first tick checks, downloads and asks; the shell answers that it is not the moment.
+  clock.runTimeouts();
+  await vi.waitFor(() => expect(native.installQuietly).toHaveBeenCalledTimes(1));
+  expect(native.check).toHaveBeenCalledTimes(1);
+  expect(native.download).toHaveBeenCalledTimes(1);
+  expect(native.install).not.toHaveBeenCalled();
+  expect(updater.snapshot.phase).toBe('ready');
+
+  // The next tick tries the ready release again without checking or downloading it anew.
+  busy = false;
+  [...clock.intervals.values()][0]!();
+  await vi.waitFor(() => expect(native.installQuietly).toHaveBeenCalledTimes(2));
+  expect(native.check).toHaveBeenCalledTimes(1);
+  expect(native.download).toHaveBeenCalledTimes(1);
+  expect(native.install).not.toHaveBeenCalled();
+  stop();
+});
+
+test('without autoInstallUpdates, a release found by the timer only waits to be asked for', async () => {
+  const clock = new FakeClock();
+  const native = backend({
+    check: vi.fn(async (channel) => snapshot({ phase: 'available', channel, version: '2.1.0' })),
+    installQuietly: vi.fn(async () => true)
+  });
+  const updater = new AppUpdater(native, clock, () => true);
+  const stop = updater.start();
+  await updater.settled();
+  clock.runTimeouts();
+  await updater.settled();
+  expect(updater.snapshot.phase).toBe('available');
+  expect(await updater.installByItself()).toBe(false);
+  expect(native.download).not.toHaveBeenCalled();
+  expect(native.installQuietly).not.toHaveBeenCalled();
+  stop();
+});

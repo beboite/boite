@@ -47,17 +47,19 @@ export type SubscriptionProxyTarget = { id: ProviderId; protocol: Protocol };
  * Whether a subscription proxy serves this provider: one of that kind, or one
  * of either kind when none is named. Core and clients decide alike.
  */
-export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined, kind?: SubscriptionProxy['kind']): boolean {
+export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined, kind?: SubscriptionProxy['kind'], quotas?: Pick<SubscriptionProxyQuotas, 'providers' | 'nativeMuse'> | null): boolean {
   if (provider === null || provider === undefined) return false;
+  // Muse's native subscription is a distinct Meta pool; an OpenCode Go Muse model does not connect it.
+  if (provider.id === 'muse') return kind === 'douane' && quotas?.nativeMuse === true && quotas.providers.some(pool => pool.providerId === 'meta' && pool.entries.some(entry => entry.status !== 'disabled'));
   if (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id)) return true;
   const kinds = kind === undefined ? Object.values(SUBSCRIPTION_PROXY_KIND_PROVIDERS) : [SUBSCRIPTION_PROXY_KIND_PROVIDERS[kind]];
   return kinds.some((ids) => ids.includes(provider.id));
 }
 
 /** The enabled proxy that serves this provider, or null. */
-export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined): SubscriptionProxy | null {
+export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined, quotas?: Pick<SubscriptionProxyQuotas, 'providers' | 'nativeMuse'> | null): SubscriptionProxy | null {
   const proxy = settings?.subscriptionProxy;
-  return proxy?.enabled && subscriptionProxyServes(provider, proxy.kind) ? proxy : null;
+  return proxy?.enabled && subscriptionProxyServes(provider, proxy.kind, quotas) ? proxy : null;
 }
 
 export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {
@@ -149,6 +151,11 @@ export interface SubscriptionProxyRpcMethods {
   'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
   /** Owner-only, atomic configuration and optional private-key update; an omitted key keeps it. */
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
+  /**
+   * Turns the configured gateway on or off and nothing else: its kind, URLs
+   * and key stay as the owner saved them. A paired phone may call it.
+   */
+  'subscriptionProxy.setEnabled': { params: { enabled: boolean }; result: Settings };
   /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
   'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
   /** Owner-only. The logins and OpenCode keys of this machine's accounts Douane could take, without their values. */

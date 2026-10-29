@@ -1,12 +1,15 @@
-import type { ActivityTurn, AgentTask, Attachment, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
+import { threadActive } from '@boite/contracts';
+import type { ActivityTurn, AgentTask, Attachment, ComposerChoice, GoalReview, MessagePart, RpcParams, ThreadActivity, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
+import { isAgentHeld } from './agents/runtime.ts';
 import { activityResult, parseVerdict, reviewPrompt } from './activity-prompt.ts';
 import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import type { ChildRoute } from './delegation/routes.ts';
 import { GoalTracker, modelRead, newChecklist } from './goal-tracker.ts';
 import type { ProviderProbe } from './providers/probe.ts';
+import { needsModelDiscovery } from './threads/selection.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
@@ -41,6 +44,7 @@ export class ActivityStore {
   private readonly readingModels = new Set<string>();
   /** The goal generation and round whose reviewer already had its models read: one read per review. */
   private readonly modelsRead = new Map<string, string>();
+  private readonly readingTurnModels = new Set<string>();
   private closed = false;
 
   /** `threadJsonChecked`: the core validated visible thread JSON just before, with nothing written since. */
@@ -76,6 +80,10 @@ export class ActivityStore {
         const event = payload as { threadId: string; part: MessagePart };
         this.observeTool(event.threadId, event.part);
       }
+    });
+    // An archive or removal that rolls back pauses, stops and forgets nothing.
+    core.bus.onCommitted((name, payload) => {
+      if (this.closed) return;
       if (name === 'thread.updated') {
         const thread = payload as { id: string; archived: boolean };
         if (thread.archived) this.pauseAll(thread.id);
@@ -94,6 +102,7 @@ export class ActivityStore {
         this.states.delete(threadId);
         core.journal.deleteSetting(`activity:${threadId}`);
         core.journal.deleteSetting(`activity-input:${threadId}`);
+        core.journal.deleteSetting(`activity:shared:${threadId}`);
       }
     });
   }
@@ -134,9 +143,8 @@ export class ActivityStore {
     if (goal?.checklist && goal.status !== 'complete') this.tracker.message(threadId, text);
   }
 
-  set(params: RpcParams<'threads.activity.set'>): ThreadActivity {
+  set(params: RpcParams<'threads.activity.set'>, sharedClaim?: {sharedProjectId: string; cardId: string; claimId: string}, executionChoice?: ComposerChoice): ThreadActivity {
     const thread = this.core.journal.getThread(params.threadId);
-    if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
     const attachments = params.attachments ?? [];
     checkAttachmentArray(attachments);
@@ -150,18 +158,26 @@ export class ActivityStore {
       this.stopReview(params.threadId);
       this.bounced.delete(params.threadId);
       state.goal = params.goal === null ? null : { objective: params.goal.objective.trim(), status: 'active', iterations: 0, error: null, ...(params.goal.review ? { review: newReview(), checklist: newChecklist() } : {}) };
+      // This second argument is core-only. An ordinary RPC goal replacement cannot inherit another claim's stop authority.
+      if (sharedClaim && params.goal) this.core.journal.setSetting(`activity:shared:${params.threadId}`, sharedClaim);
+      else this.core.journal.deleteSetting(`activity:shared:${params.threadId}`);
     }
     if (params.loop !== undefined) {
       if (params.loop !== null) validateLoop(params.loop);
       state.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
     }
     const pending = this.pendingAttachments(params.threadId);
+    const choices = (this.core.journal.getSetting(`activity-choice:${params.threadId}`) as Partial<Record<'goal' | 'loop', ComposerChoice>> | undefined) ?? {};
     for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
       const key = `${params.threadId}:${kind}`;
       this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
       if (params[kind] && attachments.length) pending[kind] = structuredClone(attachments);
       else delete pending[kind];
+      if (params[kind] && executionChoice) choices[kind] = executionChoice;
+      else delete choices[kind];
     }
+    if (Object.keys(choices).length) this.core.journal.setSetting(`activity-choice:${params.threadId}`, choices);
+    else this.core.journal.deleteSetting(`activity-choice:${params.threadId}`);
     this.saveAttachments(params.threadId, pending);
     this.states.set(params.threadId, state);
     this.save(params.threadId);
@@ -325,12 +341,12 @@ export class ActivityStore {
     return result;
   }
 
-  private run(threadId: string): void {
-    if (this.closed) return;
+  private run(threadId: string, discovered?: string): void {
+    if (this.closed || this.readingTurnModels.has(threadId)) return;
     const thread = this.core.journal.getThread(threadId);
     const state = this.states.get(threadId);
     if (!thread || !state || thread.archived) return;
-    if (['running', 'queued', 'waiting'].includes(thread.status)) return;
+    if (threadActive(thread.status)) return;
     const kind = state.loop?.status === 'active' && (state.loop.nextRunAt ?? 0) <= Date.now() ? 'loop' : state.goal?.status === 'active' ? 'goal' : null;
     if (!kind) {
       if (state.loop?.status === 'active') this.schedule(threadId, Math.max(0, (state.loop.nextRunAt ?? Date.now()) - Date.now()));
@@ -344,13 +360,33 @@ export class ActivityStore {
     // Only the first turn after a review carries its findings; later ones have them in the history.
     const feedback = review && last && last.verdict !== 'pass' && review.delivered < review.verdicts.length ? { round: last.round, feedback: last.summary } : undefined;
     const list = kind === 'goal' ? state.goal!.checklist : undefined;
-    const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
     const prompt = `/${review ? 'goal2' : kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
     const iteration = state[kind]!.iterations + 1;
     try {
       const pending = this.pendingAttachments(threadId);
+      const choice = (this.core.journal.getSetting(`activity-choice:${threadId}`) as Partial<Record<'goal' | 'loop', ComposerChoice>> | undefined)?.[kind];
+      const provider = choice ? this.core.providers.require(choice.providerId) : null;
+      const generation = this.generations.get(`${threadId}:${kind}`) ?? 0;
+      const attempt = JSON.stringify([kind, generation, choice]);
+      if (choice && this.probe && provider && discovered !== attempt && needsModelDiscovery(provider, choice.accountId, choice.model, choice.effort, choice.speed ?? null)) {
+        const read = this.probe({ providerId: choice.providerId, accountId: choice.accountId, ...(provider.protocol === 'acp' && choice.model !== null && choice.effort !== null ? { model: choice.model } : {}) });
+        this.readingTurnModels.add(threadId);
+        void read.then(() => {
+          this.readingTurnModels.delete(threadId);
+          // Validate this attempt once, even when the target read has no effort
+          // metadata. A changed activity still discovers its own selection.
+          this.run(threadId, attempt);
+        }, error => {
+          this.readingTurnModels.delete(threadId);
+          if (this.closed || !this.core.journal.getThread(threadId)) return;
+          if (generation === (this.generations.get(`${threadId}:${kind}`) ?? 0) && this.states.get(threadId)?.[kind]?.status === 'active') this.stop(threadId, messageOf(error));
+          else this.schedule(threadId, 0);
+        });
+        return;
+      }
+      const checklist = list?.items.length ? { open: list.items.filter(item => item.status === 'open').map(item => item.text), bounced: this.bounced.delete(threadId) } : undefined;
       const turnActivity: ActivityTurn = { kind, iteration, ...(feedback ? { review: feedback } : {}), ...(checklist ? { checklist } : {}) };
-      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, turnActivity);
+      const turn = this.core.threads.startTurn(threadId, { prompt, attachments: pending[kind] ?? [] }, { kind: 'goal', activity: turnActivity }, { choice });
       delete pending[kind];
       this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });
@@ -363,7 +399,11 @@ export class ActivityStore {
         current.loop!.history = [...(current.loop!.history ?? []), { iteration, turnId: turn.id, status: 'running' as const, summary: '', startedAt: Date.now(), finishedAt: null }].slice(-50);
       }
       this.save(threadId);
-    } catch (error) { this.stop(threadId, error instanceof Error ? error.message : String(error)); }
+    } catch (error) {
+      // A persistent agent that is paused or out of budget: the goal waits for it rather than ending.
+      if (isAgentHeld(error)) { this.core.agentRuntime.whenAdmitted(threadId, 'goal', () => this.run(threadId)); return; }
+      this.stop(threadId, error instanceof Error ? error.message : String(error));
+    }
   }
 
   private schedule(threadId: string, delay: number): void {
@@ -424,7 +464,7 @@ export class ActivityStore {
       this.reviewing.set(reviewer, { threadId, generation, round });
       review.reviewerThreadId = reviewer;
       this.save(threadId);
-      this.core.threads.startTurn(reviewer, reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), [], undefined, 'delegation', undefined, undefined, `Review the goal: ${goal.objective}`.slice(0, 500));
+      this.core.threads.startTurn(reviewer, { prompt: reviewPrompt(goal.objective, claim, round, goal.checklist?.items ?? []), display: `Review the goal: ${goal.objective}`.slice(0, 500) }, { kind: 'delegation' });
     } catch (error) {
       if (reviewer) this.reviewing.delete(reviewer);
       review.reviewerThreadId = null;

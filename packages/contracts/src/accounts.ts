@@ -18,6 +18,76 @@ export interface QuotaWindow {
   primary?: true;
 }
 
+/**
+ * The length of window an alert watches. Every window of that length counts:
+ * the account-wide one and any per model or group (`Weekly · Opus`).
+ */
+export type QuotaAlertPeriod = 'fiveHour' | 'weekly';
+export const QUOTA_ALERT_PERIODS: readonly QuotaAlertPeriod[] = ['fiveHour', 'weekly'];
+/** The shares left Limits offers in one click; any other whole percentage is a custom one. */
+export const QUOTA_ALERT_PRESETS: readonly number[] = [50, 25, 10];
+/** How many thresholds one period may hold. */
+export const QUOTA_ALERT_MAX = 6;
+/**
+ * Per period, the shares left (whole percentages, 0 to 99) that each notify
+ * once, highest first; a period left out sends nothing.
+ */
+export type QuotaAlerts = Partial<Record<QuotaAlertPeriod, number[]>>;
+
+/**
+ * The thresholds of one period as the core keeps them: distinct, highest
+ * first. Null when the list is not one: more than `QUOTA_ALERT_MAX` values, or
+ * a value that is not a whole percentage from 0 to 99.
+ */
+export function quotaAlertThresholds(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length > QUOTA_ALERT_MAX) return null;
+  if (!value.every((left) => Number.isInteger(left) && left >= 0 && left <= 99)) return null;
+  return [...new Set(value as number[])].sort((a, b) => b - a);
+}
+
+/**
+ * Which period a window covers, from the ids and labels every source sends:
+ * Claude's `five_hour` and `seven_day`, Codex's `5 hours` and `Weekly`,
+ * OpenCode's `rolling`, Antigravity's `Gemini · 5 hours`, Douane's
+ * `five-hour`, `seven-day` and `window-18000s`. Null for a daily, monthly or
+ * credit window, and for a name nothing here recognizes.
+ */
+export function quotaAlertPeriod(window: Pick<QuotaWindow, 'id' | 'label'>): QuotaAlertPeriod | null {
+  const text = `${window.id} ${window.label}`.toLowerCase();
+  if (/week|seven|\b7\s*-?d|604800s/.test(text)) return 'weekly';
+  if (/five|\b5\s*-?h|rolling|18000s/.test(text)) return 'fiveHour';
+  return null;
+}
+
+/** What `quotas.alerted` says: one window of one account fell to a share left set for its period. */
+export interface QuotaAlert {
+  accountId: AccountId;
+  providerId: ProviderId;
+  providerName: string;
+  /** The account's name as Limits shows it. */
+  label: string;
+  period: QuotaAlertPeriod;
+  /** The share left, in percent, that was reached: the lowest one when a reading passed several. */
+  threshold: number;
+  window: QuotaWindow;
+  at: Timestamp;
+}
+
+/**
+ * An alert's title, the same in a push and a toast: the account, then the
+ * model or group a scoped window names (`Weekly · Opus` gives `Opus`).
+ */
+export function quotaAlertTitle(alert: Pick<QuotaAlert, 'label' | 'providerName' | 'window'>): string {
+  const name = alert.label.includes(alert.providerName) ? alert.label : `${alert.providerName} · ${alert.label}`;
+  const scope = alert.window.label.split(' · ').filter((part) => !/week|hour|seven|\b\d+\s*-?[hd]\b/i.test(part)).join(' · ');
+  return scope ? `${name} · ${scope}` : name;
+}
+
+/** What the alerted window has left, in whole percent, never above what was used allows: 99.6 % used is 0 % left. */
+export function quotaAlertLeft(alert: Pick<QuotaAlert, 'window'>): number {
+  return Math.max(0, Math.floor(100 - alert.window.usedPercent));
+}
+
 /** No redeemable identifiers reach the client. The core selects the next credit. */
 export interface QuotaResetCredits {
   availableCount: number;
@@ -87,6 +157,8 @@ export interface SubscriptionProxyQuotas {
    */
   status: 'ready' | 'unsupported' | 'unavailable' | 'off';
   providers: GatewayQuotaProvider[];
+  /** The core verified the native Muse catalog and Responses route without running inference. */
+  nativeMuse?: boolean;
   /** The gateway's own `updated_at`. */
   updatedAt: Timestamp | null;
   /** When the core last had an answer. */
@@ -112,6 +184,8 @@ export interface AccountQuota extends QuotaReading {
   error: string | null;
   /** Set on a subscription gateway's entry: it is not a Boite account and has no switch. */
   gateway?: AccountQuotaGateway;
+  /** The alerts set on this row, missing when none is. */
+  alerts?: QuotaAlerts;
 }
 
 export interface AccountQuotaGateway {
@@ -146,6 +220,13 @@ export interface Account {
 export interface AccountsRpcMethods {
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
+  /**
+   * Every share left, in whole percent, at which a window of this period
+   * notifies (`quotaAlertThresholds`); an empty list turns the period off.
+   * Takes an account or a gateway entry (`proxy:<provider>:<entry>`) the list
+   * holds now, or one that still has alerts, to turn them off.
+   */
+  'quotas.alert': { params: { accountId: AccountId; period: QuotaAlertPeriod; thresholds: number[] }; result: AccountQuota[] };
   /** Owner-only: consumes a banked reset after an explicit client confirmation. */
   'quotas.reset': { params: { accountId: AccountId; confirmed: true }; result: QuotaResetResult };
 
@@ -191,6 +272,8 @@ export interface AccountsRpcEvents {
   'quotas.updated': AccountQuota[];
   /** Owner-only partial result, correlated with the caller's quotas.list request. */
   'quotas.progress': { requestId: string; quota: AccountQuota };
+  /** A window crossed its alert threshold: once per window, until it resets or falls back. */
+  'quotas.alerted': QuotaAlert;
   'accounts.updated': Account;
   /** An account `accounts.remove` deleted. */
   'accounts.removed': { accountId: AccountId };

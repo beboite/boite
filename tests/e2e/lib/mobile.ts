@@ -1,28 +1,28 @@
 import type { BrowserPage } from './cdp.ts';
 
-/** From a conversation, whose header holds no menu, Back leads to the list that has it. */
-async function toList(page: BrowserPage): Promise<void> {
-  if (await page.evaluate(`!!document.querySelector('[data-testid=mobile-menu]')`)) return;
+/**
+ * The phone's slides and sheets (`app.css`'s `screen-*` and `sheet-*` keyframes) have come
+ * to rest: what is measured or tapped next is where it stays.
+ */
+export const screensSettled = `!document.getAnimations().some(animation => /^(screen|sheet)-/.test(animation.animationName ?? '') && animation.playState === 'running')`;
+
+/** From a conversation, which hides the bottom bar, Back leads to the list that shows it. */
+export async function toMobileList(page: BrowserPage): Promise<void> {
+  if (await page.evaluate(`!!document.querySelector('[data-testid=mobile-tabs]')`)) return;
   await page.click('[data-testid=mobile-back]');
-  await page.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
 }
 
-/** Opens the phone's top menu, from the list or a page that has it. */
-export async function openMobileMenu(page: BrowserPage): Promise<void> {
-  await toList(page);
-  await page.click('[data-testid=mobile-menu]');
-}
-
-/** Navigate through the phone's top menu, including when it is already open. */
+/** Navigate through the phone's bottom bar, from a conversation too. */
 export async function mobileAction(page: BrowserPage, destination: string): Promise<void> {
-  if (!await page.evaluate(`!!document.querySelector('[data-testid=mobile-menu-dialog]')`)) await openMobileMenu(page);
-  await page.click(`[data-testid=${destination}]`);
+  await toMobileList(page);
+  await page.click(`[data-testid=mobile-tabs] [data-testid=${destination}]`);
 }
 
-/** A new draft from the header's +, which the list shows. */
+/** A new draft from the bottom bar's +. */
 export async function newMobileThread(page: BrowserPage): Promise<void> {
-  await toList(page);
-  await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
+  await toMobileList(page);
+  await page.click('[data-testid=mobile-tabs] [data-testid=mobile-new]');
 }
 
 /** The panel from a conversation's title menu, the one menu of its header. */

@@ -5,10 +5,12 @@ import type { NativeAgentUpdate } from './delegation';
 import type { MessageId, ProjectId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { RpcMethods } from './index';
 import type { QuestionAnswer, QuestionOption } from './questions';
+import type { SecretRequestStatus } from './secrets';
 import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
-import type { InlineView } from './view.ts';
+import type { InlineView, ViewCheckCapture } from './view.ts';
+import type { WindowCaptureKind, WindowConsentAnswer } from './windows';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -201,16 +203,52 @@ export type MessagePart =
       open?: { url: string };
     }
   /**
+   * A secret card (`boite secret ask`): the name, the reason and how it ended,
+   * never the value. Answered with `secrets.answer`; `status` and `ref` are
+   * written back once it closes.
+   */
+  | {
+      type: 'secret_request';
+      requestId: RequestId;
+      name: string;
+      reason: string;
+      placeholder: string | null;
+      status: SecretRequestStatus;
+      ref: string | null;
+      /** It replaces a key kept for the project. */
+      replace?: boolean;
+      /** The user kept it for the project. */
+      kept?: boolean;
+      expiresAt?: Timestamp;
+    }
+  /**
    * The agent compacted its context mid-turn: what it held before, what is
    * left after when it says so. Drawn as a divider in the timeline.
+   * `background`: the summary was made ahead, on a copy of the session, and
+   * the thread switched to it between turns (`backgroundCompaction`).
    */
-  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null }
+  | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null; background?: true }
   /**
    * One of the user's own hooks ended the turn: it blocked the prompt, or told
    * the agent to stop. `event` is the agent's own name for the hook event. A
    * hook that denied a tool call shows on that tool's card instead.
    */
   | { type: 'hook'; event: string; outcome: 'blocked' | 'stopped'; message: string }
+  /**
+   * A native window an agent captured with `boite window`, or whose stream a
+   * viewer started in the Window panel: no capture is silent. `thumbnail` is a
+   * JPEG of at most `WINDOW_THUMBNAIL_MAX` pixels as base64, null when it could
+   * not be made; `path` is the file the agent asked for, `width` and `height`
+   * that file's size (the window's for a stream).
+   */
+  | { type: 'window_capture'; kind: WindowCaptureKind; windowId: string; process: string; width: number; height: number; at: Timestamp; thumbnail: { data: string; width: number; height: number } | null; path?: string; frames?: number }
+  /**
+   * An agent asked to capture an app the project does not allow: the owner
+   * answers Allow once, Always for this project or Refuse. `answer` is null
+   * while the capture waits, `expired` once `expiresAt` passed or the core
+   * restarted. The window's title is left out: the agent can read its thread.
+   */
+  | { type: 'window_consent'; requestId: string; kind: WindowCaptureKind; process: string; path: string; expiresAt: Timestamp; answer: WindowConsentAnswer | 'expired' | null }
   | { type: 'error'; message: string };
 
 export interface Message {
@@ -232,14 +270,15 @@ export const INITIAL_MESSAGE_PAGE = 40;
  * language it speaks: the service worker looks the label up in the words the
  * page left it, and falls back on the English body.
  */
-export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected' | 'limitFiveHour' | 'limitWeekly';
 /**
  * What a notification is about, the unit a device turns on or off: a
- * permission or a change to approve, a question, a finished turn, a failed one.
+ * permission or a change to approve, a question, a finished turn, a failed
+ * one, a subscription limit crossing its alert threshold.
  */
-export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors';
+export type NotificationKind = 'approvals' | 'questions' | 'finished' | 'errors' | 'limits';
 /** Every kind, in the order the settings list them. A device that never chose gets them all. */
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors'];
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['approvals', 'questions', 'finished', 'errors', 'limits'];
 /** A Web Push payload, as the core sends it and the service worker reads it. */
 export interface PushPayload {
   title: string;
@@ -251,6 +290,8 @@ export interface PushPayload {
   kind?: NotificationKind;
   /** The app icon's count after this notification. */
   badge?: number;
+  /** What a label's words leave a place for: `{percent}` in a limit alert. */
+  values?: { percent: string };
   /**
    * The id of the machine the thread is on. Every push to a device of the
    * group carries it, direct or passed on by another member through the
@@ -313,6 +354,8 @@ export interface MessagesRpcMethods {
    * color, a font of its own): it never refuses a publish.
    */
   'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
+  /** Render a private draft with the view kit; optionally run an async DOM check at each width. Publishes nothing. */
+  'artifacts.viewCheck': { params: { threadId: ThreadId; path: string; script?: string; scheme?: 'dark' | 'light' }; result: { checked: boolean; errors: string[]; advice: string[]; captures: ViewCheckCapture[] } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** Push credentials are owned by the authenticated pairing, never a caller-supplied session id. */
@@ -326,7 +369,7 @@ export interface MessagesRpcMethods {
   'push.test': { params: Record<string, never>; result: { ok: true } };
   /** Reserve the final workspace and initialize a native session without publishing a conversation or sending text. */
   'drafts.prepare': {
-    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe'> & { preparationId: string };
+    params: Omit<RpcMethods['threads.create']['params'], 'title' | 'preparationId' | 'subscribe' | 'clientRequestId'> & { preparationId: string };
     result: { preparationId: string; threadId: ThreadId };
   };
   /** Release only the named reservation owned by this connection, including preparation still in flight. */

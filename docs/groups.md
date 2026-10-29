@@ -68,11 +68,10 @@ out; that machine is told and leaves on its own, or learns it the next time it
 reaches a member. **Leave the group** takes this machine out and tells the
 others first.
 
-The group card also offers one switch to keep the settings of every connected
-machine like the selected one. It uses the settings synchronization
-described in [machines](machines.md#automatic-settings-synchronization) for
-all of them at once, and has the same limits: the copy runs while that window
-is open.
+The group card also picks the group's **Default machine**, whose settings
+every other member follows. The choice lives in the roster, so every member
+shows it; the copy itself runs from a window that owns both machines
+([machines](machines.md#automatic-settings-synchronization)).
 
 A machine with no window uses the core's command, on the data directory of
 the running core:
@@ -146,6 +145,11 @@ whatever network carries it: the roster, agents' messages and the join
 request are unreadable on the path, a plain LAN and the owner's app relay
 included ([sealing](#sealing)). A member refuses a readable roster, and
 refuses any readable request from a machine it trusts through the group alone.
+A bot of one member looking after projects of another
+([bots](bots.md#projects-of-the-other-machines-of-the-group)) uses these
+same sealed requests: no key or token of either machine is copied to the
+other, and the member holding the projects lets bots in only while its own
+`groupBots` switch is on.
 
 What a client says to a core is not sealed. That link is as private as its
 transport: WireGuard on a tailnet, TLS on an HTTPS address. A core that listens
@@ -289,6 +293,18 @@ to each other, the client's key for that member included. Every member of a
 group already has full control of the others ([trust](#trust)), so this gives
 it nothing it did not have. The client link is not sealed on that hop either:
 as private as the network between the two machines.
+
+### Contact projects on a member
+
+An explicitly shared Contact project can live on another member. The linked
+gateway forwards `contact.project` through existing sealed `relay.in/out`
+requests, checking the member's current admission and that contact's exact
+member/project grant again before returning the answer. Saved member mirrors
+bind the group and both admission epochs; removing and readmitting a core does
+not restore an old copy's authority. The association and jobs stay on the
+executing member, with no copy on the gateway. This bounded peer protocol is
+separate from the owner's general group RPC relay. See
+[Contacts](contacts.md#implemented-association-service).
 
 ### Notifications through the group
 

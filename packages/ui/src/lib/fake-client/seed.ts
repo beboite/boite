@@ -4,6 +4,7 @@ import { seedAccounts } from './accounts-seed';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
 import { T0 } from './shared';
 import { heavyThread } from './heavy-thread';
+import { diagramsThread } from './diagrams-thread';
 import { longThread, seedThreads } from './threads-seed';
 import { settlePermission, settleQuestion } from './requests';
 import { seedArchivedThread, seedWorktrees } from './worktrees';
@@ -81,6 +82,10 @@ export function seed(ctx: FakeContext): void {
   if (ctx.heavy) {
     const heavy = heavyThread();
     ctx.threads.set(heavy.id, heavy);
+  }
+  if (ctx.diagrams) {
+    const diagrams = diagramsThread();
+    ctx.threads.set(diagrams.id, diagrams);
   }
 
   const seededRequest: PermissionRequest = {

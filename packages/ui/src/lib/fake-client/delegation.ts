@@ -6,6 +6,7 @@ import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
+import { delegationProject } from './delegation-project';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
   const thread = ctx.thread(threadId);
@@ -62,7 +63,7 @@ function namedRoute(parent: Thread, config: DelegationConfig, profileId: string 
 }
 
 /** `provider/model`, a model id (the parent's provider first) or a unique part of an id or name. */
-function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, wanted: string, effort: string | undefined): ChildRoute {
+export function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, wanted: string, effort: string | undefined): ChildRoute {
   const choices = modelChoices(ctx, parent), query = wanted.toLowerCase();
   const full = (c: DelegationModelChoice) => `${c.providerId}/${c.model}`;
   const byId = choices.filter(c => full(c) === query || c.model.toLowerCase() === query);
@@ -79,7 +80,7 @@ function pickModel(ctx: FakeContext, parent: Thread, config: DelegationConfig, w
 function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
   const thread = ctx.thread(row.threadId);
   const summary = toSummary(thread);
-  const lastTurn = thread.turns.at(-1) ?? null;
+  const lastTurn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') ?? null;
   const terminal = lastTurn !== null && !['queued', 'running'].includes(lastTurn.status);
   const result = terminal
     ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
@@ -101,7 +102,7 @@ function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: 
 /** A child still owes its parent a result: a turn under way, or a wait on its own background work. */
 function owesResult(ctx: FakeContext, threadId: ThreadId): boolean {
   const thread = ctx.thread(threadId);
-  const turn = thread.turns.at(-1);
+  const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
   return (turn !== undefined && ['queued', 'running'].includes(turn.status)) || toSummary(thread).backgroundWait?.state === 'waiting';
 }
 
@@ -209,7 +210,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
   const at = ctx.now();
   const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
   const child: Thread = {
-    ...root, id, parentThreadId: root.id, title, titleSource: 'user',
+    ...delegationProject(ctx, root), id, parentThreadId: root.id, parentIsBot: root.agentSessionId ? true : undefined, agentSessionId: undefined, title, titleSource: 'user',
     providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
     status: 'running', unread: false, archived: false, pinned: false,
     sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined, moveNote: null,
@@ -227,7 +228,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
 export function workflowAnswer(ctx: FakeContext, threadId: ThreadId, text: string, ok: boolean): void {
   const thread = ctx.threads.get(threadId);
   if (!thread) return;
-  const turn = thread.turns.at(-1);
+  const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
   const at = ctx.now();
   if (turn && (turn.status === 'running' || turn.status === 'queued')) {
     Object.assign(turn, { status: ok ? 'done' : 'error', finishedAt: at, error: ok ? null : text,
@@ -270,7 +271,7 @@ export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   for (const row of rows) {
     const thread = ctx.thread(row.threadId);
-    const turn = thread.turns.at(-1);
+    const turn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive');
     if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
     ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== turn.id);
     ctx.scheduler.queued.forEach((entry, index) => { entry.position = index + 1; });
@@ -309,7 +310,7 @@ function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>):
         resolve({ state: asks ? 'needs_input' : waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.settlement === 'result_available') ? 'result_available' : 'settled', timedOut: timedOut && !asks, agents });
       } catch (error) { cleanup(); reject(error); }
     };
-    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()), ctx.bus.on('thread.background', () => inspect()), ctx.bus.on('question.asked', () => inspect()), ctx.bus.on('permission.requested', () => inspect()));
+    subscriptions.push(ctx.bus.observe('turn.finished', () => inspect()), ctx.bus.observe('delegation.changed', () => inspect()), ctx.bus.observe('thread.removed', () => inspect()), ctx.bus.observe('thread.background', () => inspect()), ctx.bus.observe('question.asked', () => inspect()), ctx.bus.observe('permission.requested', () => inspect()));
     subscriptions.push(ctx.bus.onState(state => {
       if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
     }));
@@ -385,7 +386,9 @@ export function delegationMethods(ctx: FakeContext) {
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
       if (params.speed !== undefined) checkSpeedText(params.speed);
       if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'worktree: expected true, false or absent' });
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true]);
+      if (params.project !== undefined && (typeof params.project !== 'string' || !params.project.trim() || params.project.length > 4096)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'project: expected 1 to 4096 characters' });
+      const wantedProject = params.project?.trim();
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null, params.context ?? null, params.worktree === true, ...(wantedProject === undefined ? [] : [wantedProject])]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
@@ -405,14 +408,17 @@ export function delegationMethods(ctx: FakeContext) {
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
       // As the core: a branch and folder of its own, refused outside a project; the fake has no git to make it with.
-      const project = ctx.projects.find(entry => entry.id === parent.projectId);
+      const placement = delegationProject(ctx, parent, wantedProject);
+      const project = ctx.projects.find(entry => entry.id === placement.projectId);
       if (params.worktree === true && (!project || project.kind === 'drafts')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `worktree: ${project?.path ?? 'this conversation'} is not a git repository; spawn without --worktree to share the checkout` });
       const worktree = params.worktree === true && project ? { branch: `boite/sub-${id}`, path: `${project.path}/.boite/worktrees/sub-${id}`, base: null, state: 'pending' as const } : null;
       const child: Thread = {
-        ...parent,
+        ...placement,
         ...(worktree ? { cwd: worktree.path, branch: worktree.branch } : {}),
         id,
         parentThreadId: parent.id,
+        parentIsBot: parent.agentSessionId ? true : undefined,
+        agentSessionId: undefined,
         title: params.title?.trim() || task.split('\n')[0]!.slice(0, 80),
         titleSource: 'user',
         providerId: profile.providerId,

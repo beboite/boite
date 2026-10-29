@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import { ChevronDown, ChevronRight, Plug, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo } from '@boite/contracts';
@@ -8,11 +9,13 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import ProviderTiles from './ProviderTiles.svelte';
   import { floating } from '../lib/floating';
+  import { focusInitial } from '../lib/focus';
   import { Closing } from '../lib/closing.svelte';
   import { fill, strings } from '../lib/strings';
   import { FIRST_MODELS, favoriteIds, firstModels, groupModels, modelSource } from '../lib/model-list';
   import { pickerKeydown } from '../lib/model-picker-keys';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
+  import { desktopSettings } from '../lib/settings-tabs';
 
   /**
    * A fixed frame: provider logos beside a scrolling model list on desktop.
@@ -230,8 +233,8 @@
 
   // Desktop can type immediately. Phones keep their keyboard closed until tapped.
   $effect(() => {
-    if (!popover.open || !searchable || window.matchMedia('(max-width: 720px)').matches) return;
-    searchBox?.focus();
+    if (!popover.open || !searchable) return;
+    focusInitial(searchBox, menu);
   });
 
   function toggle(event: MouseEvent) {
@@ -271,7 +274,12 @@
     if (instance) return applyPick(instance, model.id);
   }
 
-  /** Installing and signing in happen on the Providers page, so the picker sends you there. */
+  /**
+   * Installing and signing in happen on the Providers page, so the picker sends
+   * the owner there; a phone has no such page, so it offers no way to it.
+   */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   function openInstall() {
     popover.hide();
     store.showSettings('accounts');
@@ -353,7 +361,7 @@
       <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={disabled || probing || pickPending || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing || pickPending ? 'spin' : ''} /></button>
       {#if !single}
         <div class="column rail">
-          <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
+          <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={providersReachable ? openInstall : undefined} />
         </div>
       {/if}
 
@@ -414,9 +422,10 @@
 
         {#if needsInstall}
           <p class="none subtle" data-testid="picker-not-installed">{strings.composer.notInstalled}</p>
-          <!-- The Providers page is `accounts.*` and `providers.install`, so the
-               device is told the provider is missing and nothing more. -->
-          {#if store.owner}
+          <!-- The Providers page is `accounts.*` and `providers.install`, and
+               desktop only, so a device or a phone is told the provider is
+               missing and nothing more. -->
+          {#if providersReachable}
             <button
               type="button"
               class="quiet small to-settings"
@@ -449,7 +458,7 @@
               {/each}
             {/each}
             {#if capped}
-              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}><span class="ui-label">{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</span></button>
+              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; focusInitial(searchBox, menu); }}><span class="ui-label">{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</span></button>
             {/if}
           {:else}
             {#each filteredCurrent as model (model.id)}

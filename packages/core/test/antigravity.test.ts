@@ -329,7 +329,7 @@ describe('antigravity', () => {
     expect(probeTimeoutMs(unpacking)).toBeGreaterThanOrEqual(90_000);
     expect(probeTimeoutMs({ ...unpacking, quirks: [] })).toBe(20_000);
   });
-  test('a start_subagent launch lists its batch, unknown once the turn ended since its children report nothing; a failed launch keeps its error', async () => {
+  test('a start_subagent or invoke_subagent launch lists its batch, unknown once the turn ended since its children report nothing; a failed launch keeps its error', async () => {
     const client = await startCore();
     const { threadId } = await agyThread(client);
     await runTurn(client, threadId, 'review with readers scenario:subagents');
@@ -339,6 +339,7 @@ describe('antigravity', () => {
     expect(agents.map(({ id, status, task, result }) => ({ id: id.slice(id.lastIndexOf(':') + 1), status, task, result }))).toEqual([
       { id: '2', status: 'unknown', task: 'Launch readers', result: undefined },
       { id: '3', status: 'error', task: undefined, result: 'Subagent exceeded its limit.' },
+      { id: '5', status: 'unknown', task: 'Launch reviewers', result: undefined },
     ]);
     // While the turn runs, a launch that returned stays running: its output is no child's answer.
     expect(antigravitySubagentBatch('t:2', 'done', 'Launch readers')).toEqual({ id: 't:2', status: 'running', task: 'Launch readers' });

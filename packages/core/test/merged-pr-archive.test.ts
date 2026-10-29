@@ -9,7 +9,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { MergedPrArchive } from '../src/merged-pr-archive.ts';
 import { archiveState } from '../src/merged-pr-archive-state.ts';
-import { githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
+import { fetchedRepositories, githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { rejection, thrown } from './settle.ts';
 
@@ -38,7 +38,7 @@ async function fixture() {
   harness.core.journal.putProject({ ...project, path: repo });
   harness.core.journal.putThread({ ...thread, cwd: checkout, branch: 'topic', pinned: false, unread: false });
   const sha = git(checkout, 'rev-parse', 'HEAD');
-  let candidates = [{ number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' }];
+  let candidates = [{ title: 'Merged change', baseRefName: 'main', number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' }];
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   let ghGate: string | undefined;
   let hideList = false;
@@ -96,6 +96,191 @@ async function completedFamily() {
   for (const thread of [harness.core.threads.require(f.threadId), ...children]) await f.client.call('threads.markRead', { threadId: thread.id });
   return { ...f, children, runId: run.id };
 }
+
+test.each(['badge', 'linked PR'] as const)('a merge detected by the %s moves directly to Done and lets the current prompt finish', async source => {
+  const f = await fixture();
+  const core = harness.core;
+  const original = core.threads.require(f.threadId);
+  for (let index = 0; index < 300; index++) core.journal.putThread({ ...original, id: `retained-${index}`, branch: `retained-${index}`, archived: true });
+  core.journal.putThread(original); // Beyond the next periodic scan's 128 rows.
+  await service.close();
+  service = new MergedPrArchive(core, core.pullRequests); // Normal startup grace and settling delay.
+  Object.defineProperty(core, 'mergedPrArchive', { value: service });
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  let stops = 0;
+  restoreDriver = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    return { stop() { stops++; finish(); }, done: gate.then(() => {
+      const message = ctx.emit.startMessage('assistant');
+      ctx.emit.part(message, 0, { type: 'text', text: 'Final answer after the merge.' });
+      ctx.emit.complete(message, 'complete');
+      return { status: 'done' as const, sessionId: null, usage: null };
+    }) };
+  } });
+  const turn = await f.client.call('turns.start', { threadId: f.threadId, prompt: 'Finish reporting the merged change.' });
+  const token = core.agents.tokenFor(f.threadId);
+  const agent = await connect(harness.url, token);
+  const owned = core.procs.spawn(f.threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: f.checkout });
+  try {
+    await waitFor(() => core.threads.runner.handles.has(f.threadId));
+    if (source === 'badge') expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toMatchObject({ state: 'MERGED' });
+    else await f.client.call('threads.linkPullRequest', { threadId: f.threadId, url: f.candidates[0]!.url });
+    await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
+    expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'running' });
+    // Done only hides the row: what the finishing prompt still runs in the background stays on it.
+    const running = core.threads.require(f.threadId);
+    const owner = { providerId: running.providerId, sessionGeneration: running.sessionGeneration ?? 0, parentTurnId: turn.id };
+    core.threads.agentState.noteBackground(f.threadId, [{ id: 'merged-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], owner);
+    expect(await f.client.call('threads.get', { threadId: f.threadId })).toMatchObject({ archived: true, backgroundWork: { kinds: ['shell'] } });
+    core.threads.agentState.noteBackground(f.threadId, [], owner);
+    expect(stops).toBe(0);
+    expect(core.procs.liveCount(f.threadId)).toBe(1);
+    expect(await agent.call('agent.where', { threadId: f.threadId })).toMatchObject({ threadId: f.threadId });
+    finish();
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done');
+    const saved = await f.client.call('threads.get', { threadId: f.threadId });
+    expect(saved).toMatchObject({ archived: true, status: 'idle', archiveReason: { type: 'pr-merged', number: 7 } });
+    expect(saved.messages.flatMap(message => message.parts).some(part => part.type === 'text' && part.text === 'Final answer after the merge.')).toBe(true);
+    await waitFor(() => core.agents.authenticate(token) === null);
+    expect(stops).toBe(0);
+  } finally { finish(); agent.close(); core.procs.killTree(f.threadId); await owned.exited; }
+});
+
+test.each(['before Done', 'after Done', 'scheduled turn'] as const)('Done stops compaction: %s', async timing => {
+  const f = await fixture();
+  const core = harness.core;
+  let report!: () => void;
+  let finish!: () => void;
+  let stops = 0;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  restoreDriver = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    const message = ctx.emit.startMessage('assistant');
+    ctx.emit.part(message, 0, { type: 'text', text: 'The change has merged.' });
+    ctx.emit.complete(message, 'complete');
+    report = () => ctx.reportProgress?.('compacting');
+    return {
+      stop() { stops++; finish(); },
+      done: gate.then(() => ({ status: 'stopped' as const, sessionId: null, usage: null })),
+    };
+  } });
+  const turn = core.threads.startTurn(f.threadId, 'Finish reporting the merged change.',
+    timing === 'scheduled turn' ? { kind: 'compact', automatic: false } : undefined);
+  try {
+    await waitFor(() => core.threads.runner.handles.has(f.threadId));
+    if (timing === 'before Done') report();
+    expect(await f.client.call('threads.pullRequest', { threadId: f.threadId })).toMatchObject({ state: 'MERGED' });
+    await waitFor(() => core.threads.require(f.threadId).doneAt != null, 1500);
+    if (timing === 'after Done') {
+      expect(stops).toBe(0); // The final answer can still finish until compaction starts.
+      report();
+    }
+    expect(stops).toBe(1);
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'stopped', 1500);
+    expect(core.threads.require(f.threadId)).toMatchObject({ archived: true, status: 'idle', doneAt: expect.any(Number) });
+    const saved = await f.client.call('threads.get', { threadId: f.threadId });
+    expect(saved.messages.flatMap(message => message.parts)).toContainEqual({ type: 'text', text: 'The change has merged.' });
+  } finally { finish(); }
+});
+
+test.each(['restore', 'draft'] as const)('detected merges respect a late %s during checkout validation', async change => {
+  const f = await fixture();
+  const core = harness.core;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let validating = false;
+  let validated = false;
+  const validate = core.pullRequests.validateMergedCheckout.bind(core.pullRequests);
+  const held = spyOn(core.pullRequests, 'validateMergedCheckout').mockImplementation(async (...args) => {
+    validating = true;
+    await gate;
+    return validate(...args).finally(() => { validated = true; });
+  });
+  try {
+    await f.client.call('threads.pullRequest', { threadId: f.threadId });
+    await waitFor(() => validating);
+    if (change === 'restore') core.threads.archive(f.threadId, false);
+    else core.threads.focus.set('typing-device', null, [f.threadId]);
+    release();
+    await waitFor(() => validated);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(core.threads.require(f.threadId).archived).toBe(false);
+  } finally { release(); held.mockRestore(); }
+});
+
+test('a merge observed as the last detection finishes is processed without another notification', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const read = journal.getThread.bind(journal);
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === 'deleted-merge-detection') {
+      // A badge result queued behind the final read runs before the drain's cleanup.
+      queueMicrotask(() => service.observe(f.threadId));
+      return null;
+    }
+    return read(id);
+  });
+  try {
+    service.observe('deleted-merge-detection');
+    await waitFor(() => harness.core.threads.require(f.threadId).archived, 1500);
+  } finally { get.mockRestore(); }
+});
+
+test('a failed detected conversation read leaves it visible and continues with the next merge', async () => {
+  const f = await fixture();
+  const core = harness.core, journal = core.journal;
+  const broken = 'unreadable-detected-thread';
+  journal.putThread({ ...core.threads.require(f.threadId), id: broken, branch: 'unreadable' });
+  const read = journal.getThread.bind(journal);
+  const warning = spyOn(core, 'log');
+  const get = spyOn(journal, 'getThread').mockImplementation(id => {
+    if (id === broken) throw new Error('fixture journal read failed');
+    return read(id);
+  });
+  try {
+    service.observe(broken);
+    service.observe(f.threadId);
+    await waitFor(() => core.threads.require(f.threadId).archived, 1500);
+    expect(warning.mock.calls.some(([, , context]) => context?.event === 'archive.detectionFailed' && context.threadId === broken)).toBe(true);
+  } finally { get.mockRestore(); warning.mockRestore(); }
+  expect(core.threads.require(broken).archived).toBe(false);
+});
+
+test('detected proof failures back off independently of history scans and retry after expiry or a thread change', async () => {
+  const f = await fixture();
+  const journal = harness.core.journal;
+  const original = harness.core.threads.require(f.threadId);
+  const proof = spyOn(harness.core.pullRequests, 'proveMerged').mockResolvedValue(null);
+  const now = Date.now.bind(Date);
+  let elapsed = 0;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now() + elapsed);
+  const observe = async () => {
+    service.observe(f.threadId);
+    // A null proof settles within the detection turn, including its promise callbacks.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
+  try {
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(1);
+    elapsed = 30_000;
+    await observe(); // A scan's negative proof cannot delay newly detected work.
+    expect(proof).toHaveBeenCalledTimes(2);
+    for (let read = 0; read < 3; read++) await observe();
+    expect(proof).toHaveBeenCalledTimes(2);
+    elapsed = 60_001;
+    expect(await service.sweep()).toBe(0);
+    expect(proof).toHaveBeenCalledTimes(3);
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(3);
+    elapsed = 90_001;
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(4);
+    journal.putThread({ ...original, updatedAt: original.updatedAt + 1 });
+    await observe();
+    expect(proof).toHaveBeenCalledTimes(5);
+    expect(harness.core.threads.require(f.threadId).archived).toBe(false);
+  } finally { proof.mockRestore(); clock.mockRestore(); }
+});
 
 test('large archive sweeps bound hydration, yield to owner RPCs and advance beyond retained candidates', async () => {
   const f = await fixture();
@@ -179,7 +364,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
   };
   try {
     // Four open pull requests: one remote read and one list for the repository, no status walk.
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['git remote', 'gh api'] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     expect(await sweep()).toEqual({ proofs: 0, spawned: [] });
     // An updated thread is proved again at once, from what the repository reads kept.
@@ -189,7 +374,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     expect(updated.spawned).not.toContain('git status');
     // Each minute asks again, sharing the cached remotes and one fresh repository list.
     elapsed = 60_001;
-    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh pr'] });
+    expect(await sweep()).toEqual({ proofs: 4, spawned: ['gh api'] });
     elapsed += 30_000;
     expect((await sweep()).proofs).toBe(0);
     elapsed += 30_001;
@@ -201,7 +386,7 @@ test('unmerged worktree threads share repository reads and check again once a mi
     const merged = await sweep(1);
     expect(merged.proofs).toBe(1);
     expect(merged.spawned.filter(command => command === 'git status')).toHaveLength(2);
-    expect(merged.spawned.filter(command => command === 'gh pr')).toHaveLength(1);
+    expect(merged.spawned.filter(command => command === 'gh api')).toHaveLength(1);
     console.log('archive-spawn-measurement', JSON.stringify({ threads: 4, passes }));
   } finally { proved.mockRestore(); clock.mockRestore(); }
 });
@@ -405,6 +590,14 @@ test('a child turn admitted during final Git validation keeps its merged parent 
     expect(harness.core.threads.require(childId).status).toBe('running');
     expect(harness.core.threads.require(f.threadId).archived).toBe(false);
   } finally { held.mockRestore(); harness.core.threads.stopTurn(childId); }
+});
+
+test('repository identities normalize slashes around the git suffix', () => {
+  for (const remote of ['https://github.com/example/repo.git/', 'git@github.com:example/repo.git//', 'https://github.com/example/repo/.git', 'https://github.com/example/repo/.git/', 'https://github.com/example/repo']) {
+    const remotes = `origin ${remote} (fetch)`;
+    expect(githubRepository(remotes)).toBe('github.com/example/repo');
+    expect([...fetchedRepositories(remotes)]).toEqual(['github.com/example/repo']);
+  }
 });
 
 test('strict action proof rejects forks, reused branch, wrong tip and repository ambiguity', () => {

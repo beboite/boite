@@ -8,6 +8,9 @@ export const fr: Translation = {
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions installées : l’installateur Windows x64, l’app macOS et le .deb ou l’AppImage Linux.',
     channel: 'Canal de publication',
+    nightlyShort: 'Nightly', releaseShort: 'Release',
+    noRelease: 'Pas encore de release : Boite sort en builds nightly pour l’instant.',
+    updates: 'Mises à jour',
     stable: 'Boite',
     nightly: 'Boite Nightly',
     nightlyHint: "Boite Nightly est expérimentale et peut contenir des changements inachevés. Vous pouvez revenir à Boite même si son numéro de version est inférieur.",
@@ -32,5 +35,7 @@ export const fr: Translation = {
     readyAction: 'Mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
     installBody: "Les agents terminent leur appel d'outil en cours, 30 secondes au plus. Boite se met ensuite à jour, redémarre et les reprend.",
+    autoInstall: 'Installer les mises à jour tout seul quand rien ne tourne',
+    autoInstallHint: "Une version trouvée par la vérification toutes les six heures se télécharge et s'installe sans rien demander, seulement quand la fenêtre est rangée dans la zone de notification et qu'aucune conversation, aucun message en attente ni aucun processus ne tourne. Boite revient dans la zone de notification. Sinon, il réessaie à la vérification suivante. Les agents gardent leur propre interrupteur dans la page Fournisseurs.",
   }
 };

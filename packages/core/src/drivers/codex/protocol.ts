@@ -1,4 +1,12 @@
-import type { NativeAgentUpdate, PermissionMode, ToolStatus } from '@boite/contracts';
+import type { HookOutcome, NativeAgentUpdate, PermissionMode, ThreadContextMode, ToolStatus } from '@boite/contracts';
+
+/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
+export const HOOK_OUTCOMES: Record<string, HookOutcome> = {
+  completed: 'ok',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'stopped',
+};
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
@@ -39,6 +47,22 @@ export const THREAD_CONFIG = {
  */
 export const NO_PLUGINS = ['--config', 'features.plugins=false', '--config', 'features.apps=false'] as const;
 
+/**
+ * What a thread in a context mode leaves out on the command line: Codex cannot
+ * drop its shell, so a thread with no tool (`TOOL_FREE_CONTEXT`) also loses web
+ * search, and its `plan` mode keeps the sandbox read-only with no network. MCP
+ * servers go off by name at `thread/start` (`threadConfig`).
+ */
+export function contextArgs(mode: ThreadContextMode | null | undefined): string[] {
+  if (!mode) return [];
+  return [
+    ...(mode.hooks ? [] : ['--config', 'features.hooks=false']),
+    ...(mode.mcp ? [] : NO_PLUGINS),
+    ...(mode.instructions ? [] : ['--config', 'project_doc_max_bytes=0']),
+    ...(mode.tools?.length === 0 ? ['--config', 'web_search="disabled"'] : []),
+  ];
+}
+
 export const STDERR_MAX = 400;
 
 /**
@@ -55,7 +79,7 @@ export const PROBE_TIMEOUT_MS = 20_000;
 export const PROBE_MAX_PAGES = 10;
 
 /** How long a failed request waits for the child's exit before blaming itself. */
-export const EXIT_GRACE_MS = 500;
+export { EXIT_GRACE_MS } from '../exit.ts';
 
 /** Codex names no tool for a shell command, so the card carries the usual one. */
 export const COMMAND_TOOL_NAME = 'Bash';

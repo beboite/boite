@@ -6,7 +6,7 @@ import { refusal } from './shared';
 /** The fixture accepts live user messages without opening or stopping a turn. */
 export async function steerUser(ctx: FakeContext, params: RpcParams<'turns.steer'>): Promise<{ accepted: boolean }> {
   const thread = ctx.thread(params.threadId);
-  if (thread.archived || thread.agentSessionId) throw refusal('user steering requires an active, unarchived conversation');
+  if (thread.archived) throw refusal('user steering requires an active, unarchived conversation');
   if (typeof params.prompt !== 'string') throw refusal('prompt must be a string');
   if (typeof params.clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(params.clientRequestId)) throw refusal('clientRequestId must contain 8 to 128 URL-safe characters');
   const attachments = params.attachments ?? [];

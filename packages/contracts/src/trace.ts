@@ -21,6 +21,9 @@ export interface ProcessRecord {
   ioBytes: number | null;
 }
 
+/** The exit code a process gets on Windows when Boite ends it or its job. */
+export const KILL_EXIT_CODE = 9;
+
 /**
  * The most recent processes `trace.get` returns when no limit is given, and
  * all a client keeps of a thread's trace as `process.*` events arrive.
@@ -74,6 +77,39 @@ export interface AgentResourceSnapshot {
   agents: AgentResourceUsage[];
 }
 
+/** One fixed storage volume: a drive letter on Windows, a mount point elsewhere. */
+export interface MachineVolume {
+  name: string;
+  totalBytes: number;
+  freeBytes: number;
+}
+
+export interface MachineGpu {
+  name: string;
+  /** The busiest engine, as Windows' Task Manager counts it; null when the driver gives no reading. */
+  percent: number | null;
+  memoryUsedBytes: number | null;
+  memoryTotalBytes: number | null;
+}
+
+/** The whole machine, not only Boite's agents; no paths, users or process arguments. */
+export interface MachineResourceSnapshot {
+  sampledAt: Timestamp;
+  hostname: string;
+  os: Os;
+  /** The system's own name for itself, such as "Windows 11 Pro" or "Debian GNU/Linux 12". */
+  osLabel: string | null;
+  /** Null `percent` until two readings establish an interval. */
+  cpu: { model: string | null; cores: number; percent: number | null };
+  /** `agentBytes` sums the measured agent processes; null `availableBytes` when the OS gives no honest reading. */
+  memory: { totalBytes: number; availableBytes: number | null; agentBytes: number };
+  /** Null when this OS has no GPU reader; an empty list when none was found. */
+  gpus: MachineGpu[] | null;
+  /** Each agent's share of its busiest GPU engine. Windows only; null where no per-process reading exists. */
+  agentGpu: { threadId: ThreadId; percent: number }[] | null;
+  volumes: MachineVolume[];
+}
+
 /** What the trace can and cannot promise on this OS. */
 export interface TraceCapability {
   os: Os;
@@ -88,6 +124,8 @@ export interface TraceRpcMethods {
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
   /** Visible clients renew a six-second detail lease; false releases only this connection. */
   'resources.usage': { params: { watch?: boolean }; result: AgentResourceSnapshot };
+  /** Machine-wide CPU, GPU, memory and storage; readings under a second old are shared between callers. */
+  'resources.machine': { params: Record<string, never>; result: MachineResourceSnapshot };
   /** Owner-only machine memory reading and the limits actually applied by the governor. */
   'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };

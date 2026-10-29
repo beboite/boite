@@ -11,7 +11,7 @@ import { workspace } from './workspace.svelte';
  * per kind for this session only, so a reload covers it again.
  */
 const shown = new SvelteSet<string>();
-export type LiveViewKind = 'agent-browser' | 'device';
+export type LiveViewKind = 'agent-browser' | 'device' | 'window';
 const key = (kind: LiveViewKind, threadKey: string) => `${kind}\u0000${threadKey}`;
 
 export const liveViews = {

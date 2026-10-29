@@ -24,6 +24,47 @@ const tasks = () => [
   { id: 'two', text: 'Check the result', status: 'in_progress' as const }
 ];
 function toggle() { return document.querySelector<HTMLButtonElement>('[data-testid=activity-tasks-toggle]')!; }
+const question = (id: string, createdAt: number): QuestionRequest => ({
+  id, threadId: 'thread', turnId: 'turn', text: `Question ${id}`, options: [{ id: 'yes', label: 'Yes' }], allowText: true, multiple: false, async: true, createdAt
+});
+const shownQuestion = () => document.querySelector('[data-testid=activity-question]:not([hidden])')?.getAttribute('data-question');
+
+test('pending questions open oldest first, including a restored unordered list', () => {
+  const store = render({ goal: null, loop: null, tasks: [] });
+  flushSync(() => { store.pendingQuestions = [question('middle', 2), question('oldest', 1), question('newest', 3)]; });
+  expect(shownQuestion()).toBe('oldest');
+  document.querySelector<HTMLButtonElement>('[data-testid=activity-question-next]')!.click();
+  flushSync();
+  expect(shownQuestion()).toBe('middle');
+});
+
+test('new questions leave the current question and selection in place, then answers advance oldest first', () => {
+  const store = render({ goal: null, loop: null, tasks: [] });
+  flushSync(() => { store.pendingQuestions = [question('oldest', 1)]; });
+  const option = document.querySelector<HTMLButtonElement>('[data-testid=question-option]')!;
+  option.click();
+  flushSync();
+  const fold = document.querySelector<HTMLButtonElement>('[data-testid=activity-question-toggle]')!;
+  fold.click();
+  flushSync();
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  flushSync(() => { store.pendingQuestions = [...store.pendingQuestions, question('middle', 2), question('newest', 3)]; });
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  expect(shownQuestion()).toBe('oldest');
+  expect(document.querySelector('[data-testid=activity-question-index]')!.textContent).toBe('1 of 3');
+  expect(option.getAttribute('aria-checked')).toBe('true');
+  // Explicit navigation remains possible, and later arrivals do not steal it.
+  document.querySelector<HTMLButtonElement>('[data-testid=activity-question-next]')!.click();
+  flushSync();
+  expect(shownQuestion()).toBe('middle');
+  flushSync(() => { store.pendingQuestions = [...store.pendingQuestions, question('last', 4)]; });
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  expect(shownQuestion()).toBe('middle');
+  flushSync(() => { store.pendingQuestions = store.pendingQuestions.filter(q => q.id !== 'middle'); });
+  expect(shownQuestion()).toBe('oldest');
+  flushSync(() => { store.pendingQuestions = store.pendingQuestions.filter(q => q.id !== 'oldest'); });
+  expect(shownQuestion()).toBe('newest');
+});
 
 test('hover keeps tasks collapsed and only explicit disclosure opens them', () => {
   render({ goal: null, loop: null, tasks: tasks() });
@@ -115,9 +156,12 @@ test('a sub-agent\'s questions and permission wait in its parent\'s dock, named,
   });
   const docked = () => [...document.querySelectorAll<HTMLElement>('[data-testid=activity-question]')];
   expect(docked().map(card => card.dataset['question'])).toEqual(['own', 'child-async', 'child-stop']);
-  expect(document.querySelector('[data-testid=activity-question-index]')!.textContent).toBe('3 of 3');
+  expect(document.querySelector('[data-testid=activity-question-index]')!.textContent).toBe('1 of 3');
   const shown = () => document.querySelector<HTMLElement>('[data-testid=activity-question]:not([hidden])')!;
-  // The newest is up: a child's, with whose it is and the way into it, and no hand-off to this composer.
+  expect(shown().dataset['question']).toBe('own');
+  document.querySelector<HTMLButtonElement>('[data-testid=activity-question-prev]')!.click();
+  flushSync();
+  // Navigating to a child's question shows whose it is, without handing it to this composer.
   expect(shown().dataset['question']).toBe('child-stop');
   expect(shown().querySelector('[data-testid=activity-subagent-question]')!.textContent).toContain('Asked by Migrate the keys');
   expect(shown().querySelector('[data-testid=question-write]')).toBeNull();

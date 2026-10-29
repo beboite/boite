@@ -3,6 +3,8 @@ import { mount, tick, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import AgentDock from './AgentDock.svelte';
+import { AgentsView } from '../lib/agents.svelte';
+import { FakeAgents } from '../lib/fake-agents';
 
 let component: ReturnType<typeof mount> | undefined;
 let store: Store;
@@ -42,4 +44,26 @@ test('a workflow without active children shows a timer and opens the team overvi
   store.workflows[0]!.status = 'done';
   await tick();
   expect(document.querySelector('[data-testid=agent-dock]')).toBeNull();
+});
+
+test('a memory pass another machine names leaves this machine\'s subagent of the same id in the dock', async () => {
+  client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  store = new Store();
+  store.attach(client);
+  await store.connect();
+  const child = store.threads.find(thread => thread.id === 't-team-running')!;
+  await store.open(child.parentThreadId!);
+  component = mount(AgentDock, { target: document.body, props: { store, threadId: child.parentThreadId! } });
+  const count = () => document.querySelector('[data-testid=active-subagents]')?.textContent?.match(/\d+/)?.[0];
+  // The running child and the one waiting on its background run.
+  await vi.waitFor(() => expect(count()).toBe('2'));
+  // Another machine's snapshot: its agent's memory pass happens to carry the same thread id.
+  const snapshot = new FakeAgents(() => {}).snapshot();
+  const other = { client: { call: vi.fn().mockResolvedValue({ ...snapshot, status: [{ agentId: 'agt-elsewhere', threadId: 'elsewhere', state: 'idle', memory: { threadId: child.id, status: 'running', summary: null, at: 1 } }] }), on: () => () => {} } } as unknown as Store;
+  const view = new AgentsView(other);
+  try {
+    await view.refresh();
+    await tick();
+    expect(count()).toBe('2');
+  } finally { view.close(); }
 });

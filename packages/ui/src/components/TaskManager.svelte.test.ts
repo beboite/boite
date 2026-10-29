@@ -5,6 +5,7 @@ import { RpcFailure } from '../lib/client';
 import { strings } from '../lib/strings';
 import { bytes, percent } from '../lib/format';
 import { test } from '../test/fake-client';
+import { workspace } from '../lib/workspace.svelte';
 import TaskManager from './TaskManager.svelte';
 import MobileSettings from './MobileSettings.svelte';
 
@@ -206,6 +207,52 @@ test('an old machine stop cannot clear a newer machine pending stop', async ({ r
   expect(element('.actions button').hasAttribute('disabled')).toBe(true);
   finishes[1]!(); await settle();
   expect(element('.actions button').hasAttribute('disabled')).toBe(false);
+});
+
+test('every machine has its card, and the one picked lists its agents', async ({ ready }) => {
+  visibility();
+  const a = await ready({ delayMs: 0, coreId: 'machine-a' });
+  const b = await ready({ delayMs: 0, coreId: 'machine-b' });
+  const original = b.client.call.bind(b.client);
+  // The laptop runs an older core: its card says so, and its agents have no GPU column.
+  const call = vi.spyOn(b.client, 'call').mockImplementation((method, params) => method === 'resources.machine' ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method resources.machine' })) : original(method, params));
+  // The Mac reads only its total memory: the overview leaves it out rather than count it idle.
+  const c = await ready({ delayMs: 0, coreId: 'machine-c' });
+  const macCall = c.client.call.bind(c.client);
+  vi.spyOn(c.client, 'call').mockImplementation(async (method, params) => {
+    const answer = await macCall(method, params);
+    return method === 'resources.machine' ? { ...answer, memory: { ...(answer as { memory: object }).memory, totalBytes: 64 * 2 ** 30, availableBytes: null } } : answer;
+  });
+  const listed = workspace.machines;
+  workspace.machines = [{ id: 'https://laptop.test', label: 'Laptop', store: b.store }, { id: 'desk', label: 'Desk', store: a.store }, { id: 'mac', label: 'Mac', store: c.store }];
+  try {
+    const props = $state({ store: a.store });
+    mounted = mount(TaskManager, { target: document.body, props }); await settle();
+    const cards = () => [...document.querySelectorAll<HTMLElement>('[data-testid="task-manager-machine"]')];
+    const card = (id: string) => cards().find(row => row.dataset.machineId === id)!;
+    expect(cards().map(row => row.dataset.machineId).sort()).toEqual(['desk', 'https://laptop.test', 'mac']);
+    const memoryInUse = [...document.querySelectorAll('.overview > div')].find(row => row.textContent?.includes(strings.taskManager.memoryInUse))!.querySelector('strong')!.textContent;
+    expect(memoryInUse).toBe(card('desk').querySelector('[data-testid="task-manager-machine-memory"] b')!.textContent);
+    expect(card('desk').getAttribute('aria-pressed')).toBe('true');
+    expect(card('desk').querySelector('[data-testid="task-manager-machine-cpu"]')!.textContent).toMatch(/\d+%/);
+    expect(card('desk').querySelector('[data-testid="task-manager-machine-storage"]')!.textContent).toContain('C:');
+    expect(card('desk').textContent).toContain('AMD Radeon RX 6750 XT');
+    expect(card('https://laptop.test').textContent).toContain(strings.taskManager.machine.unsupported);
+    expect(element('.heading h2').textContent).toBe(strings.taskManager.agentsOn('Desk'));
+    expect(rows()[0]!.querySelector('[data-testid="task-manager-gpu"]')!.textContent).toBe(percent(0));
+    await click(card('https://laptop.test'));
+    expect(card('https://laptop.test').getAttribute('aria-pressed')).toBe('true');
+    expect(element('.heading h2').textContent).toBe(strings.taskManager.agentsOn('Laptop'));
+    expect(call.mock.calls.some(([method]) => method === 'resources.usage')).toBe(true);
+    expect(rows().length).toBeGreaterThan(0);
+    expect(rows()[0]!.querySelector('[data-testid="task-manager-gpu"]')).toBeNull();
+    // A page opened for another machine starts from that machine again.
+    props.store = b.store; flushSync(); await settle();
+    props.store = a.store; flushSync(); await settle();
+    expect(element('.heading h2').textContent).toBe(strings.taskManager.agentsOn('Desk'));
+  } finally {
+    workspace.machines = listed;
+  }
 });
 
 test('the subtitle sits under the title in one block, like the other settings pages', async ({ store }) => {

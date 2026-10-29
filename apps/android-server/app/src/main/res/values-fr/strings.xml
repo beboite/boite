@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Boite Server</string>
+    <string name="tagline">Boite sur ce téléphone, pour vos autres appareils.</string>
+    <string name="check_again">Vérifier à nouveau</string>
+    <string name="copy">Copier</string>
+    <string name="copied">Copié</string>
+    <string name="done">Terminé</string>
+    <string name="cancel">Annuler</string>
+
+    <!-- Setup -->
+    <string name="termux_title">Installer Termux</string>
+    <string name="termux_body">Boite Server fonctionne dans Termux, un environnement Linux pour Android. Installez Termux depuis F-Droid ou la page des versions sur GitHub. Boite Server est conçu pour ces versions.</string>
+    <string name="termux_fdroid">F-Droid</string>
+    <string name="termux_github">GitHub</string>
+    <string name="permission_title">Autoriser Boite Server à utiliser Termux</string>
+    <string name="permission_body">Boite Server démarre, arrête et met à jour Boite en exécutant des commandes dans Termux. Android vous demande cette autorisation une seule fois.</string>
+    <string name="permission_allow">Autoriser</string>
+    <string name="permission_settings">Paramètres de l\'application</string>
+    <string name="setup_title">Installer Boite dans Termux</string>
+    <string name="setup_step_channel">Choisissez les versions à suivre.</string>
+    <string name="setup_step_paste">Ouvrez Termux, collez cette commande et appuyez sur Entrée. Elle télécharge plusieurs centaines de mégaoctets : utilisez le Wi-Fi.</string>
+    <string name="setup_step_wait">Revenez ici quand Termux indique que Boite fonctionne. Le tableau de bord s\'affichera automatiquement.</string>
+    <string name="setup_open_termux">Ouvrir Termux</string>
+    <string name="setup_termux_said">Termux : %1$s</string>
+    <string name="channel_stable">Stable</string>
+    <string name="channel_nightly">Nightly</string>
+
+    <!-- Status -->
+    <string name="state_running">En marche</string>
+    <string name="state_starting">Démarrage</string>
+    <string name="state_stopped">Arrêté</string>
+    <string name="version">Boite %1$s</string>
+    <string name="channel_line">Canal %1$s</string>
+    <string name="up_for">actif depuis %1$s</string>
+    <string name="duration_days">%1$d j %2$d h</string>
+    <string name="duration_hours">%1$d h %2$d min</string>
+    <string name="duration_minutes">%1$d min</string>
+    <string name="reach_at">Depuis un autre appareil, ouvrez cette adresse</string>
+    <string name="tailscale_address">Tailscale</string>
+    <string name="wifi_address">Wi-Fi</string>
+    <string name="waiting_tailscale">En attente de Tailscale : le serveur écoutera dès que ce téléphone rejoindra le tailnet.</string>
+    <string name="start">Démarrer</string>
+    <string name="stop">Arrêter</string>
+    <string name="restart">Redémarrer</string>
+    <string name="busy_start">Démarrage…</string>
+    <string name="busy_stop">Arrêt en cours. Un tour déjà lancé a jusqu\'à 75 s pour se terminer.</string>
+    <string name="busy_restart">Redémarrage en cours. Un tour déjà lancé a jusqu\'à 75 s pour se terminer.</string>
+    <string name="busy_other">Opération en cours…</string>
+
+    <!-- Signing the agents in -->
+    <string name="sign_in_title">Agents</string>
+    <string name="sign_in_unknown">Boite n\'a pas indiqué quels agents sont connectés.</string>
+    <string name="nobody_signed_in">Aucun agent connecté</string>
+    <string name="sign_in_hint">Une conversation ne reçoit aucune réponse tant qu\'aucun agent n\'est connecté. Le bouton Se connecter ouvre Termux. Ouvrez le lien affiché, connectez-vous, puis collez le code dans Termux si un code vous est demandé. Vous pouvez aussi appairer une application de bureau Boite ci-dessous et vous connecter depuis Réglages › Fournisseurs.</string>
+    <string name="signed_in">Connecté</string>
+    <string name="signed_out">Non connecté</string>
+    <string name="sign_in_checking">Pas encore vérifié</string>
+    <string name="sign_in_error">Échec de la vérification de connexion</string>
+    <string name="sign_in">Se connecter</string>
+
+    <!-- Pairing -->
+    <string name="pair_title">Appairer un appareil</string>
+    <string name="pair_device">Téléphone ou navigateur</string>
+    <string name="pair_device_hint">Ouvre Boite sur ce serveur avec les droits d\'un téléphone.</string>
+    <string name="pair_owner">Application de bureau</string>
+    <string name="pair_owner_hint">Donne à une application de bureau Boite le contrôle complet de ce serveur, en tant que propriétaire.</string>
+    <string name="pair_show">Afficher le code</string>
+    <string name="pair_dialog_device">Appairer un téléphone ou navigateur</string>
+    <string name="pair_dialog_owner">Appairer une application de bureau</string>
+    <string name="pair_dialog_body">Scannez le code depuis l\'autre appareil ou envoyez-lui le lien. Le lien ne fonctionne qu\'une fois.</string>
+    <string name="pair_until">Valable jusqu\'à %1$s.</string>
+    <string name="pair_copy">Copier le lien</string>
+    <string name="pair_secret">Ce lien donne accès au serveur à quiconque le possède. Partagez-le uniquement avec votre propre appareil.</string>
+
+    <!-- Updates and agents -->
+    <string name="updates_title">Mises à jour</string>
+    <string name="check_updates">Rechercher des mises à jour</string>
+    <string name="up_to_date">Boite %1$s est à jour.</string>
+    <string name="available">Boite %1$s est disponible.</string>
+    <string name="update_now">Mettre à jour</string>
+    <string name="updating">Mise à jour en cours. Boite s\'arrête un instant quand la nouvelle version est prête.</string>
+    <string name="updated">Boite %1$s installé.</string>
+    <string name="claude">Claude Code</string>
+    <string name="codex">Codex</string>
+    <string name="not_installed">non installé</string>
+    <string name="not_checked">…</string>
+    <string name="update_claude">Mettre à jour Claude Code</string>
+    <string name="updating_claude">Mise à jour de Claude Code…</string>
+    <string name="claude_updated">Claude Code mis à jour vers %1$s.</string>
+    <string name="claude_current">Claude Code %1$s est à jour.</string>
+    <string name="codex_hint">Le gestionnaire de paquets de Termux met à jour Codex : pkg upgrade codex.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Réglages</string>
+    <string name="setting_channel">Versions</string>
+    <string name="setting_host">Écouter sur</string>
+    <string name="host_lan">Wi-Fi et Tailscale</string>
+    <string name="host_tailscale">Tailscale uniquement</string>
+    <string name="host_local">Ce téléphone uniquement</string>
+    <string name="setting_port">Port</string>
+    <string name="setting_port_invalid">Un port de 1024 à 65535.</string>
+    <string name="save">Enregistrer</string>
+    <string name="setting_autostart">Démarrer avec le téléphone</string>
+    <string name="restart_to_apply">Enregistré. Redémarrez Boite pour appliquer les réglages.</string>
+
+    <!-- Keeping it alive -->
+    <string name="alive_title">Garder le serveur actif</string>
+    <string name="alive_body">Android arrête les applications en arrière-plan pour économiser la batterie. Pour que le serveur reste actif :</string>
+    <string name="alive_battery">Réglez l\'utilisation de la batterie de Termux sur Sans restriction.</string>
+    <string name="alive_autostart">Autorisez Boite Server à démarrer avec le téléphone. Sur certains téléphones, cette option se trouve dans Paramètres de Boite Server › Utilisation de la batterie, sur d\'autres dans une liste de démarrage automatique ; sans cette autorisation, Boite reste à l\'arrêt après un redémarrage.</string>
+    <string name="alive_children">Sur Android 12 et les versions suivantes, activez Options pour les développeurs › Désactiver les restrictions des processus enfants si le téléphone le propose.</string>
+    <string name="alive_termux_settings">Paramètres de Termux</string>
+    <string name="alive_app_settings">Paramètres de Boite Server</string>
+    <string name="alive_guide">Guide pour %1$s</string>
+
+    <!-- Logs -->
+    <string name="logs_title">Journaux</string>
+    <string name="logs_show">Afficher les journaux</string>
+    <string name="logs_refresh">Actualiser</string>
+    <string name="logs_empty">Aucune entrée pour le moment.</string>
+
+    <!-- Removal -->
+    <string name="remove_title">Supprimer Boite Server</string>
+    <string name="remove_body">Arrête Boite et le supprime de Termux. Vos conversations sont conservées, sauf si vous les supprimez aussi.</string>
+    <string name="remove_button">Supprimer</string>
+    <string name="remove_purge">Supprimer aussi les conversations</string>
+    <string name="remove_confirm">Supprimer Boite de ce téléphone ?</string>
+</resources>

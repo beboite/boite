@@ -1,8 +1,10 @@
 import { registerJournalInspection } from './journal/integrity.ts';
 import type { Core } from './core.ts';
 import { registerPersistentAgents } from './agents/store.ts';
+import { createAgent } from './agents/create.ts';
 import { registerAccountMethods } from './accounts.ts';
 import { registerHookMethods } from './hooks.ts';
+import { registerSecretMethods } from './secrets/rpc.ts';
 import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
 import { registerKeybindingMethods } from './keybindings.ts';
@@ -25,6 +27,7 @@ import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
 import { registerContactMethods } from './contacts/rpc.ts';
+import { registerSharedComputeMethods } from './contacts/compute.ts';
 import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
@@ -35,6 +38,7 @@ import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerSharedComputeMethods(core);
   registerJournalInspection(core);
   core.router.register('core.logs', async params => {
     const records = await core.logs.query(params);
@@ -55,9 +59,11 @@ export function registerModules(core: Core): void {
   core.router.register('core.desktopUpdateStatus', () => core.desktopUpdates.snapshot());
   registerPersistentAgents(core);
   core.router.register('brain.status', () => core.brain.status());
+  core.router.register('brain.commands', () => core.brain.commands());
   core.router.register('brain.configure', params => core.brain.configure(params));
   core.router.register('brain.sync', () => core.brain.sync());
   registerHookMethods(core);
+  registerSecretMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
   registerContactMethods(core);
@@ -71,6 +77,7 @@ export function registerModules(core: Core): void {
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
+  core.router.register('quotas.alert', (params) => core.quotas.alert(params.accountId, params.period, params.thresholds));
   core.router.register('quotas.reset', (params) => core.quotas.resets.reset(params.accountId, params.confirmed));
   core.router.register('plugins.list', () => core.plugins.list());
   core.router.register('plugins.inspect', (params) => core.plugins.inspect(params));
@@ -97,6 +104,11 @@ export function registerModules(core: Core): void {
   core.router.register('delegation.spawn', async params => {
     await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
     return core.delegation.spawn(params);
+  });
+  // A bot's model resolves as a subagent's: read the lists a named model needs first.
+  core.router.register('agents.create', async params => {
+    await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
+    return createAgent(core, core.workforce, params);
   });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
   // The agent's own stop leaves a pause it may lift; the owner's, one only the owner's next message releases.

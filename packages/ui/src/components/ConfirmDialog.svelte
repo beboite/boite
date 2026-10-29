@@ -3,7 +3,7 @@
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
-  import { focusedElement, restoreFocus } from '../lib/focus';
+  import { focusInitial, focusedElement, restoreFocus } from '../lib/focus';
 
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
@@ -34,8 +34,9 @@
     held = current;
     overlay.show();
     void tick().then(() => {
-      const target = card?.querySelector<HTMLElement>(current.requiredText !== undefined ? '[data-testid=confirm-name]' : current.danger ? '[data-cancel]' : '[data-confirm]');
-      target?.focus({ preventScroll: true });
+      const target = card?.querySelector<HTMLElement>(current.requiredText !== undefined || current.initialText !== undefined ? '[data-testid=confirm-name]' : current.danger ? '[data-cancel]' : '[data-confirm]');
+      focusInitial(target, card);
+      if (current.initialText !== undefined && target instanceof HTMLInputElement) target.select();
     });
   });
 
@@ -72,7 +73,7 @@
     if (!first || !last) return;
     const active = document.activeElement;
     const inside = active instanceof Node && el.contains(active);
-    if (event.shiftKey ? inside && active !== first : inside && active !== last) return;
+    if (active !== el && (event.shiftKey ? inside && active !== first : inside && active !== last)) return;
     event.preventDefault();
     (event.shiftKey ? last : first).focus({ preventScroll: true });
   }
@@ -95,7 +96,7 @@
     <div
       class="dialog"
       class:closing={overlay.closing}
-      role="alertdialog"
+      role={request.initialText !== undefined ? 'dialog' : 'alertdialog'}
       aria-modal="true"
       aria-labelledby="confirm-title"
       aria-describedby={request.body ? 'confirm-body' : undefined}
@@ -107,11 +108,11 @@
       {#if request.body}
         <p id="confirm-body" class="muted">{request.body}</p>
       {/if}
-      {#if request.requiredText !== undefined}
+      {#if request.requiredText !== undefined || request.initialText !== undefined}
         <label class="name-field" for="confirm-name">{request.inputLabel}
           <input id="confirm-name" data-testid="confirm-name" bind:value={confirm.typed} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
         </label>
-        <p class="required-name">{request.requiredText}</p>
+        {#if request.requiredText !== undefined}<p class="required-name">{request.requiredText}</p>{/if}
       {/if}
       <div class="actions">
         <button type="button" class="ghost" data-cancel data-testid="confirm-cancel" onclick={() => confirm.answer(false)}>
@@ -126,7 +127,7 @@
           class:destructive={request.danger}
           data-confirm
           data-testid="confirm-ok"
-          disabled={request.requiredText !== undefined && confirm.typed !== request.requiredText}
+          disabled={(request.requiredText !== undefined && confirm.typed !== request.requiredText) || (request.initialText !== undefined && !confirm.typed.trim())}
           onclick={() => confirm.answer(true)}
         >
           <span class="ui-label">{request.confirmLabel}</span>

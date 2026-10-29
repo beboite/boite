@@ -10,8 +10,8 @@ export interface LiveInputHandlers {
   /** Returns true when the key went to the view: the app then never sees it. */
   key(event: KeyboardEvent): boolean;
   paste(text: string): void;
-  /** The view's selected text; absent or an empty answer leaves the clipboard as it was. */
-  copy?(): Promise<string>;
+  /** The view's selected text, after a cut when `cut`; absent or an empty answer leaves the clipboard as it was. */
+  copy?(cut: boolean): Promise<string>;
   /** After a cut reached the clipboard: erase the selection in the view. */
   cut?(): void;
   /** A copy that could not be written, with the reason. */
@@ -74,7 +74,7 @@ export function liveInput(screen: () => Element | null | undefined, handlers: Li
   const copy = (event: ClipboardEvent) => {
     if (!mine(event) || !handlers.copy) return;
     event.preventDefault();
-    writeClipboardLater(handlers.copy()).then(
+    writeClipboardLater(handlers.copy(event.type === 'cut')).then(
       written => { if (written && event.type === 'cut') handlers.cut?.(); },
       cause => handlers.failed?.(errorText(cause)));
   };
@@ -130,11 +130,16 @@ export function browserKey(event: KeyboardEvent): { press: string } | { text: st
 
 const DEVICE_KEYS = { Enter: 'enter', Backspace: 'backspace', Delete: 'delete', Tab: 'tab', Escape: 'back', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' } as const;
 
-/** What a key pressed on a live device sends: a device key (Escape is Android's back), a printable ASCII character, or nothing. */
-export function deviceKey(event: KeyboardEvent): { key: (typeof DEVICE_KEYS)[keyof typeof DEVICE_KEYS] } | { text: string } | null {
+/**
+ * What a key pressed on a live device sends: a device key (Escape is Android's
+ * back), a character, or nothing. Without `unicode` (`adb shell input`), only
+ * printable ASCII characters.
+ */
+export function deviceKey(event: KeyboardEvent, unicode = false): { key: (typeof DEVICE_KEYS)[keyof typeof DEVICE_KEYS] } | { text: string } | null {
   const altGraph = event.getModifierState?.('AltGraph') === true;
   if (((event.ctrlKey || event.metaKey || event.altKey) && !altGraph)) return null;
   if (Object.hasOwn(DEVICE_KEYS, event.key)) return { key: DEVICE_KEYS[event.key as keyof typeof DEVICE_KEYS] };
+  if (unicode) return [...event.key].length === 1 && !/\p{Cc}/u.test(event.key) ? { text: event.key } : null;
   return /^[\x20-\x7e]$/.test(event.key) ? { text: event.key } : null;
 }
 

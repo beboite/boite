@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AGENT_PREFIX, isAgentCommand, slashName } from '../lib/commands.svelte';
+  import { SKILL_PREFIX } from '../lib/composer-menus';
   import type { PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import ComposerMenu from './ComposerMenu.svelte';
@@ -28,8 +29,9 @@
     const item = items[index];
     if (!item) return null;
     const previous = items[index - 1];
-    if (previous && isAgentCommand(previous) === isAgentCommand(item)) return null;
-    return isAgentCommand(item) ? strings.slash.agent : strings.slash.app;
+    const group = (row: PaletteItem): string => isAgentCommand(row) ? strings.slash.agent
+      : row.id.startsWith(SKILL_PREFIX) ? strings.slash.skills : strings.slash.app;
+    return previous && group(previous) === group(item) ? null : group(item);
   }
 
   function nameOf(item: PaletteItem): string {

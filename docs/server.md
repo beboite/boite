@@ -13,7 +13,10 @@ Grok and Muse Code have none there, so they need a custom image. The x64 image c
 baseline build only, which also runs on CPUs without AVX2. Agent
 authentication is still required. No login is built into the image.
 
-Release workflows publish `ghcr.io/beboite/boite/boite-server` for Linux x64 and ARM64.
+Release workflows publish `ghcr.io/mtsu-dev/boite/boite-server` for Linux x64 and ARM64.
+Images built before the repository moved on 2026-10-26 stay at
+`ghcr.io/beboite/boite/boite-server`, which gets no new tags. GHCR does not
+redirect a moved package, so a Compose file that names it needs the new path.
 Until the first image has been published, build it from this checkout:
 
 ```sh
@@ -60,12 +63,21 @@ the home volume; isolated accounts persist in the data volume. See
 [accounts](accounts.md). Install additional system tools in a derived image,
 or user tools under `/home/node/.local`, whose `bin` directory is on `PATH`.
 
+The image ships its agents in `/opt/agents`, owned by root. npm's global prefix
+is `/home/node/.local` (`NPM_CONFIG_PREFIX`), and its `bin` comes before
+`/opt/agents` on `PATH`. An agent update, from the Providers page or the
+agent's own command (`codex update`, `pi update self`), installs there, in the
+home volume, and that copy runs from then on. It outlives an image update, so
+it is the copy Boite updates next. `npm uninstall -g <package>`
+(`npm uninstall -g @openai/codex`) removes its `bin` entry and its
+`lib/node_modules` copy, and the image's runs again.
+
 ### Updates and rollback
 
 Record the current image digest and stop the core before backing up:
 
 ```sh
-docker image inspect ghcr.io/beboite/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
+docker image inspect ghcr.io/mtsu-dev/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
 docker compose stop -t 60
 ```
 
@@ -87,7 +99,7 @@ wrote to `/data/core.json`, so a `--port` passed in `command:` is followed.
 Compose restarts exited containers;
 Docker does not automatically restart an unhealthy process.
 
-To pin a release, set `BOITE_IMAGE=ghcr.io/beboite/boite/boite-server:v<version>` in
+To pin a release, set `BOITE_IMAGE=ghcr.io/mtsu-dev/boite/boite-server:v<version>` in
 a local `.env` file. To roll back, stop the server, restore the matching volume
 backup and set `BOITE_IMAGE` to the old recorded digest before starting again.
 An older binary may not understand a journal migrated by a newer one.
@@ -134,12 +146,11 @@ no real provider call and uses no existing login directory.
 ## Updating from the app
 
 Open Settings, Machines and updates. A remote server whose row says Update
-available has a signed release waiting: open its details, where the server
-shows its installed version, a Check for updates action and Update. The
-desktop app's own manual check and channel choices sit in the card above the
-list. Cards show the installed and offered versions together. The card's own
-Details expands the idle wait, backup and recovery behavior without adding it
-to the confirmation.
+available has a signed release waiting: the updates card at the top lists it
+under the app's own, with its installed and offered versions, and its Update
+button installs it with everything else waiting. While that server downloads
+or waits for its agents, its line offers Cancel. A Docker or hand-made server
+says on its row how it updates.
 
 The sidebar's update card lists that release too, and its Update all
 installs it after the machine's agents
@@ -156,10 +167,13 @@ The default service name is `boite.service`; set `BOITE_SERVER_SERVICE` in the
 service environment for another name. Its `ExecStart` must name that core
 directly, and `Restart` must be `on-failure` or `no`. Desktop sidecars, source
 runs, symlinked installs and containers keep their own installation method.
-Docker cards show the Compose update command; other unmanaged or older cores
-link to this guide. A core predating this feature needs one manual update first.
+When a release is available, a Docker core's row has a tip with the Compose
+update command and another unmanaged core's tip points to this guide. A core predating this feature needs one manual update first.
 
-The server checks eight seconds after startup, then every six hours. It follows
+The server checks eight seconds after startup, then every six hours. An owner
+client that connects, or whose window is shown again, asks it to check at once
+when its last check is more than 15 minutes old; a download, a wait or a
+failure is left as it is. It follows
 its installed stable or nightly channel, downloads an immutable release's
 signed server archive, and verifies the publisher signature and embedded
 version before staging the complete core, CLI and UI. The archive is hashed as
@@ -243,11 +257,18 @@ the service starts the previous version at boot. A start that finds the record
 takes `<data>.maintenance.lock`, a kernel `flock` the job and its recovery hold
 while they restore, so neither moves the data under the other. The restore
 starts no process while it holds it, so the kernel drops it with a killed
-holder. Whoever restores also holds the data directory's `core.lock` from its
-first look until that data moves aside, and refuses while a live core holds it.
-It puts its own `core.lock` in the restored copy before that copy takes the
-data directory's name, so a core starting meanwhile finds the data taken or
-the record still there, never a directory about to move away. It finishes that
+holder. Whoever restores takes the data directory's `core.lock` and refuses
+while a live core holds it. It also locks the restored copy before the swap.
+Windows cannot rename these directories with the lock handles open, so the
+restorer publishes PID records without `osLock` from its first acquisition in
+both directories, closes their handles without rewriting those records, then
+takes the native lock again under the final data name. Rewriting a published
+record would expose an empty file during truncation to an older PID-only core,
+which could replace it and enter. The maintenance lock stays held throughout.
+Both older cores and current cores honor these
+live PID records, including a start that checked for a rollback before its
+record was published. If the restorer dies mid-swap, its PID records no longer
+block the next restore. It finishes that
 operation's restore before anything opens the data: it uses the
 `<data>.restore-<id>` the record names, never the newest one on disk, keeps
 the rejected data as `<data>.failed-<id>` (or `<data>.unused-data` when that
@@ -328,6 +349,13 @@ a fixed port:
 ~/.local/lib/boite/boite-core --host <private address> --port <port>
 ```
 
+`BOITE_MACHINE_NAME` sets the name the core reports to clients and its group;
+otherwise it uses the operating system's hostname (`machineName` in
+`packages/core/src/paths.ts`). The value is trimmed and limited to 100
+characters. Set it in the core's environment before starting it, for example
+with an `Environment=BOITE_MACHINE_NAME=build-server` line in the unit below.
+Client-side names and icons in [Machines](machines.md) remain device preferences.
+
 There is no TLS on the socket. Never bind a public address: the key a pairing
 link becomes travels in the first frame, and `ws://` carries it in the clear.
 
@@ -401,6 +429,12 @@ core for a one-time link over its own socket, and prints it on stdout; stderr
 says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
+
+`boite-core accounts` asks the running core the same way for the agent
+accounts Settings › Providers shows, one line per account with its provider,
+status and label, or the list as JSON with `--json`. `--refresh` first reloads
+the providers, which adopts a login made with an agent's own CLI, then checks
+every account against its agent.
 
 A server that belongs with your other machines joins their [group](groups.md)
 instead, with `boite-core group join`, which reads the invitation on its

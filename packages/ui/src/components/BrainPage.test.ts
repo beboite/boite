@@ -15,11 +15,31 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+test('Windows link failures explain Developer Mode and retry the saved configuration', async () => {
+  const config = { path: 'C:/brain', enabled: true, globalInstructions: true, boiteGuide: false };
+  const call = vi.fn(async (method: string) => ({ config, entries: [], problems: [], git: null, lastSync: null,
+    links: [{ name: 'Codex', path: 'C:/Users/user/.codex/AGENTS.md', state: method === 'brain.configure' ? 'linked' : 'blocked',
+      error: method === 'brain.configure' ? null : 'EPERM: symlink', ...(method === 'brain.configure' ? {} : { remedy: 'windows-developer-mode' }) }] }));
+  const store = { client: client(call), owner: true, connection: 'ready', keep: vi.fn() } as unknown as Store;
+  mounted = mount(BrainPage, { target: document.body, props: { store } });
+  await vi.waitFor(() => { flushSync(); expect(document.querySelector('[data-testid="brain-link-help"]')?.textContent).toContain('Developer Mode'); });
+  expect(document.querySelector('[data-testid="brain-link-help"]')?.textContent).toContain('ms-settings:developers');
+  expect(document.querySelector('[data-testid="brain-link-help"]')?.textContent).toContain('Win+R');
+  document.querySelector<HTMLButtonElement>('[data-testid="brain-link-retry"]')!.click();
+  await vi.waitFor(() => { flushSync(); expect(document.querySelector('[data-testid="brain-link-help"]')).toBeNull(); });
+  expect(call).toHaveBeenCalledWith('brain.configure', config);
+  expect(document.querySelector<HTMLInputElement>('[data-testid="brain-global"]')!.checked).toBe(true);
+});
+
 test('restoration problems remain visible after disconnecting the folder', async () => {
-  const call = vi.fn(async () => ({ config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null,
-    links: [{ name: 'Codex', path: '/home/user/.codex/AGENTS.md', state: 'blocked', error: 'Restore pending; original backup preserved' }] }));
+  const call = vi.fn(async (method: string) => ({ config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null,
+    links: method === 'brain.configure' ? [] : [{ name: 'Codex', path: '/home/user/.codex/AGENTS.md', state: 'blocked', error: 'Restore pending; original backup preserved' }] }));
   mounted = mount(BrainPage, { target: document.body, props: { store: { client: client(call), owner: true, connection: 'ready' } as unknown as Store } });
-  await vi.waitFor(() => { flushSync(); expect(document.querySelector('[role="alert"]')?.textContent).toContain('original backup preserved'); });
+  await vi.waitFor(() => { flushSync(); expect([...document.querySelectorAll('[role="alert"]')].some(alert => alert.textContent?.includes('original backup preserved'))).toBe(true); });
+  expect(document.querySelector('[data-testid="brain-link-help"]')?.textContent).not.toContain('Developer Mode');
+  document.querySelector<HTMLButtonElement>('[data-testid="brain-link-retry"]')!.click();
+  await vi.waitFor(() => { flushSync(); expect(document.querySelector('[data-testid="brain-link-help"]')).toBeNull(); });
+  expect(call).toHaveBeenCalledWith('brain.configure', { path: null, enabled: false });
 });
 
 test.each(['enabled', 'global', 'guide'])('a refused %s change keeps the saved switch state and shows the error', async name => {
@@ -72,4 +92,40 @@ test('automatic pull controls save their policy and preserve it when sharing cha
   control('enabled').click();
   await vi.waitFor(() => { flushSync(); expect(config.enabled).toBe(true); });
   expect(config.autoPull).toEqual({ onStartup: true, intervalMinutes: 30 });
+});
+
+test('a change made elsewhere shows at once, and the next switch writes the configuration the core holds', async () => {
+  let configured: ((config: unknown) => void) | undefined;
+  const call = vi.fn(async (method: string, params?: unknown) => method === 'brain.configure'
+    ? { config: params, entries: [], problems: [], git: null, lastSync: null }
+    : { config: { path: '/work/brain', enabled: true, globalInstructions: false, boiteGuide: true }, entries: [], problems: [], git: null, lastSync: null });
+  const store = {
+    client: { ...client(call as never), on: (event: string, handler: (config: unknown) => void) => { if (event === 'brain.configured') configured = handler; return () => {}; } },
+    owner: true, connection: 'ready', keep: vi.fn(async () => undefined)
+  } as unknown as Store;
+  mounted = mount(BrainPage, { target: document.body, props: { store } });
+  await vi.waitFor(() => { flushSync(); expect(document.querySelector<HTMLInputElement>('[data-testid="brain-global"]')?.checked).toBe(false); });
+  // The default machine's copy turned the instructions on.
+  configured!({ path: '/work/brain', enabled: true, globalInstructions: true, boiteGuide: true });
+  flushSync();
+  expect(document.querySelector<HTMLInputElement>('[data-testid="brain-global"]')!.checked).toBe(true);
+  document.querySelector<HTMLInputElement>('[data-testid="brain-guide"]')!.click();
+  await vi.waitFor(() => expect(call).toHaveBeenCalledWith('brain.configure', expect.objectContaining({ globalInstructions: true, boiteGuide: false })));
+});
+
+test('another folder chosen elsewhere reads that folder again, not only its switches', async () => {
+  let configured: ((config: unknown) => void) | undefined;
+  const first = { config: { path: '/work/brain', enabled: true }, entries: [{ kind: 'instructions', name: 'OLD-AGENTS.md', path: 'OLD-AGENTS.md', description: '', error: null }], problems: [], git: null, lastSync: null };
+  const second = { config: { path: '/other/brain', enabled: true }, entries: [], problems: [], git: null, lastSync: null };
+  let current: unknown = first;
+  const call = vi.fn(async () => current);
+  const store = {
+    client: { ...client(call as never), on: (event: string, handler: (config: unknown) => void) => { if (event === 'brain.configured') configured = handler; return () => {}; } },
+    owner: true, connection: 'ready', keep: vi.fn(async () => undefined)
+  } as unknown as Store;
+  mounted = mount(BrainPage, { target: document.body, props: { store } });
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('OLD-AGENTS.md'); });
+  current = second;
+  configured!(second.config);
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).not.toContain('OLD-AGENTS.md'); });
 });

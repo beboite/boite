@@ -72,10 +72,10 @@ describe.skipIf(!ready)('installer hooks', () => {
       const script = `!addplugindir /x86-unicode "${PLUGINS}"\n` + withHooks
         .replace(/^!define BUNDLEID ".*"\r?$/m, `!define BUNDLEID "${id}"`)
         .replace(/^!define OUTFILE ".*"\r?$/m, `!define OUTFILE "${join(directory, 'setup.exe')}"`)
-        // Only the script is under test: no compression, and the payload
-        // files a build staged need not exist any more.
-        .replace('!if "lzma" == "none"', '!if "none" == "none"')
-        .replace(/^(\s*)File (?!\/nonfatal)/gm, '$1File /nonfatal ');
+        // Only hook placement is under test: omit application/WebView payloads
+        // even when the build's files still exist, and disable any compression.
+        .replace(/^!if "[^"]+" == "none"\r?$/m, '!if "none" == "none"')
+        .replace(/^([ \t]*)File [^\r\n]*\r?$/gm, '$1; payload omitted by hook template test');
       writeFileSync(join(directory, 'installer.nsi'), script);
       const output = makensis(join(directory, 'installer.nsi'));
       const chosen = [...output.matchAll(/SetEnvironmentVariable\(t "BOITE_STOP_DIR", t "([^"]*)"\)/g)].map((match) => match[1]);
@@ -91,142 +91,7 @@ describe.skipIf(!ready)('installer hooks', () => {
   // shell running from the install's directory: Boite and Boite Dev install
   // side by side, and once shipped the same file name.
   test('a running shell cannot restart the core while its files are replaced or removed', async () => {
-    const base = join(scratch, 'shell');
-    mkdirSync(base, { recursive: true });
-    writeFileSync(join(base, 'fake-core.ts'), FAKE_CORE);
-    writeFileSync(join(base, 'fake-shell.ts'), FAKE_SHELL);
-    writeFileSync(join(base, 'new-core.txt'), 'the new core\n');
-    const data = join(base, 'data');
-    const script = [
-      'Unicode true',
-      `!addplugindir /x86-unicode "${PLUGINS}"`,
-      '!include LogicLib.nsh',
-      `!include "${join(GENERATED, 'utils.nsh')}"`,
-      `!define BOITE_DATA_ROOT "${data}"`,
-      // Where and in which order the template has them.
-      `!include "${HOOKS}"`,
-      '!define MAINBINARYNAME "boite-hooktest-shell"',
-      '!define PRODUCTNAME "Boite hook test"',
-      '!define BUNDLEID "com.boite.two"',
-      '!define INSTALLMODE "currentUser"',
-      `!define UNINSTKEY "${UNINSTKEY}"`,
-      'Var PassiveMode',
-      'Var OldMainBinaryName',
-      `OutFile "${join(base, 'setup.exe')}"`,
-      'RequestExecutionLevel user',
-      'SilentInstall silent',
-      'LoadLanguageFile "${NSISDIR}\\Contrib\\Language files\\English.nlf"',
-      'LangString appRunning ${LANG_ENGLISH} "{{product_name}} is running"',
-      'LangString appRunningOkKill ${LANG_ENGLISH} "{{product_name}} is running, OK to kill it"',
-      'LangString failedToKillApp ${LANG_ENGLISH} "{{product_name}} could not be killed"',
-      'Section Install',
-      '  SetOutPath $INSTDIR',
-      '  !insertmacro NSIS_HOOK_PREINSTALL',
-      // The user reading the template's OK/Cancel box, when it still asks.
-      '  Sleep 6000',
-      '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
-      '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
-      '  !endif',
-      // A copy that fails halfway through the chunks, which the template
-      // writes before boite-core.exe (a full disk): the install aborts.
-      '  IfFileExists "$INSTDIR\\fail-copy" 0 +4',
-      '    CreateDirectory "$INSTDIR\\core"',
-      `    File "/oname=core\\main-n3wn3wn3.js" "${join(base, 'new-core.txt')}"`,
-      '    Abort',
-      '  ClearErrors',
-      `  File "/oname=boite-core.exe" "${join(base, 'new-core.txt')}"`,
-      '  IfErrors 0 +2',
-      '    FileOpen $0 "$INSTDIR\\write-failed" w',
-      `  WriteUninstaller "${join(base, 'uninstall.exe')}"`,
-      '  !insertmacro NSIS_HOOK_POSTINSTALL',
-      'SectionEnd',
-      'Section Uninstall',
-      '  !insertmacro NSIS_HOOK_PREUNINSTALL',
-      '  Sleep 6000',
-      '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
-      '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
-      '  !endif',
-      '  Delete "$INSTDIR\\boite-core.exe"',
-      // The rest of the template's uninstall: shortcuts, registry, uninstaller.
-      '  Sleep 2000',
-      // Where the template inserts it, after its own deletions.
-      '  !ifmacrodef NSIS_HOOK_POSTUNINSTALL',
-      '    !insertmacro NSIS_HOOK_POSTUNINSTALL',
-      '  !endif',
-      'SectionEnd',
-    ].join('\r\n');
-    writeFileSync(join(base, 'hooktest.nsi'), script);
-    makensis(join(base, 'hooktest.nsi'));
-    // No name left registered by an earlier run.
-    Bun.spawnSync(['reg', 'delete', `HKCU\\${UNINSTKEY}`, '/f'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
-
-    // The same file name run from elsewhere: another install, or a build in a
-    // cargo target directory. No installer here may end it.
-    const elsewhere = join(base, 'elsewhere');
-    mkdirSync(elsewhere, { recursive: true });
-    copyFileSync(process.execPath, join(elsewhere, 'boite-hooktest-shell.exe'));
-    const other = Bun.spawn([join(elsewhere, 'boite-hooktest-shell.exe'), '-e', 'setInterval(() => {}, 1000)'], {
-      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
-    });
-    started.push(other.pid);
-
-    // An install and its running core and shell, as Boite leaves them.
-    async function running(name: string, shellName = 'boite-hooktest-shell.exe') {
-      const install = join(base, name);
-      mkdirSync(install, { recursive: true });
-      mkdirSync(join(data, 'boite2'), { recursive: true });
-      rmSync(join(data, 'boite2', 'core.json'), { force: true });
-      copyFileSync(process.execPath, join(install, 'boite-core.exe'));
-      copyFileSync(process.execPath, join(install, shellName));
-      // A previous build's hashed chunks, and files of the user's beside them.
-      for (const [path, text] of [...STALE, ...KEPT]) {
-        mkdirSync(dirname(join(install, path)), { recursive: true });
-        writeFileSync(join(install, path), text);
-      }
-      const restarted = join(install, 'restarted.txt');
-      const core = Bun.spawn([join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), '--data-dir', join(data, 'boite2')], {
-        stdout: 'ignore', stderr: 'ignore', windowsHide: true,
-      });
-      started.push(core.pid);
-      const deadline = Date.now() + 20_000;
-      while (!existsSync(join(data, 'boite2', 'core.json'))) {
-        if (Date.now() > deadline) throw new Error('the fake core never wrote core.json');
-        await Bun.sleep(50);
-      }
-      const shell = Bun.spawn([join(install, shellName), join(base, 'fake-shell.ts'),
-        join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), join(data, 'boite2'), restarted], {
-        stdout: 'ignore', stderr: 'ignore', windowsHide: true,
-      });
-      started.push(shell.pid);
-      await Bun.sleep(500);
-      return { install, core, shell, restarted };
-    }
-    // Whether the bundle directories are still there, the user's files
-    // untouched and nothing left aside.
-    function bundles(install: string) {
-      return {
-        core: existsSync(join(install, 'core')),
-        ui: existsSync(join(install, 'ui')),
-        kept: KEPT.every(([path, text]) => existsSync(join(install, path)) && readFileSync(join(install, path), 'utf8') === text),
-        aside: existsSync(join(install, 'core.previous')) || existsSync(join(install, 'ui.previous')),
-      };
-    }
-    function restartedPids(file: string): number[] {
-      if (!existsSync(file)) return [];
-      const pids = readFileSync(file, 'utf8').split(/\s+/).filter(Boolean).map(Number);
-      started.push(...pids);
-      return pids;
-    }
-    // The exit code, or 'still running' after a few seconds.
-    function exited(child: Bun.Subprocess, ms = 5_000) {
-      return Promise.race([child.exited, Bun.sleep(ms).then(() => 'still running' as const)]);
-    }
-    async function run(command: string[]) {
-      const child = Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
-      started.push(child.pid);
-      return child.exited;
-    }
-
+    const { base, other, running, bundles, restartedPids, exited, run } = installerFixture('active');
     const installed = await running('install');
     expect(await run([join(base, 'setup.exe'), '/S', `/D=${installed.install}`])).toBe(0);
     // Ended by the installer, whatever code that leaves.
@@ -261,7 +126,12 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(restartedPids(removed.restarted)).toEqual([]);
     expect(existsSync(join(removed.install, 'boite-core.exe'))).toBe(false);
     expect(bundles(removed.install)).toEqual({ core: false, ui: false, kept: true, aside: false });
+    // A matching shell name in another installation stays running.
+    expect(other.exitCode).toBeNull();
+  }, 180_000);
 
+  test('failed and renamed installs preserve the core and its bundles', async () => {
+    const { base, data, other, running, bundles, restartedPids, exited, run } = installerFixture('recovery');
     const busy = await running('busy');
     writeFileSync(join(data, 'boite2', 'busy'), '');
     const before = Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')));
@@ -330,11 +200,220 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(renamed.shell)).not.toBe('still running');
     expect(await exited(renamed.core)).toBe(0);
     expect(restartedPids(renamed.restarted)).toEqual([]);
+    // A matching shell name in another installation stays running.
+    expect(other.exitCode).toBeNull();
+  }, 180_000);
 
-    // Six installs and uninstalls later, the shell run from elsewhere still runs.
+  test('idle installs skip stop scripts and a stale lock takes the checked path', async () => {
+    const { base, data, other, bundles, exited } = installerFixture('idle');
+    // Nothing of the install runs, as after an in-app update stopped its core
+    // and its shell: no PowerShell starts. Each one took about a second on
+    // Windows 11, most of an update's installation (2026-10-23). The scripts
+    // write their names to BOITE_HOOKS_TRACE when they run.
+    function idle(name: string) {
+      const install = join(base, name);
+      mkdirSync(install, { recursive: true });
+      copyFileSync(process.execPath, join(install, 'boite-core.exe'));
+      copyFileSync(process.execPath, join(install, 'boite-hooktest-shell.exe'));
+      for (const [path, text] of [...STALE, ...KEPT]) {
+        mkdirSync(dirname(join(install, path)), { recursive: true });
+        writeFileSync(join(install, path), text);
+      }
+      return install;
+    }
+    const trace = join(base, 'hooks-trace.txt');
+    async function traced(install: string) {
+      rmSync(trace, { force: true });
+      const at = performance.now();
+      // Handed over explicitly: a child started without `env` does not see a later change to process.env.
+      const child = Bun.spawn([join(base, 'setup.exe'), '/S', `/D=${install}`], {
+        env: { ...process.env, BOITE_HOOKS_TRACE: trace }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+      });
+      started.push(child.pid);
+      expect(await child.exited).toBe(0);
+      const scripts = existsSync(trace) ? readFileSync(trace, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+      return { scripts, ms: Math.round(performance.now() - at) };
+    }
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
+    const quiet = idle('idle');
+    const idleRun = await traced(quiet);
+    console.log(`an install with nothing running took ${idleRun.ms} ms, 6000 of them the section's own sleep`);
+    expect(idleRun.scripts).toEqual([]);
+    expect(readFileSync(join(quiet, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    expect(bundles(quiet)).toEqual({ core: false, ui: false, kept: true, aside: false });
+
+    // The in-app update's shell exits just after starting the installer: a
+    // shell executable let go of within the 3 seconds still skips the scripts.
+    const exiting = idle('exiting');
+    const exitingShell = join(exiting, 'boite-hooktest-shell.exe');
+    const holdingShell = join(base, 'holding-shell.txt');
+    // The paths go through the environment, so an apostrophe in them cannot end a PowerShell string.
+    const shellHolder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      "$f = [IO.File]::Open($env:BOITE_HOLD_FILE, 'Open', 'Read', 'Read'); Set-Content -LiteralPath $env:BOITE_HOLD_SIGNAL 'held'; Start-Sleep -Milliseconds 1000; $f.Close()"], {
+      env: { ...process.env, BOITE_HOLD_FILE: exitingShell, BOITE_HOLD_SIGNAL: holdingShell }, stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(shellHolder.pid);
+    for (const deadline = Date.now() + 20_000; !existsSync(holdingShell);) {
+      if (Date.now() > deadline) throw new Error('the holder never opened the shell executable');
+      await Bun.sleep(50);
+    }
+    const exitingRun = await traced(exiting);
+    expect(await exited(shellHolder)).toBe(0);
+    expect(exitingRun.scripts).toEqual([]);
+    expect(readFileSync(join(exiting, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+
+    // A lock a crashed core left behind takes the checked way, at once, which finds nothing to stop.
+    writeFileSync(join(data, 'boite2', 'core.lock'), JSON.stringify({ pid: 999999, startedAt: Date.now() }));
+    const crashed = idle('crashed');
+    const crashedRun = await traced(crashed);
+    expect(crashedRun.scripts).toEqual(['stop-shell', 'stop-core']);
+    expect(readFileSync(join(crashed, 'boite-core.exe'), 'utf8')).toBe('the new core\n');
+    rmSync(join(data, 'boite2', 'core.lock'), { force: true });
+    // A matching shell name in another installation stays running.
     expect(other.exitCode).toBeNull();
   }, 180_000);
 });
+
+/** An isolated installation tree, data directory and compiled hooks for one scenario group. */
+function installerFixture(name: string) {
+  const base = join(scratch, name);
+  mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, 'fake-core.ts'), FAKE_CORE);
+  writeFileSync(join(base, 'fake-shell.ts'), FAKE_SHELL);
+  writeFileSync(join(base, 'new-core.txt'), 'the new core\n');
+  const data = join(base, 'data');
+  mkdirSync(join(data, 'boite2'), { recursive: true });
+  const script = [
+    'Unicode true',
+    `!addplugindir /x86-unicode "${PLUGINS}"`,
+    '!include LogicLib.nsh',
+    `!include "${join(GENERATED, 'utils.nsh')}"`,
+    `!define BOITE_DATA_ROOT "${data}"`,
+    // Where and in which order the template has them.
+    `!include "${HOOKS}"`,
+    '!define MAINBINARYNAME "boite-hooktest-shell"',
+    '!define PRODUCTNAME "Boite hook test"',
+    '!define BUNDLEID "com.boite.two"',
+    '!define INSTALLMODE "currentUser"',
+    `!define UNINSTKEY "${UNINSTKEY}"`,
+    'Var PassiveMode',
+    'Var OldMainBinaryName',
+    `OutFile "${join(base, 'setup.exe')}"`,
+    'RequestExecutionLevel user',
+    'SilentInstall silent',
+    'LoadLanguageFile "${NSISDIR}\\Contrib\\Language files\\English.nlf"',
+    'LangString appRunning ${LANG_ENGLISH} "{{product_name}} is running"',
+    'LangString appRunningOkKill ${LANG_ENGLISH} "{{product_name}} is running, OK to kill it"',
+    'LangString failedToKillApp ${LANG_ENGLISH} "{{product_name}} could not be killed"',
+    'Section Install',
+    '  SetOutPath $INSTDIR',
+    '  !insertmacro NSIS_HOOK_PREINSTALL',
+    // The user reading the template's OK/Cancel box, when it still asks.
+    '  Sleep 6000',
+    '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
+    '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+    '  !endif',
+    // A copy that fails halfway through the chunks, which the template
+    // writes before boite-core.exe (a full disk): the install aborts.
+    '  IfFileExists "$INSTDIR\\fail-copy" 0 +4',
+    '    CreateDirectory "$INSTDIR\\core"',
+    `    File "/oname=core\\main-n3wn3wn3.js" "${join(base, 'new-core.txt')}"`,
+    '    Abort',
+    '  ClearErrors',
+    `  File "/oname=boite-core.exe" "${join(base, 'new-core.txt')}"`,
+    '  IfErrors 0 +2',
+    '    FileOpen $0 "$INSTDIR\\write-failed" w',
+    `  WriteUninstaller "${join(base, 'uninstall.exe')}"`,
+    '  !insertmacro NSIS_HOOK_POSTINSTALL',
+    'SectionEnd',
+    'Section Uninstall',
+    '  !insertmacro NSIS_HOOK_PREUNINSTALL',
+    '  Sleep 6000',
+    '  !ifndef BOITE_HOOKS_CLOSE_SHELL',
+    '    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"',
+    '  !endif',
+    '  Delete "$INSTDIR\\boite-core.exe"',
+    // The rest of the template's uninstall: shortcuts, registry, uninstaller.
+    '  Sleep 2000',
+    // Where the template inserts it, after its own deletions.
+    '  !ifmacrodef NSIS_HOOK_POSTUNINSTALL',
+    '    !insertmacro NSIS_HOOK_POSTUNINSTALL',
+    '  !endif',
+    'SectionEnd',
+  ].join('\r\n');
+  writeFileSync(join(base, 'hooktest.nsi'), script);
+  makensis(join(base, 'hooktest.nsi'));
+  // No name left registered by an earlier run.
+  Bun.spawnSync(['reg', 'delete', `HKCU\\${UNINSTKEY}`, '/f'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
+
+  // The same file name run from elsewhere: another install, or a build in a
+  // cargo target directory. No installer here may end it.
+  const elsewhere = join(base, 'elsewhere');
+  mkdirSync(elsewhere, { recursive: true });
+  copyFileSync(process.execPath, join(elsewhere, 'boite-hooktest-shell.exe'));
+  const other = Bun.spawn([join(elsewhere, 'boite-hooktest-shell.exe'), '-e', 'setInterval(() => {}, 1000)'], {
+    stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+  });
+  started.push(other.pid);
+
+  // An install and its running core and shell, as Boite leaves them.
+  async function running(name: string, shellName = 'boite-hooktest-shell.exe') {
+    const install = join(base, name);
+    mkdirSync(install, { recursive: true });
+    mkdirSync(join(data, 'boite2'), { recursive: true });
+    rmSync(join(data, 'boite2', 'core.json'), { force: true });
+    copyFileSync(process.execPath, join(install, 'boite-core.exe'));
+    copyFileSync(process.execPath, join(install, shellName));
+    // A previous build's hashed chunks, and files of the user's beside them.
+    for (const [path, text] of [...STALE, ...KEPT]) {
+      mkdirSync(dirname(join(install, path)), { recursive: true });
+      writeFileSync(join(install, path), text);
+    }
+    const restarted = join(install, 'restarted.txt');
+    const core = Bun.spawn([join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), '--data-dir', join(data, 'boite2')], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(core.pid);
+    const deadline = Date.now() + 20_000;
+    while (!existsSync(join(data, 'boite2', 'core.json'))) {
+      if (Date.now() > deadline) throw new Error('the fake core never wrote core.json');
+      await Bun.sleep(50);
+    }
+    const shell = Bun.spawn([join(install, shellName), join(base, 'fake-shell.ts'),
+      join(install, 'boite-core.exe'), join(base, 'fake-core.ts'), join(data, 'boite2'), restarted], {
+      stdout: 'ignore', stderr: 'ignore', windowsHide: true,
+    });
+    started.push(shell.pid);
+    await Bun.sleep(500);
+    return { install, core, shell, restarted };
+  }
+  // Whether the bundle directories are still there, the user's files
+  // untouched and nothing left aside.
+  function bundles(install: string) {
+    return {
+      core: existsSync(join(install, 'core')),
+      ui: existsSync(join(install, 'ui')),
+      kept: KEPT.every(([path, text]) => existsSync(join(install, path)) && readFileSync(join(install, path), 'utf8') === text),
+      aside: existsSync(join(install, 'core.previous')) || existsSync(join(install, 'ui.previous')),
+    };
+  }
+  function restartedPids(file: string): number[] {
+    if (!existsSync(file)) return [];
+    const pids = readFileSync(file, 'utf8').split(/\s+/).filter(Boolean).map(Number);
+    started.push(...pids);
+    return pids;
+  }
+  // The exit code, or 'still running' after a few seconds.
+  function exited(child: Bun.Subprocess, ms = 5_000) {
+    return Promise.race([child.exited, Bun.sleep(ms).then(() => 'still running' as const)]);
+  }
+  async function run(command: string[]) {
+    const child = Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
+    started.push(child.pid);
+    return child.exited;
+  }
+  return { base, data, other, running, bundles, restartedPids, exited, run };
+}
 
 /** What an earlier build left in the install's two bundle directories. */
 const STALE = [['core/main-0ld0ld0l.js', 'old chunk'], ['ui/assets/index-0ld0ld0l.js', 'old asset'], ['ui/index.html', 'old page']] as const;

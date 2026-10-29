@@ -5,6 +5,10 @@ import type { FakeContext, FakeMethods } from './context';
 
 export function brainMethods(ctx: FakeContext) {
   return {
+    'brain.commands': async () => ctx.brain.config.path ? ctx.brain.entries
+      .filter(entry => entry.kind === 'skill' && !entry.error && entry.disableModelInvocation)
+      .filter((entry, index, entries) => entries.findIndex(other => other.name === entry.name) === index)
+      .map(entry => ({ name: entry.name, description: entry.description, hint: null })) : [],
     'brain.status': async () => structuredClone(ctx.brain),
     'brain.configure': async (config) => {
         if (typeof config.enabled !== 'boolean' || (config.enabled && !config.path) || (config.path !== null && (typeof config.path !== 'string' || !/^(?:[A-Za-z]:[\\/]|\/)/.test(config.path)))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.path must be an absolute folder path or null; enabled must be a boolean' });
@@ -20,9 +24,13 @@ export function brainMethods(ctx: FakeContext) {
           ['Claude Code', '.claude/CLAUDE.md'], ['Codex', '.codex/AGENTS.md'], ['OpenCode', '.config/opencode/AGENTS.md'],
           ['pi', '.pi/agent/AGENTS.md'], ['Grok', '.grok/AGENTS.md'], ['Gemini / Antigravity', '.gemini/GEMINI.md'], ['Muse', '.config/muse/AGENTS.md'],
         ].map(([name, path]) => ({ name: name!, path: `/home/user/${path}`, state: 'linked' as const, error: null })) : [];
+        if (ctx.brainLinkPermission) ctx.brain.links = ctx.brain.links.map(link => ({
+          ...link, state: 'blocked', error: `EPERM: symlink at ${link.path}`, remedy: 'windows-developer-mode',
+        }));
         ctx.brain.entries = config.path ? [
           { kind: 'instructions', name: 'AGENTS.md', path: 'AGENTS.md', description: '', error: null },
           { kind: 'skill', name: 'code-review', path: 'skills/code-review/SKILL.md', description: 'Review changes and check the affected behavior.', error: null },
+          { kind: 'skill', name: 'focus', path: 'skills/focus/SKILL.md', description: 'Work through one task at a time.', error: null, disableModelInvocation: true },
           { kind: 'plugin', name: 'team-tools', path: 'plugins/team-tools/.claude-plugin/plugin.json', description: 'Shared tools for the team.', error: null },
         ] : [];
         ctx.brain.git = config.path ? { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, dirty: false } : null;

@@ -37,6 +37,19 @@ test('live paragraphs update without rebuilding completed prose when tools and r
   } finally { store.detach(); client.close(); }
 });
 
+test('a compaction a background copy made says so beside its counts', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const last = store.openThread!.messages.at(-1)!;
+    const message: Message = { ...last, id: 'm-background', role: 'system', parts: [{ type: 'compaction', trigger: 'auto', preTokens: 184_000, postTokens: 31_000, background: true }] };
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    expect(document.querySelector('[data-testid=compaction-part]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Context compacted, 184K to 31K tokens (in the background)');
+  } finally { store.detach(); client.close(); }
+});
+
 test('a line naming a page the turn published cuts the answer there, without drawing again what is above it', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store(); store.attach(client);

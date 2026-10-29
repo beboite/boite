@@ -221,13 +221,11 @@ export async function showMobileThreads(): Promise<void> {
   // jsdom does not implement dialog methods; the browser suite exercises the modal.
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
-  // A conversation's header has no menu: Back leads to the list that has it.
-  if (!document.querySelector('[data-testid=mobile-menu]')) {
+  // A conversation hides the bottom bar: Back leads to the list that has it.
+  if (!document.querySelector('[data-testid=mobile-tabs]')) {
     query<HTMLButtonElement>('[data-testid=mobile-back]').click();
-    await waitFor(() => document.querySelector('[data-testid=mobile-menu]') !== null);
+    await waitFor(() => document.querySelector('[data-testid=mobile-tabs]') !== null);
   }
-  query<HTMLButtonElement>('[data-testid=mobile-menu]').click();
-  await waitFor(() => document.querySelector('[data-testid=mobile-conversations]') !== null);
   query<HTMLButtonElement>('[data-testid=mobile-conversations]').click();
   await waitFor(() => document.querySelector('[data-testid=mobile-project]') !== null);
 }
@@ -240,9 +238,11 @@ export const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-accounts]',
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
-  '[data-testid=setting-listen-on-lan]',
   '[data-testid=group-add-device]'
 ];
+
+/** How a phone reaches this machine, on Advanced: the owner's to change. */
+export const OWNER_ONLY_IN_ADVANCED = ['[data-testid=setting-listen-on-lan]'];
 
 /** The palette ids that each end in a method a device may not call. */
 export const OWNER_ONLY_COMMANDS = ['add-project', 'trace', 'providers', 'pair'];

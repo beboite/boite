@@ -4,6 +4,7 @@ export const fr: Translation = {
   "telemetry": {
     "heading": "Confidentialité et statistiques",
     "description": "Les compteurs de base sont activés par défaut. Les statistiques améliorées restent facultatives. Aucun message, nom de projet, chemin, compte ou enregistrement n'est collecté.",
+    "choiceNotice": "Base, Plus ou Refus : votre choix est compté anonymement, sans identifiant d'installation, même si les statistiques d'usage sont désactivées.",
     "basic": "Compteurs anonymes",
     "basicHint": "Compter les installations actives, lancements, conversations et résultats des tours. Les identifiants d'usage changent chaque jour ; un identifiant distinct compte uniquement les installations.",
     "enhanced": "Statistiques améliorées",

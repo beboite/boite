@@ -116,7 +116,7 @@ export class ThreadTitles {
         try {
           const raw = await getDriver(writer.provider.protocol).title!({
             thread, provider: writer.provider, account: writer.account,
-            accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider),
+            accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider, thread),
             nameBranch: thread.branchNamingPending === true,
             prompt, answer: answers.join('\n\n'), initial,
             attachments: writer.provider.capabilities.images ? attachments : [],

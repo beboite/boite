@@ -1,11 +1,16 @@
-import { LOCAL_DEVICE_HOST, mobileDeviceIdError, mobileDeviceInputError, type MobileDevice, type MobileDeviceSession } from '@boite/contracts';
+import { isAdbText, LOCAL_DEVICE_HOST, MOBILE_STREAM_SIZE, mobileDeviceIdError, mobileDeviceInputError, type MobileDevice, type MobileDeviceSession } from '@boite/contracts';
 import { fakeDeviceScreen } from './device-screen';
+import { FAKE_STREAM, FAKE_STREAM_FRAMES } from './device-stream';
 import { refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'devices.list' | 'devices.open' | 'devices.sessions' | 'devices.frame' | 'devices.input' | 'devices.screenshot' | 'devices.close';
+type Methods = 'devices.list' | 'devices.open' | 'devices.sessions' | 'devices.frame' | 'devices.input' | 'devices.screenshot' | 'devices.close' | 'devices.stream' | 'devices.clipboard';
 
 const SCREEN = { width: 1080, height: 2400 };
+/** The core's answer while the deviceStream setting is off (control.ts STREAM_OFF). */
+const STREAM_OFF = 'the live stream is off: the owner turns it on in Settings > Experiments, or an agent asks with `boite settings request deviceStream true --why "..."`';
+/** How long a viewer stays counted after its last answer, as the core's stream.ts iewerMs. */
+const VIEWER_MS = 5000;
 /** How long a fake emulator takes to boot: long enough to see the starting state. */
 export const FAKE_BOOT_MS = 1500;
 
@@ -13,6 +18,8 @@ export const FAKE_BOOT_MS = 1500;
  * Mirrors packages/core/src/devices/control.ts on a machine with an Android SDK
  * and two emulators but no Xcode. Frames are one still home screen; an input
  * counts as a change, so the next frame gets a new id instead of `unchanged`.
+ * With the deviceStream setting on, the live stream loops four H.264 frames at
+ * 10 per second and input goes through it, as the core's scrcpy session does.
  */
 export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   const devices: MobileDevice[] = [
@@ -22,11 +29,14 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   const sessions = new Map<string, Map<string, MobileDeviceSession>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const screens = new Map<string, number>();
+  // When each device last answered a stream poll, and what its clipboard holds.
+  const watched = new Map<string, number>(), clipboards = new Map<string, string>();
+  const live = (deviceId: string) => ctx.settings.deviceStream === true && Date.now() - (watched.get(deviceId) ?? 0) < VIEWER_MS;
   const list = (threadId: string) => [...(sessions.get(threadId)?.values() ?? [])].map(session => ({ ...session }));
   const changed = (threadId: string) => ctx.emitToThread(threadId, 'devices.changed', { threadId, sessions: list(threadId) });
   const release = (threadId: string) => { if (sessions.delete(threadId)) changed(threadId); };
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
+  ctx.bus.observe('thread.updated', thread => { if (thread.archived) release(thread.id); });
+  ctx.bus.observe('thread.removed', ({ threadId }) => release(threadId));
   const thread = (threadId: string) => {
     if (ctx.thread(threadId).archived) throw refusal('the Device panel needs an active conversation', { threadId });
     if (!ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the conversation before using its Device panel', { threadId });
@@ -70,7 +80,8 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       return {
         hosts: [{ id: LOCAL_DEVICE_HOST, name: 'This computer', platforms: [{ platform: 'android', available: true }, { platform: 'ios', available: false, reason: 'iOS Simulators need macOS with Xcode.' }] }],
         devices: devices.map(device => ({ ...device })),
-        sessions: list(threadId)
+        sessions: list(threadId),
+        liveStream: ctx.settings.deviceStream === true
       };
     },
     'devices.sessions': async ({ threadId }) => {
@@ -120,8 +131,42 @@ export function devicesMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const problem = mobileDeviceInputError(input);
       if (problem) throw refusal(problem);
       ready(threadId, deviceId);
+      if (live(deviceId)) {
+        if (input.kind === 'clipboard') clipboards.set(deviceId, input.text);
+        return { ok: true, via: 'stream' };
+      }
+      const streamOnly = input.kind === 'touch' ? 'a touch' : input.kind === 'scroll' ? 'a scroll' : input.kind === 'clipboard' ? 'the device clipboard'
+        : input.kind === 'text' && !isAdbText(input.text) ? 'text beyond printable ASCII' : undefined;
+      if (streamOnly) throw refusal(`${streamOnly} needs the device's live stream (adb input cannot send it): ${ctx.settings.deviceStream === true ? 'show the device in the Device panel to start it' : STREAM_OFF}`, { deviceId });
       screens.set(deviceId, (screens.get(deviceId) ?? 0) + 1);
-      return { ok: true };
+      return { ok: true, via: 'adb' };
+    },
+    'devices.stream': async ({ threadId, deviceId, maxSize, after }) => {
+      if (maxSize !== undefined && !(Number.isInteger(maxSize) && maxSize >= MOBILE_STREAM_SIZE.min && maxSize <= MOBILE_STREAM_SIZE.max)) {
+        throw refusal(`device stream maxSize must be an integer from ${MOBILE_STREAM_SIZE.min} to ${MOBILE_STREAM_SIZE.max}`);
+      }
+      if (after !== undefined && !(typeof after === 'object' && after !== null && typeof after.id === 'string' && after.id.length <= 100 && Number.isInteger(after.seq) && after.seq >= 0)) {
+        throw refusal('device stream after must be the id and seq of a chunk this device sent');
+      }
+      const session = ready(threadId, deviceId);
+      if (ctx.settings.deviceStream !== true) return { deviceId, state: 'off', reason: STREAM_OFF, chunks: [] };
+      if (session.platform !== 'android') return { deviceId, state: 'unavailable', reason: 'iOS Simulators have no live stream; the panel shows their screenshots', chunks: [] };
+      const id = `fake-${deviceId}`;
+      // The first answer starts at the key frame; each later one waits a frame's time and sends the next.
+      const seq = after?.id === id ? after.seq + 1 : 1;
+      if (seq > 1) await new Promise(resolve => setTimeout(resolve, 100));
+      watched.set(deviceId, Date.now());
+      const index = (seq - 1) % FAKE_STREAM_FRAMES.length;
+      return {
+        deviceId, state: 'live', id, codec: FAKE_STREAM.codec, width: FAKE_STREAM.width, height: FAKE_STREAM.height, screen: { ...SCREEN },
+        chunks: [{ seq, key: index === 0, pts: seq * 100_000, base64: FAKE_STREAM_FRAMES[index]! }]
+      };
+    },
+    'devices.clipboard': async ({ threadId, deviceId, copy }) => {
+      if (copy !== undefined && copy !== 'copy' && copy !== 'cut') throw refusal('device clipboard copy must be copy or cut');
+      ready(threadId, deviceId);
+      if (!live(deviceId)) throw refusal(`the device clipboard needs the live stream: ${ctx.settings.deviceStream === true ? 'show the device in the Device panel to start it' : STREAM_OFF}`, { deviceId });
+      return { text: clipboards.get(deviceId) ?? 'Copied on the fake phone' };
     },
     'devices.screenshot': async ({ threadId, deviceId, hostId }) => {
       thread(threadId);

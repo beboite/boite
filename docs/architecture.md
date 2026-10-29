@@ -5,14 +5,17 @@
 The Bun core owns execution, accounts, scheduling and persistence on the machine
 that owns the project folder. The Tauri shell owns windows, tray integration,
 native dialogs, desktop updates and local core startup. The Svelte UI connects
-to a local or remote core; a phone connects to an existing core.
+to a local or remote core. The [phone client](phone.md), including the
+[Android client app](android.md), connects to an existing core. The separate
+[Android server](android-server.md) runs a core and agents on the phone in
+Termux.
 
 A desktop core runs in the user's session. Windows session 0 cannot use the
 user's DPAPI state, OAuth loopback callback or profile. Local cores are resident
 by default: quitting the shell leaves work running until an owner calls
 `core.shutdown`. Tests can set `BOITE_CORE_RESIDENT=0`; on Windows that mode
 keeps the shell's `KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain
-independent. [Persistent agents](agents.md) describes background work.
+independent. [Bots](bots.md) describes background work.
 
 The shell passes `--data-dir` and adopts a local core only when its PID is alive
 and `/health` reports the shell's version. Split JavaScript bundles must also
@@ -74,9 +77,17 @@ The [CLI](cli.md) uses the agent credential inside a thread.
 Project, settings, provider and account changes reach authenticated connections
 allowed to receive them. Message, permission, question, panel, process and
 activity events are scoped to subscribed threads as well as principal access.
-Questions from persistent agents' hidden session threads also reach owner and
-paired-device clients without a subscription, so their conversation cards stay
-current; the hidden transcript keeps its subscription boundary.
+Questions from bots' threads also reach owner and paired-device
+clients without a subscription, so an agent's row and desk see a card the user
+must answer.
+`composer.updated` reaches owner and paired devices without a thread
+subscription. The owning core stores revised drafts, replies and pending
+prompts separately from message history; their attachments are content-addressed
+assets. Compare-and-swap and tombstones protect edits across reconnects.
+Removing references collects unused assets; live records and pending uploads
+retain their bytes without loading attachment bodies during text saves.
+The core drains accepted queues even when every client is closed, waking only
+records with queued input and targeting thread events to that thread's record.
 Subscribing does not prepare a provider session. A reconnect reads pending cards
 from `permissions.list`; an answered, ended or withdrawn request leaves the list
 and emits `permission.resolved`. Driver cancellation withdraws the card instead
@@ -90,7 +101,12 @@ the first checkpoint after a write, runs a passive checkpoint once the WAL
 passes 4 MiB and truncates it after 30 s without writes. The main thread
 checkpoints when the Worker is unavailable or when the WAL reaches 16 MiB
 because writes kept landing during the Worker's passes, and it truncates the
-WAL at close. A write that binds more than 64 KiB, such as a message's parts,
+WAL at close. The main connection caches up to 64 MiB of pages
+(`journal/statements.ts`): SQLite's default 2 MiB is less than one thread list
+on a journal of a few thousand threads, and a machine short of memory reads
+those file pages from the disk on the event loop
+(`bench/results/2026-10-28-journal-cache.md`).
+A write that binds more than 64 KiB, such as a message's parts,
 runs on a statement finalized after use (`journal/statements.ts`): a cached
 statement keeps its last bound values alive. An append to
 `events(id, thread_id, ts, type, version, payload)` and its projection changes
@@ -101,6 +117,10 @@ table that has none, reading about 400 rows per index; the open itself analyzes
 nothing. It then deletes events older than 30 days in paced batches while
 retaining the latest agents revision, and after each prune it rebuilds the
 statistics that prune made stale, the same way.
+An event-retention error keeps the pending statement and pass state for a
+retry after 30 s. Waiting for the WAL to catch up uses the same delay before
+any statistics or pruning work, without changing the batch size. Stopping
+retention or closing the journal prevents further ticks.
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
@@ -112,7 +132,11 @@ out again once the newest events are deleted, so every deletion of events
 brings that cursor back to the last id in the same transaction. `message.started` keeps only the first
 1,024 characters of each string. The types that are read back (`question.asked`,
 `question.answered`, `thread.memory`) keep their whole payload and have partial
-indexes, so startup and a thread open no longer scan the events table.
+indexes, so a thread open no longer scans the events table. An asynchronous
+question nobody answered lives in `pending_questions` (`journal/questions.ts`),
+written in the transaction of the event that asks or closes it, so its card
+comes back at startup after its events are pruned (schema 45 fills it once from
+the events still kept).
 
 The blur a deferred picture is drawn with before its bytes arrive is a
 `media_previews` row, keyed by message and part, and the light WebP copy the
@@ -187,6 +211,9 @@ row. Schema 36 moves the lines of older rows there in paced batches. The same
 background passes cut a thread's trace back to what it keeps once it holds 500
 rows past the 2,000 it keeps, one thread at a time and again daily, and delete
 the lines only the deleted rows named ([trace](trace.md)).
+A daily-prune date ahead of the current clock is removed before a pass resumes
+from its stored cursor. The date stays absent during the incomplete pass;
+completion records the current time and removes the cursor.
 
 `native_agent_messages` names the messages holding an Agent, Task or subagent
 call, or a `nativeAgents` list, so `delegation.get` parses those messages only.
@@ -244,6 +271,13 @@ deletions expire) and 33 by nothing (172 MiB, 0.8 MiB of it untouched for 7
 days, so no sweep of older files was added), read from a read-only copy of its
 journal.
 
+Session imports probe the entered project path before its canonical path and
+retain the entered path as the imported thread's working directory. Shared
+transcript files appear once, with an explicit account choice when several
+accounts can read them. The journal reserves current native session IDs while
+conversations remain recoverable in the trash, including deleted children;
+imports keep their existing global refusal of an already owned session ID.
+
 The journal does not replace a provider's native transcript. A turn resumes the
 selected account's `sessionId`. An account change starts a fresh session seeded
 with bounded journal excerpts. A confirmed missing native session permits one
@@ -267,20 +301,47 @@ There is no global or per-account interactive turn ceiling. A conversation has
 one in-flight turn and can stay queued while its account is being configured or
 its team is paused. Process resource guards are separate from admission.
 
+Stop is accepted from the start of turn setup, including while entering a
+delegated worktree. A stop received there is retained through setup and settles
+the turn as stopped before its first code checkpoint or native preparation.
+If Stop kills a preparation process and worktree entry rejects, the turn still
+ends stopped. A preparation failure without an accepted Stop remains an error.
+A delegated worktree records its base before mutation and reserves its ref with
+an atomic ownership reflog, as draft preparation does. If Stop preceded that
+transaction, a pending retry reserves the still-absent ref at its saved base,
+not the parent's later HEAD. Read errors and foreign refs are refused.
+Preparation registers the worktree without checkout. Git builds a missing
+index in an exclusively allocated temporary directory; after Git exits, the
+core publishes it synchronously under the ordinary exclusive index lock.
+Stop can therefore kill Git without stranding a lock on the shared index.
+An existing index or foreign lock stays untouched. Recovery accepts only
+the owned ref and registered path and checks out absent indexed files without
+overwriting existing edits, notes or staging.
+The accepted input remains in history, and the next turn starts normally.
+
 After an unplanned restart, an ordinary queued prompt that never started stays
 held with its original turn, input receipt and execution selection. Desktop and
 phone offer Resume and Discard through `turns.recover`; neither creates a second
 input. Work that may already have reached a provider is never replayed by this
 recovery path. Explicit restart handoff keeps its own authorization rules.
+A turn the restart closes as failed leaves its thread `error`, the status a live
+failure leaves: `threads/lifecycle.ts` is the only writer of a thread's status,
+and `finishTurn` in `threads/turn-settlement.ts` closes every turn, settled,
+never started, crashed or handed over.
+Server-owned composer queues may resume never-started turns admitted by their
+durable delivery ledger. A native submission whose acceptance is uncertain
+stays held for review; it is never submitted again automatically.
 
 A turn a provider refused for availability retries at capacity within the same
-turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset
-from a plan journalled under `limit-resumes`; `ThreadSummary.retry` shows
-either ([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that
-stops before its answer (an error, a crash, a compaction, background work that
-ended without waking the agent) resumes by itself from a plan journalled under
-`auto-continues`, twice in a row at most
+turn, or, with `autoResumeLimitedThreads`, resumes after a usage limit's reset;
+`ThreadSummary.retry` shows either
+([usage](usage.md#when-a-provider-refuses-a-turn)). Any other turn that stops
+before its answer (an error, a crash, a compaction, background work that ended
+without waking the agent) resumes by itself, twice in a row at most
 ([restart handoff](restart-handoff.md#turns-that-stop-before-their-answer)).
+Both kinds are one `ResumePlanner` (`threads/resume.ts`): one plan per thread
+with its reason, journalled under `resumes`, checked again when it fires. Their
+prompts and labels live in `threads/resume-text.ts`.
 
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude, Codex, ACP, pi and Muse can prepare their traced process
@@ -317,7 +378,7 @@ Checkpoint capture and native preparation can run together, but prompt dispatch
 waits for the checkpoint. This transient preparation does not extend post-turn
 retention. Stop or checkpoint failure releases it before a prompt can leave.
 
-Attachments selected in the composer upload through connection-owned leases.
+Direct sends upload attachments through connection-owned leases.
 Completed upload IDs replace only the wire bytes when sending; durable drafts
 retain the original bytes. The core validates ownership, metadata and SHA-256
 before restoring the original attachment for validation and journaling. Leases
@@ -353,12 +414,34 @@ Every process starts through `procs.spawn`, `procs.spawnChild` or
 `packages/core/src/platform/`; drivers and RPC handlers do not import backends.
 The shell has its own native boundary under `apps/shell/src-tauri/src/platform/`.
 
-Windows Job Objects provide tree membership events and resource caps. Linux and
-macOS record direct children; their process-group termination cannot catch a
-child that starts its own session. The capability report exposes those limits.
+Protected tools install a host-owned `procs.protection` capability before their
+first spawn. It captures association/grant/checkout identity, optional selected
+provider/account/mode, credential paths and exact read overrides. Its immutable
+fingerprint belongs in the provider's warm-session key. The Linux implementation
+uses a private filtered checkout inside bubblewrap user/mount/PID/network
+namespaces and an inherited seccomp filter. All three registry launch APIs enforce
+it, and revocation kills namespace roots before removing their private view.
+Only validated project edits are copied back after tools exit and authority is
+rechecked. [Contacts](contacts.md#native-linux-tool-execution) describes setup,
+adapter obligations and native tests. This backend alone does not admit a provider.
+
+Windows protected tools use the same capture/publication policy with a private
+LPAC identity, task-owned directory ACLs and a non-breakaway Job Object. The
+native launcher atomically installs the lowbox, job and standard-handle allowlist
+before the process runs. The job's last handle kills descendants on launcher
+death, and root exit drains descendants before publication. Account/control
+processes stay separate. [Windows setup](contacts.md#native-windows-tool-execution)
+requires an explicitly built userspace helper. macOS has no protected execution
+backend and refuses these routes.
+
+Windows Job Objects provide tree membership events and resource caps. For ordinary
+processes, Linux and macOS record direct children; their process-group termination
+cannot catch a child that starts its own session. The capability report exposes those limits.
 [Trace](trace.md#platform-boundary) owns process records, caps, guards and shutdown.
 
 ## Drivers, one interface
+
+Brain skills marked `disable-model-invocation: true` stay out of the model catalog; the core expands a leading `/<name>` into their body before recording and delivering user input, unless the driver advertises that command.
 
 `Driver.startTurn(ctx)` returns a `TurnHandle`. A driver maps its protocol to
 contract message parts, questions, approvals, usage and session lifecycle.
@@ -449,7 +532,9 @@ environment, workspace and context mode. Missing ACP effort metadata uses an
 isolated probe rather than changing a prepared session's selection.
 Concurrent reads share an operation; caches belong to a provider and
 account. Changed descriptors or account state invalidate them, and a stale
-completion cannot replace a newer cache entry. Disposable processes close on
+completion cannot replace a newer cache entry. The last list of each account is
+also saved in the journal and answers at once, while a fresh read runs, when the
+descriptor, executable, gateway and login it was read under still stand. Disposable processes close on
 every path. Background failures retain display fallbacks; explicit refreshes report
 their reason. See [provider discovery](providers.md#the-models-probe).
 
@@ -491,9 +576,11 @@ cores; a fixed known divergence must leave its explicit exception list.
 `bun run check:architecture` checks production runtime imports, including literal
 dynamic imports. It rejects cycles, runtime cross-imports, contracts importing
 runtimes, native backends imported outside their boundary and internal imports
-of entry modules. Type-only imports, Svelte scripts and Rust are outside this
-check. Unmapped workspace exports fail. The same check enforces 900 source lines
-or a shrinking allowance in `scripts/architecture/size-budget.json`.
+of entry modules. Svelte component scripts count as modules; type-only imports
+do not. Rust, Kotlin and Java have no import graph here. Unmapped workspace
+exports fail. The same check enforces 900 source lines, Rust and the Android
+sources included, or a shrinking allowance in
+`scripts/architecture/size-budget.json`.
 `bun run audit:complexity` provides an advisory ranking, not a CI threshold.
 [Development](development.md#architecture-checks) owns the commands and scope.
 
@@ -529,6 +616,15 @@ member's desktop app gets a signed ticket from its own core for the others.
 Browser origins and coordination peers are read off the same roster. A member
 listens on its tailnet address beside the one it started on. [Groups](groups.md)
 describes the trust this assumes and where it stops.
+
+Contacts link different owners rather than adding group members. Explicit
+shared projects keep their association, board authority and execution on the
+selected original cores. A group gateway forwards only the bounded
+`contact.project` protocol under a current exact project grant, with canonical
+source/target endpoints and admission checks before and after the wait. It
+never turns that peer into an owner RPC client. File/tool enforcement and
+captured cancellation remain on the execution host. [Contacts](contacts.md)
+documents the protocol, acceptance evidence and unavailable provider isolation.
 
 ## The phone keeps the app
 

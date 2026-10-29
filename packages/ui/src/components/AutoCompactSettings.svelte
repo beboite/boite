@@ -1,33 +1,37 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { CircleCheck, Hourglass, Ruler, Timer } from '@lucide/svelte';
-  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment } from '@boite/contracts';
+  import { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, type AutoCompact, type AutoCompactMoment, type CompactionTarget } from '@boite/contracts';
+  import { compactionPatch, compactionPolicy } from '../lib/compaction-settings';
   import { fill, strings } from '../lib/strings';
   import { formatTokens } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
+  import { Autosave, saved, TYPING_MS } from '../lib/autosave.svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
+  import SaveStatus from './SaveStatus.svelte';
 
   /**
-   * When the core compacts a conversation by itself: the moments it may pick,
-   * and an optional size below which it leaves a conversation alone. The size
-   * is in tokens and not in percent, so one number covers every model.
+   * Automatic compaction: selected idle moments and an independent token limit.
+   * The limit triggers at a safe native tool boundary where supported, otherwise
+   * between turns. It also gates turn-end/background moments, never cache expiry.
    */
-  let { store }: { store: Store } = $props();
+  let { store, target, embedded = false }: { store: Store; target?: CompactionTarget; embedded?: boolean } = $props();
   const uid = $props.id();
 
-  /** What switching it on starts from: dead time only, so no message of the user's ever waits behind it. */
+  /** Start with idle moments only and leave the independent token limit off. */
   const FIRST: AutoCompact = { tokens: null, moments: ['background', 'cache-expiry'] };
   const FIRST_TOKENS = 200_000;
   const PRESETS = [100_000, 200_000, 400_000, 800_000];
-  /** Shown from the one that costs the user nothing to the one that can make a message wait. */
+  /** Idle moments, from cache reuse to one that can make a new message wait. */
   const MOMENTS: { id: AutoCompactMoment; icon: typeof Timer; name: string; hint: string; recommended?: true }[] = [
     { id: 'cache-expiry', icon: Timer, name: strings.settings.autoCompactCacheExpiry, hint: strings.settings.autoCompactCacheExpiryHint, recommended: true },
     { id: 'background', icon: Hourglass, name: strings.settings.autoCompactBackground, hint: strings.settings.autoCompactBackgroundHint },
     { id: 'turn-end', icon: CircleCheck, name: strings.settings.autoCompactTurnEnd, hint: strings.settings.autoCompactTurnEndHint }
   ];
 
-  let rule = $derived(store.settings?.autoCompact ?? null);
-  /** The field as typed, kept while the threshold is off so switching it back on restores it. */
+  let rule = $derived(compactionPolicy(store.settings, target).autoCompact);
+  /** The field as typed, kept while the token limit is off so switching it back on restores it. */
   let tokens = $state<number | null | undefined>(FIRST_TOKENS);
   let dirty = $state(false);
   $effect(() => {
@@ -39,36 +43,64 @@
   /** A switch saves when it flips; a refusal puts it back. */
   /** Every control builds the whole rule from the saved one, so none moves while a save is on its way. */
   let saving = $state(false);
-  async function save(next: AutoCompact | null, input?: HTMLInputElement) {
+  let inflight: Promise<boolean> | null = null;
+  async function save(next: AutoCompact | null, input?: HTMLInputElement, machine = store, scope = target) {
     saving = true;
-    const ok = await store.saveSettings({ autoCompact: next }).finally(() => { saving = false; });
+    const sent = inflight = machine.saveSettings(compactionPatch(machine.settings, scope, { autoCompact: next })).finally(() => { saving = false; if (inflight === sent) inflight = null; });
+    const ok = await sent;
     if (!ok && input) input.checked = !input.checked;
     return ok;
   }
-  /** Switching the last moment off leaves nothing to compact at, which is the whole setting off. */
+  /** Removing the last idle moment preserves an independent token limit. */
   function toggleMoment(moment: AutoCompactMoment, input: HTMLInputElement) {
     if (!rule) return;
     const moments = AUTO_COMPACT_MOMENTS.filter((entry) => entry === moment ? input.checked : rule.moments.includes(entry));
-    void save(moments.length ? { ...rule, moments } : null, input);
+    void save(moments.length || rule.tokens !== null ? { ...rule, moments } : null, input);
   }
-  function toggleThreshold(input: HTMLInputElement) {
+  /** The switch sends the size as it stands, so an earlier size status or draft no longer applies. */
+  async function toggleThreshold(input: HTMLInputElement) {
     if (!rule) return;
-    if (input.checked && !valid) { tokens = FIRST_TOKENS; dirty = false; }
-    void save({ ...rule, tokens: input.checked ? tokens as number : null }, input);
+    if (input.checked && !valid) tokens = FIRST_TOKENS;
+    sizeSave.state = 'idle';
+    const next = { ...rule, tokens: input.checked ? tokens as number : null };
+    if (await save(next.tokens !== null || next.moments.length ? next : null, input)) dirty = false;
   }
-  async function saveTokens(value = tokens) {
+  /**
+   * The size saves like every typed setting: after a pause, when the field is
+   * left, or when the page goes, from the rule the core holds once a switch's
+   * save has landed. The field stays enabled, so a save never takes its focus.
+   * It goes to the machine it was typed for: switching machines flushes it
+   * while `store` already reads the next one.
+   */
+  let typedFor: { store: Store; target?: CompactionTarget } | null = null;
+  const sizeSave = new Autosave(async () => {
+    while (inflight) await inflight.catch(() => false);
+    const destination = typedFor ?? { store, target };
+    const current = compactionPolicy(destination.store.settings, destination.target).autoCompact;
+    if (!current || current.tokens === null) { dirty = false; return; }
+    const sent = tokens as number;
+    if (current.tokens !== sent) await saved(save({ ...current, tokens: sent }, undefined, destination.store, destination.target));
+    if (tokens === sent) dirty = false;
+  }, () => valid ? null : strings.settings.autosave.invalid);
+  export async function flush() {
+    await sizeSave.flush();
+    while (inflight) await inflight.catch(() => false);
+  }
+  $effect(() => () => void sizeSave.flush());
+  function typeTokens(delay: number, value = tokens) {
     tokens = value;
-    if (!rule || rule.tokens === null || !valid) return;
-    if (await save({ ...rule, tokens: tokens as number })) dirty = false;
+    dirty = true;
+    typedFor = { store, target };
+    sizeSave.change('', delay);
   }
 </script>
 
 <!-- The core's own behaviour on the owner's machine, so a paired device does not see it. -->
 {#if store.owner}
-  <section class="card" id="settings-auto-compact" data-testid="auto-compact-settings">
+  <section class:card={!embedded} id="settings-auto-compact" data-testid="auto-compact-settings">
     <label for="{uid}-on" class="master">
       <span class="words">
-        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /></h2>
+        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /><SyncMark {store} key={target ? 'compactionByType' : 'autoCompact'} /></h2>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="auto-compact-on"
         checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />
@@ -96,20 +128,21 @@
         <div class="option" class:on={rule.tokens !== null}>
           <span class="icon"><Ruler size={18} strokeWidth={1.75} /></span>
           <span class="words">
-            <label for="{uid}-threshold" class="name"><span class="ui-label" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</span><InfoTip topic={strings.settings.autoCompactThreshold} text={rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint} /></label>
+            <!-- Only the words label the switch: a retry beside them must not flip it. -->
+            <span class="name"><label for="{uid}-threshold" class="ui-label" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</label><InfoTip topic={strings.settings.autoCompactThreshold} text={rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint} />{#if rule.tokens !== null}<SaveStatus save={sizeSave} />{/if}</span>
             {#if rule.tokens !== null}
               <span class="size">
                 <span class="presets" role="group" aria-label={strings.settings.autoCompactThreshold}>
                   {#each PRESETS as preset (preset)}
-                    <button type="button" class="chip" class:picked={tokens === preset} aria-pressed={tokens === preset} disabled={saving} data-testid="auto-compact-preset-{preset}"
-                      onclick={() => { dirty = true; void saveTokens(preset); }}><span class="ui-label">{formatTokens(preset)}</span></button>
+                    <button type="button" class="chip" class:picked={tokens === preset} aria-pressed={tokens === preset} data-testid="auto-compact-preset-{preset}"
+                      onclick={() => typeTokens(0, preset)}><span class="ui-label">{formatTokens(preset)}</span></button>
                   {/each}
                 </span>
                 <span class="field">
                   <input id="{uid}-tokens" type="number" inputmode="numeric" min={AUTO_COMPACT_TOKENS.min} max={AUTO_COMPACT_TOKENS.max} step="1000"
                     data-testid="auto-compact-tokens" aria-label={strings.settings.autoCompactThreshold} aria-invalid={!valid}
-                    aria-describedby={valid ? undefined : `${uid}-tokens-error`} disabled={saving} bind:value={tokens}
-                    oninput={() => { dirty = true; }} onchange={() => void saveTokens()} />
+                    aria-describedby={valid ? undefined : `${uid}-tokens-error`} bind:value={tokens}
+                    oninput={() => typeTokens(TYPING_MS)} onchange={() => void sizeSave.flush()} />
                   <span class="unit ui-label">{strings.settings.autoCompactUnit}</span>
                 </span>
               </span>
@@ -119,7 +152,7 @@
             {/if}
           </span>
           <input id="{uid}-threshold" aria-labelledby="{uid}-threshold-name" type="checkbox" role="switch" data-testid="auto-compact-threshold"
-            checked={rule.tokens !== null} disabled={saving} onchange={(event) => toggleThreshold(event.currentTarget)} />
+            checked={rule.tokens !== null} disabled={saving} onchange={(event) => void toggleThreshold(event.currentTarget)} />
         </div>
       </div>
     {/if}
@@ -129,7 +162,7 @@
 <style>
   .master { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; cursor: pointer; }
   .master .words { display: grid; gap: 6px; flex: 1; min-width: 0; }
-  .card .master h2 { margin: 0; }
+  .master h2 { margin: 0; }
   h3 { margin: 22px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
   .options { display: grid; gap: 8px; }
   /* Icon, name, help and switch share the first line. */

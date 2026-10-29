@@ -1,20 +1,38 @@
 # Desktop updates
 
-Settings, Machines and updates lists every machine once. Each row says in one
-word where its updates stand (Up to date, Update available, Updating, Update
-failed), and one Check for updates button at the top of the page reads the
-desktop app, every server and every agent again
-([machines](machines.md#the-machines-page)). The desktop card sits above the
-list and belongs to this computer, even while another machine's conversation is
-open.
-It names the release and its age, links to the changelog on GitHub and offers
-installation with a restart confirmation. Channel options show the installed
-version and let you switch channels.
+## Downloading Boite
 
-Manual checks and channel controls remain in Machines and updates when
-everything is current. Each remote machine keeps its own
-[server update card](server.md#updating-from-the-app) and owner-only
-[agent update controls](agent-updates.md) under its row's details.
+Open the [download page](https://github.com/mtsu-dev/boite/releases). New releases
+list direct downloads by platform at the top of their notes: the Windows x64
+installer, macOS DMGs for Apple Silicon and Intel, and Linux x64/ARM64 packages.
+Choose `.deb` for Debian or Ubuntu, or AppImage for other supported distributions.
+[Installation notes](portability.md#installing-a-release) cover system requirements
+and macOS permissions. The Android client and Boite Server APKs appear when
+attached to that release; [Android setup](android.md) and
+[Android server setup](android-server.md) describe their different roles.
+
+> [!WARNING]
+> Nightly builds are unstable and may contain bugs or unfinished changes. Back up
+> your Boite data before installing or switching channels. Current published
+> builds are nightly prereleases; the Release channel becomes available after
+> the first stable release.
+
+## Finding updates
+
+Settings, Machines and updates opens on one card that folds nothing: the
+version this desktop app runs, the release found with its changelog on GitHub,
+the channel (Nightly or Release), Check for updates and Update
+([machines](machines.md#the-machines-page)). The card belongs to this
+computer, even while another machine's conversation is open. Check reads the
+desktop app, every server and every agent again; every other pending update is
+listed under it by machine, and Update starts all of them. A release already
+downloaded, with nothing else waiting, makes the button Restart, which installs
+after a restart confirmation. Each machine's row below says in one word where
+its updates stand (Up to date, Update available, Updating, Update failed).
+Agent versions, with their own update and skip controls and the automatic
+update switch, are on each machine's Providers page ([agent updates](agent-updates.md)).
+Under them, **Install updates by itself when nothing runs** lets the app
+install a release without a click ([installing by itself](#installing-by-itself)).
 
 ## Update everything
 
@@ -39,8 +57,8 @@ too. A newer release lights the dot and opens the card again. A press
 elsewhere only closes the card.
 
 On a phone the card stays closed until the button is pressed, and opens as a
-sheet. Settings, Machines and updates has the same Update all beside Check for
-updates.
+sheet. Settings, Machines and updates has the same thing as its Update button,
+beside Check for updates.
 
 Update all sends one `core.updateEverything` request to each machine, all at
 once, naming the agents and the Boite release the card showed. Each core then
@@ -77,8 +95,8 @@ updates one call each, without that ordering.
 ### The desktop app of another PC
 
 Another Windows PC of the group shows its desktop app as a Boite row under
-its name, and Settings, Machines and updates shows a Desktop app block with an
-Update button on that machine's details instead of the manual server guide.
+its name, and Settings, Machines and updates lists it under the app's own
+update, started by the same Update button.
 Only that PC's own window can run its installer, so the request goes through
 its core:
 
@@ -88,7 +106,7 @@ its core:
    the group, a phone, a browser tab or a plugin is refused by field. The core
    keeps the last report until that window's socket closes, and relays it to
    owner connections (`core.desktopUpdateChanged`, `core.desktopUpdateStatus`).
-2. Update all, or Update on the block, sends `core.updateEverything` with
+2. Update all, or Update on the Machines updates card, sends `core.updateEverything` with
    `app`, the version the report offered. The core starts the agents named,
    waits until none of them is updating, then sends `ui.appUpdate` to that
    window alone. Meanwhile the row reads Waits for work to finish.
@@ -109,11 +127,53 @@ password through `pkexec` and the macOS installer can ask too, with nobody at
 that machine to answer. A core without `features.desktopUpdates` in its hello
 shows no desktop row, as before.
 
+## Installing by itself
+
+**Install updates by itself when nothing runs** (FR "Installer les mises à
+jour tout seul quand rien ne tourne"), the `autoInstallUpdates` setting of the
+core this window's shell started, is off by default. The switch sits on the
+updates card of an installed desktop app; a browser has no updater and no
+switch. An agent proposes it with `boite settings request autoInstallUpdates
+true`, whose card flips it in the chat.
+
+When it is on, each automatic check (eight seconds after start, then every six
+hours) that finds a release downloads it at once, then asks the shell to
+install it quietly (`app_update_install_quietly`). The shell installs only
+when both hold:
+
+- the main window is not on screen: hidden in the tray. A window on screen may
+  be in use even with nothing running, and its restart would take it away. It
+  is checked again right before the core is asked, so a window restored from
+  the tray while the install waited calls it off;
+- the core grants `POST /shutdown-if-idle`, asked once: no turn, queued
+  execution, RPC, peer request, tracked process or provider background work.
+  The handoff that ends running turns, which Update uses, is never asked.
+
+Otherwise the release stays downloaded and ready, offered as before,
+and the next check tries again without downloading it a second time. An
+admitted install says Installing, then runs the quiet installer as a clicked
+one does. Before it runs, the shell leaves `update-quiet-restart` in its data
+directory; the shell the installer starts reads and deletes it and comes back
+in the tray, as a login start does, with no window and no focus taken. A file
+older than 15 minutes counts for nothing.
+
+It never touches the agents: their updates keep their own automatic switch
+(`autoUpdateHarnesses`, [agent updates](agent-updates.md)). Update all, by
+contrast, does cover them: it starts every agent's update before Boite's own.
+
+The setting follows the group's default machine (`SYNCED_SETTINGS`): it is how
+the owner wants Boite kept current, not something one machine can or cannot
+do. A Docker server cannot update itself, but as the default machine its
+value still reaches every desktop of the group, set once there from a settings
+card of one of its threads. A desktop that turns it off from its own window
+keeps its own value ([synchronization](machines.md#automatic-settings-synchronization)).
+
 ## Boite and Boite Nightly
 
-Choose Boite for regular releases or Boite Nightly for checked daily builds
-from `main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain
-unfinished changes.
+Choose Release for regular releases or Nightly for checked daily builds from
+`main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain unfinished
+changes. Until the first stable release is published, Release stays disabled
+(`RELEASE_PUBLISHED` in `UpdatesCard.svelte`).
 
 Changing the channel immediately checks for its newest signed release and
 offers it. Returning from nightly to Boite permits a lower version. Both
@@ -136,7 +196,11 @@ silently moved.
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. The card's Check for updates button checks at
+then repeats every six hours. Showing or focusing the window checks again when
+the last check is more than 15 minutes old, so a release published since
+appears without waiting for the timer; the same rule asks each connected
+machine to check its Boite and its agents
+(`packages/ui/src/lib/update-freshness.ts`). The card's Check for updates button checks at
 once; it stays in the card during a check, disabled, and only makes way for
 the download progress and the install action. Checks and downloads run one at
 a time. A release found is announced at once and downloads only when asked:

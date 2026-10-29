@@ -5,6 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { BrowserUserAgent } from '@boite/contracts';
 
 export interface ChromiumFound { path: string }
 export interface ChromiumMissing { path: null; reason: string }
@@ -123,6 +124,9 @@ export function chromiumArgs(profileDir: string, platform = process.platform, us
     '--password-store=basic',
     '--use-mock-keychain',
     '--disable-blink-features=AutomationControlled',
+    // A window a page opens from a script the agent ran, not a click, becomes a tab as in the desktop app's webviews,
+    // which have no popup blocker: the conversation's tab limit is the bound (`#adopt` in `browser.ts`).
+    '--disable-popup-blocking',
     '--test-type',
     '--screen-info={1920x1080}',
     ...(userAgent ? [`--user-agent=${userAgent}`] : []),
@@ -151,6 +155,13 @@ export async function drawsWithGpu(platform = process.platform): Promise<boolean
  * `Emulation.setUserAgentOverride` takes them.
  */
 export interface BrowserIdentity { userAgent: string; metadata: Record<string, unknown> }
+
+/** Empty preserves the native identity byte for byte; client hints still describe the real engine. */
+export function profileIdentity(identity: BrowserIdentity, setting?: BrowserUserAgent): BrowserIdentity {
+  if (!setting?.value.trim()) return identity;
+  const value = setting.value.trim();
+  return { ...identity, userAgent: setting.mode === 'suffix' ? `${identity.userAgent} ${value}` : value };
+}
 
 /**
  * Read in a page of the browser itself, without `--user-agent`: that flag

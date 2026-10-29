@@ -1,7 +1,9 @@
 import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { MODEL_ROUTE_FAMILIES, nativeModelId, subscriptionProxyName, subscriptionProxyOf, type ModelFamily, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, unavailable, RpcFailure } from './errors.ts';
+import { invalidParams, refused, unavailable, RpcFailure } from './errors.ts';
 import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
 import { profileFor } from './providers/resolve.ts';
 
@@ -19,7 +21,7 @@ export const PROXY_PREFIX_ENV = 'BOITE_SUBSCRIPTION_PROXY_PREFIX';
 const GROK: ProviderId = 'grok';
 
 export function activeSubscriptionProxy(core: Core, provider: ProviderDescriptor): SubscriptionProxy | null {
-  return subscriptionProxyOf(core.settings.get(), provider);
+  return subscriptionProxyOf(core.settings.get(), provider, core.quotas?.gateway.state());
 }
 
 interface GatewayModel {
@@ -137,6 +139,7 @@ export function subscriptionProxyEnv(core: Core, provider: ProviderDescriptor): 
   const proxy = activeSubscriptionProxy(core, provider);
   if (!proxy) return {};
   const key = proxyKey(core);
+  if (provider.id === 'muse') return museGatewayEnv(core, proxy, key);
   if (isOpenCode(provider.id)) return openCodeGatewayEnv(core, provider, proxy, key);
   if (provider.id === GROK) return grokGatewayEnv(core, proxy, key);
   if (provider.protocol === 'claude-sdk') return {
@@ -152,6 +155,18 @@ export function subscriptionProxyEnv(core: Core, provider: ProviderDescriptor): 
     CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK: '1',
   };
   return { [PROXY_URL_ENV]: proxyApiUrl(proxy), [PROXY_KEY_ENV]: key };
+}
+
+/** Muse serve takes its endpoint from settings, never the TUI's --base-url flag. Keep native settings and logins intact. */
+function museGatewayEnv(core: Core, proxy: SubscriptionProxy, key: string): Record<string, string> {
+  const api = proxyApiUrl(proxy).replace(/\/v1$/, '/muse-code');
+  const identity = createHash('sha256').update(api).digest('hex').slice(0, 24);
+  const directory = join(core.dataDir, 'subscription-proxy', 'muse', identity);
+  mkdirSync(join(directory, 'muse'), { recursive: true });
+  const settings = join(directory, 'muse', 'settings.json');
+  if (!existsSync(settings)) writeFileSync(settings, JSON.stringify({ schema_version: 1, endpoint_transport: { base_url: api, auth: 'bearer' } }));
+  // META_API_KEY overrides a saved login and is deliberately supplied after the profile's unsetEnv.
+  return { XDG_CONFIG_HOME: directory, META_API_KEY: key };
 }
 
 /** Only the address is an argument; Codex reads the key from its child's environment. */
@@ -230,6 +245,10 @@ export function proprietaryFamily(id: string): ModelFamily | null {
 
 /** Discovery is a bounded HTTP read on the core, so a phone uses its host's gateway. */
 export async function readSubscriptionProxyModels(core: Core, provider: ProviderDescriptor): Promise<ModelInfo[] | null> {
+  if (provider.id === 'muse') {
+    // Its own MSP catalog carries native model ids and efforts, through Douane's Muse endpoint.
+    return null;
+  }
   const proxy = activeSubscriptionProxy(core, provider);
   if (!proxy) return null;
   // Grok's CLI reads the gateway's list itself and takes no model outside it: its discovery is the whole catalog.
@@ -347,5 +366,12 @@ export function registerSubscriptionProxy(core: Core): void {
     // A new key can change the answer even when the settings did not.
     if (key !== undefined) core.quotas.gateway.reset();
     return settings;
+  });
+  core.router.register('subscriptionProxy.setEnabled', ({ enabled }) => {
+    if (typeof enabled !== 'boolean') throw invalidParams('subscriptionProxy.setEnabled enabled must be a boolean', { field: 'enabled' });
+    const proxy = core.settings.get().subscriptionProxy;
+    if (!proxy?.baseUrl) throw refused('no subscription proxy is configured: the owner sets one up in Settings > Accounts', { field: 'subscriptionProxy' });
+    if (proxy.enabled === enabled) return core.settings.get();
+    return core.settings.set({ subscriptionProxy: { ...proxy, enabled } });
   });
 }

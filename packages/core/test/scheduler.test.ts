@@ -124,13 +124,15 @@ describe('scheduler', () => {
     const [running = ''] = await threeThreads(client);
     await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
     await waitFor(() => harness.core.scheduler.state().running.length === 1);
-    harness.core.threads.stopRunning = () => true;
+    let stopRequests = 0;
+    harness.core.threads.stopRunning = () => { stopRequests++; return true; };
     await harness.core.drain(150);
+    expect(stopRequests).toBe(1);
     // Spending the budget again in close() used to run shutdown past its own
     // ten seconds and skip every step after the drain.
-    const started = Date.now();
     await harness.stop();
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(stopRequests).toBe(1);
+    expect(harness.core.journal.isClosed()).toBe(true);
   });
 
   test('close keeps the journal open until an overlapping drain finishes', async () => {

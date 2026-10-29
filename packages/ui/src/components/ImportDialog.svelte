@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { ImportableSession } from '@boite/contracts';
+  import type { AccountId, ImportableSession } from '@boite/contracts';
+  import { contextMenu } from '../lib/context-menu.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { ago } from '../lib/format';
@@ -18,6 +19,7 @@
   $effect(() => {
     const current = store.imports;
     if (!current) {
+      if (contextMenu.anchor && list?.contains(contextMenu.anchor)) contextMenu.close();
       overlay.hide();
       return;
     }
@@ -31,8 +33,23 @@
 
   let projectName = $derived(store.projects.find((p) => p.id === held?.projectId)?.name ?? '');
 
-  function accountLabel(session: ImportableSession): string {
-    return store.accounts.find((account) => account.id === session.accountId)?.label ?? session.accountId;
+  function accountIds(session: ImportableSession): AccountId[] {
+    return session.accountIds?.length ? session.accountIds : [session.accountId];
+  }
+
+  function accountLabel(accountId: AccountId): string {
+    return store.accounts.find(account => account.id === accountId)?.label ?? accountId;
+  }
+
+  function pick(session: ImportableSession, event: MouseEvent): void {
+    const accounts = accountIds(session);
+    if (accounts.length === 1) {
+      void store.importSession(accounts[0]!, session.sessionId);
+      return;
+    }
+    contextMenu.open(event, accounts.map(id => ({ id, label: accountLabel(id) })), id => {
+      void store.importSession(id, session.sessionId);
+    });
   }
 
   function hintOf(session: ImportableSession): string {
@@ -42,7 +59,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    if (!store.imports) return;
+    if (!store.imports || contextMenu.current) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
@@ -92,7 +109,8 @@
         {:else if dialog.sessions.length === 0}
           <p class="muted empty" data-testid="import-empty">{strings.imports.empty}</p>
         {:else}
-          {#each dialog.sessions as session (session.accountId + session.sessionId)}
+          {#each dialog.sessions as session (session.file)}
+            {@const accounts = accountIds(session)}
             <button
               type="button"
               class="row"
@@ -101,10 +119,14 @@
               title={session.file}
               data-testid="import-row"
               data-session={session.sessionId}
-              onclick={() => void store.importSession(session.accountId, session.sessionId)}
+              data-file={session.file}
+              aria-haspopup={accounts.length > 1 ? 'menu' : undefined}
+              aria-label={accounts.length > 1 ? fill(strings.imports.chooseAccount, { title: session.title }) : undefined}
+              aria-expanded={accounts.length > 1 ? contextMenu.current !== null && (contextMenu.anchor as HTMLElement | null)?.dataset.file === session.file : undefined}
+              onclick={(event) => pick(session, event)}
             >
               <span class="title ui-label">{session.title}</span>
-              <span class="account ui-label">{accountLabel(session)}</span>
+              <span class="account ui-label">{accounts.length > 1 ? fill(strings.imports.accounts, { count: String(accounts.length) }) : accountLabel(accounts[0]!)}</span>
               <span class="hint ui-label">{hintOf(session)}</span>
             </button>
           {/each}

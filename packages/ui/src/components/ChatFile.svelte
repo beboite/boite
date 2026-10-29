@@ -100,6 +100,11 @@
     });
   }
 
+  /** Players fetch their URL only near the screen; the browser reads metadata and streams the bytes. */
+  function nearMedia(): void {
+    if (file?.type === 'file' && file.dataDeferred && /^(video|audio)\//.test(file.mimeType) && !loading && !url && !error) void load();
+  }
+
   /** A copy's address that stopped loading (a ticket the core forgot) is asked for again, once. */
   function copyFailed(): void {
     if (copyRetried || copy.startsWith('data:') || !store || !threadId || !messageId || partIndex === undefined) return;
@@ -137,7 +142,9 @@
     saving = true;
     try {
       if (file?.type === 'artifact') await loadArtifact();
-      saved = (body ? await saveAttachment(name, body, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
+      // Older cores and shell relays return data URLs, which the native HTTP downloader cannot read.
+      const bytes = body ?? (url.startsWith('data:') ? decodeBase64(url.slice(url.indexOf(',') + 1)) : null);
+      saved = (bytes ? await saveAttachment(name, bytes, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
       error = '';
     } catch (reason) { error = errorText(reason); }
     finally { saving = false; }
@@ -196,8 +203,16 @@
           await loadArtifact();
         } else if (file) {
           if (file.dataDeferred && (!store || !threadId || !messageId || partIndex === undefined)) throw new Error(strings.artifacts.failed);
+          if (file.dataDeferred && /^(video|audio)\//.test(file.mimeType)) {
+            const mediaUrl = await store!.loadMediaAttachment(threadId!, messageId!, partIndex!, file.mimeType);
+            if (disposed) return;
+            mime = file.mimeType;
+            size = file.bytes ?? 0;
+            url = mediaUrl;
+            return;
+          }
           const data = file.dataDeferred ? await store!.loadMessageAttachment(threadId!, messageId!, partIndex!) : file.data;
-          if (disposed) return;
+          if (disposed || data === null) return;
           body = decodeBase64(data);
           mime = file.mimeType;
           if (mime === 'application/pdf' && new TextDecoder().decode(body.subarray(0, 5)) !== '%PDF-') mime = 'application/octet-stream';
@@ -271,7 +286,7 @@
   });
 </script>
 
-<section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving}>
+<section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving} use:onView={nearMedia}>
   {#if waiting}
     <div class="preview" data-testid="artifact-waiting">
       <button type="button" class="shot boxed" style:width={boxWidth} style:aspect-ratio={boxRatio} use:onView={near} onclick={() => void openOriginal()} disabled={loading}

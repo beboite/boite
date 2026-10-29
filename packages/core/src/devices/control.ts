@@ -5,8 +5,10 @@
  * a device is acted on only after the SDK listed it. See docs/devices.md.
  */
 import {
+  isAdbText,
   LOCAL_DEVICE_HOST,
   MOBILE_PLATFORMS,
+  MOBILE_STREAM_SIZE,
   mobileDeviceIdError,
   mobileDeviceInputError,
   type MobileDevice,
@@ -15,17 +17,24 @@ import {
   type MobileDeviceInput,
   type MobileDeviceList,
   type MobileDeviceSession,
+  type MobileDeviceStream,
   type MobileHostPlatform,
   type RpcParams,
   type RpcResult,
+  type Settings,
   type ThreadId,
 } from '@boite/contracts';
-import { hostname } from 'node:os';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
+import { runCommand, type CommandRun } from '../run-command.ts';
+import { machineName } from '../paths.ts';
 import type { Connection } from '../router.ts';
 import {
   adbText,
+  ANDROID_KEYCODES,
   currentSdkEnvironment,
   findAndroidSdk,
   findXcrun,
@@ -37,6 +46,7 @@ import {
   type AndroidTools,
   type SdkEnvironment,
 } from './sdk.ts';
+import type { DeviceStreams, StreamOptions } from './stream.ts';
 
 const SCOPE = 'system:devices';
 /** What T3 Code waits too: a cold emulator takes a minute or two. */
@@ -47,14 +57,9 @@ const CAPTURE_REUSE_MS = 200;
 const SESSIONS_MAX = 4;
 /** Sizes and qualities remembered per device for `previous`: a desktop and a phone each ask their own. */
 const FRAME_KINDS_MAX = 8;
-const KEYCODES = { back: 4, home: 3, recents: 187, enter: 66, backspace: 67, power: 26, tab: 61, delete: 112, up: 19, down: 20, left: 21, right: 22 } as const;
+/** Where `boite device` and the panel send someone whose stream is off. */
+export const STREAM_OFF = 'the live stream is off: the owner turns it on in Settings > Experiments, or an agent asks with `boite settings request deviceStream true --why "..."`';
 
-interface Run {
-  code: number | null;
-  stdout: Uint8Array;
-  stderr: string;
-  timedOut: boolean;
-}
 
 /** What a listed device needs to be driven: its adb serial or simulator UDID. */
 interface Located extends MobileDevice {
@@ -85,6 +90,7 @@ export interface MobileDevicesOptions {
   sdk?: () => SdkEnvironment;
   bootTimeoutMs?: number;
   pollMs?: number;
+  stream?: StreamOptions;
 }
 
 export class MobileDevices {
@@ -104,6 +110,11 @@ export class MobileDevices {
   readonly #captures = new Map<string, Capture>();
   /** Per device, by `maxWidth:quality`, the frame last made, so a caller still showing it gets `unchanged`. */
   readonly #frames = new Map<string, Map<string, SentFrame>>();
+  readonly #streamOptions: StreamOptions | undefined;
+  /** The live stream's sessions, loaded with stream.ts by the first `devices.stream`. */
+  #streams?: Promise<DeviceStreams>;
+  #live?: DeviceStreams;
+  #offSettings?: () => void;
   #closed = false;
 
   constructor(core: Core, options: MobileDevicesOptions = {}) {
@@ -111,12 +122,13 @@ export class MobileDevices {
     this.#sdk = options.sdk ?? currentSdkEnvironment;
     this.#bootTimeoutMs = options.bootTimeoutMs ?? BOOT_TIMEOUT_MS;
     this.#pollMs = options.pollMs ?? 2000;
+    this.#streamOptions = options.stream;
   }
 
   async list({ threadId }: RpcParams<'devices.list'>, connection?: Connection): Promise<MobileDeviceList> {
     this.#thread(threadId, connection);
     const { host, devices } = await this.#discover();
-    return { hosts: [host], devices: devices.map(({ serial: _serial, ...device }) => device), sessions: this.#list(threadId) };
+    return { hosts: [host], devices: devices.map(({ serial: _serial, ...device }) => device), sessions: this.#list(threadId), liveStream: this.#streaming() };
   }
 
   sessions({ threadId }: RpcParams<'devices.sessions'>, connection?: Connection): RpcResult<'devices.sessions'> {
@@ -209,18 +221,63 @@ export class MobileDevices {
     return { deviceId, width: png.width, height: png.height, base64: Buffer.from(png.bytes).toString('base64') };
   }
 
-  async input(params: RpcParams<'devices.input'>, connection?: Connection): Promise<{ ok: true }> {
+  /** Through the live stream's control socket while one is up, else `adb shell input`, which has no drag, wheel, clipboard or Unicode. */
+  async input(params: RpcParams<'devices.input'>, connection?: Connection): Promise<RpcResult<'devices.input'>> {
     const problem = mobileDeviceInputError(params.input);
     if (problem) throw refused(problem);
     const target = this.#ready(params.threadId, params.deviceId, connection);
     if (target.platform !== 'android' || !target.serial) {
       throw refused('iOS Simulators are view-only in the Device panel; drive them with xcrun simctl from the agent', { deviceId: target.id });
     }
-    const args = this.#inputArgs(target, params.input);
+    if (this.#live?.live(target.id)) {
+      await this.#live.input(target.id, params.input);
+      this.#captures.delete(target.id);
+      return { ok: true, via: 'stream' };
+    }
+    const input = params.input;
+    const streamOnly = input.kind === 'touch' ? 'a touch' : input.kind === 'scroll' ? 'a scroll' : input.kind === 'clipboard' ? 'the device clipboard'
+      : input.kind === 'text' && !isAdbText(input.text) ? 'text beyond printable ASCII' : undefined;
+    if (streamOnly) {
+      throw refused(`${streamOnly} needs the device's live stream (adb input cannot send it): ${this.#streaming() ? 'show the device in the Device panel to start it' : STREAM_OFF}`, { deviceId: target.id });
+    }
+    const args = this.#inputArgs(target, input);
     const run = await this.#run(this.#adb().adb, ['-s', target.serial, ...args], COMMAND_TIMEOUT_MS);
     if (run.code !== 0) throw refused(`adb ${args.slice(0, 3).join(' ')} failed: ${this.#why(run)}`, { deviceId: target.id });
     this.#captures.delete(target.id);
-    return { ok: true };
+    return { ok: true, via: 'adb' };
+  }
+
+  /**
+   * The long poll behind the panel's live video. Off, on an iOS Simulator, or
+   * when the session fails, the answer says so and the panel polls frames.
+   */
+  async stream(params: RpcParams<'devices.stream'>, connection?: Connection): Promise<MobileDeviceStream> {
+    const { threadId, deviceId, maxSize, after } = params;
+    if (maxSize !== undefined && !(Number.isInteger(maxSize) && maxSize >= MOBILE_STREAM_SIZE.min && maxSize <= MOBILE_STREAM_SIZE.max)) {
+      throw refused(`device stream maxSize must be an integer from ${MOBILE_STREAM_SIZE.min} to ${MOBILE_STREAM_SIZE.max}`);
+    }
+    if (after !== undefined && !(typeof after === 'object' && after !== null && typeof after.id === 'string' && after.id.length <= 100 && Number.isInteger(after.seq) && after.seq >= 0)) {
+      throw refused('device stream after must be the id and seq of a chunk this device sent');
+    }
+    const target = this.#ready(threadId, deviceId, connection);
+    if (!this.#streaming()) return { deviceId, state: 'off', reason: STREAM_OFF, chunks: [] };
+    if (target.platform !== 'android' || !target.serial) return { deviceId, state: 'unavailable', reason: 'iOS Simulators have no live stream; the panel shows their screenshots', chunks: [] };
+    const streams = await this.#loadStreams();
+    // The setting may have gone off while stream.ts loaded.
+    if (this.#closed || !this.#streaming()) return { deviceId, state: 'off', reason: STREAM_OFF, chunks: [] };
+    // The panel may also have closed while the stream module was awaited.
+    this.#ready(threadId, deviceId, connection);
+    return streams.stream({ id: target.id, serial: target.serial, name: target.name }, connection?.id ?? 'core', { maxSize, after }, connection?.onClose?.bind(connection));
+  }
+
+  async clipboard(params: RpcParams<'devices.clipboard'>, connection?: Connection): Promise<RpcResult<'devices.clipboard'>> {
+    if (params.copy !== undefined && params.copy !== 'copy' && params.copy !== 'cut') throw refused('device clipboard copy must be copy or cut');
+    const target = this.#ready(params.threadId, params.deviceId, connection);
+    if (target.platform !== 'android' || !target.serial) throw refused('the device clipboard needs an Android device: iOS Simulators have no live stream', { deviceId: target.id });
+    if (!this.#live?.live(target.id)) {
+      throw refused(`the device clipboard needs the live stream: ${this.#streaming() ? 'show the device in the Device panel to start it' : STREAM_OFF}`, { deviceId: target.id });
+    }
+    return { text: await this.#live.clipboard(target.id, params.copy) };
   }
 
   async close(params: RpcParams<'devices.close'>, connection?: Connection): Promise<RpcResult<'devices.close'>> {
@@ -238,6 +295,7 @@ export class MobileDevices {
       if (target) this.#core.logs.info(`Device ${deviceId} shut down from the Device panel`, { source: 'devices', event: 'device.shutdown', threadId: params.threadId, data: { deviceId } });
       else this.#core.logs.info(`Device ${deviceId} closed from the Device panel; it had nothing running to power off`, { source: 'devices', event: 'device.closed', threadId: params.threadId, data: { deviceId } });
       this.#emulators.get(deviceId)?.kill();
+      this.#live?.stop(deviceId, 'the device was powered off');
       for (const [threadId, open] of this.#sessions) if (open.delete(deviceId)) this.#changed(threadId);
       this.#forget(deviceId);
       return { closed: [deviceId] };
@@ -245,17 +303,28 @@ export class MobileDevices {
     this.#core.logs.info(`Device ${deviceId} closed in the Device panel`, { source: 'devices', event: 'device.closed', threadId: params.threadId, data: { deviceId } });
     this.#sessions.get(params.threadId)?.delete(deviceId);
     this.#changed(params.threadId);
-    if (![...this.#sessions.values()].some((open) => open.has(deviceId))) { this.#captures.delete(deviceId); this.#frames.delete(deviceId); }
+    if (![...this.#sessions.values()].some((open) => open.has(deviceId))) {
+      this.#captures.delete(deviceId);
+      this.#frames.delete(deviceId);
+      this.#live?.stop(deviceId, 'closed in the last Device panel showing it');
+    }
     return { closed: [deviceId] };
   }
 
   /** A conversation archived or removed keeps no device open; the device itself keeps running. */
   release(threadId: ThreadId): void {
-    if (this.#sessions.delete(threadId)) this.#changed(threadId);
+    const open = this.#sessions.get(threadId);
+    if (!open || !this.#sessions.delete(threadId)) return;
+    this.#changed(threadId);
+    for (const deviceId of open.keys()) {
+      if (![...this.#sessions.values()].some((other) => other.has(deviceId))) this.#live?.stop(deviceId, 'its last conversation was archived');
+    }
   }
 
   stop(): void {
     this.#closed = true;
+    this.#live?.stopAll('the core is stopping');
+    this.#offSettings?.();
     this.#sessions.clear();
     this.#captures.clear();
     this.#frames.clear();
@@ -273,7 +342,7 @@ export class MobileDevices {
     ]);
     const booting = (device: Located): Located => (this.#boots.has(device.id) && device.state !== 'running' ? { ...device, state: 'booting' } : device);
     return {
-      host: { id: LOCAL_DEVICE_HOST, name: hostname(), platforms: [android.status, ios.status] },
+      host: { id: LOCAL_DEVICE_HOST, name: machineName(), platforms: [android.status, ios.status] },
       devices: [...androidDevices, ...iosDevices].map(booting),
     };
   }
@@ -405,9 +474,13 @@ export class MobileDevices {
   }
 
   async #shutdown(target: Located): Promise<void> {
+    const booting = this.#boots.has(target.id);
     const run = target.platform === 'android'
       ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'emu', 'kill'], COMMAND_TIMEOUT_MS)
       : await this.#run(this.#xcrun(), ['simctl', 'shutdown', target.id], COMMAND_TIMEOUT_MS);
+    // A simulator someone already shut down is the state asked for; simctl still answers with an error.
+    // Not while a boot was or is pending: `simctl boot` could start it after that answer.
+    if (target.platform === 'ios' && run.code !== 0 && !booting && !this.#boots.has(target.id) && /Unable to shutdown device in current state: Shutdown/i.test(run.stderr)) return;
     if (run.code !== 0) throw refused(`powering ${target.name} off failed: ${this.#why(run)}`, { deviceId: target.id });
   }
 
@@ -419,7 +492,7 @@ export class MobileDevices {
     const png = (async () => {
       const run = target.platform === 'android'
         ? await this.#run(this.#adb().adb, ['-s', target.serial!, 'exec-out', 'screencap', '-p'], COMMAND_TIMEOUT_MS)
-        : await this.#run(this.#xcrun(), ['simctl', 'io', target.id, 'screenshot', '--type=png', '-'], COMMAND_TIMEOUT_MS);
+        : await this.#simctlScreenshot(target);
       const size = run.code === 0 ? pngSize(run.stdout) : undefined;
       if (!size) throw refused(`the screen of ${target.name} could not be captured: ${this.#why(run) || 'not a PNG'}`, { deviceId: target.id });
       return { bytes: run.stdout, ...size, hash: new Bun.CryptoHasher('sha1').update(run.stdout).digest('hex') };
@@ -430,16 +503,59 @@ export class MobileDevices {
     return png;
   }
 
+  /** Since Xcode 27, `screenshot -` writes a file named `-` instead of stdout: simctl writes to a private folder, removed once read. */
+  async #simctlScreenshot(target: Located): Promise<CommandRun> {
+    const xcrun = this.#xcrun();
+    let directory: string | undefined;
+    try {
+      directory = await mkdtemp(join(tmpdir(), 'boite-simctl-'));
+      const file = join(directory, 'screen.png');
+      const run = await this.#run(xcrun, ['simctl', 'io', target.id, 'screenshot', '--type=png', file], COMMAND_TIMEOUT_MS);
+      return run.code === 0 ? { ...run, stdout: await readFile(file) } : run;
+    } catch (error) {
+      return { code: null, stdout: new Uint8Array(), stderr: error instanceof Error ? error.message : String(error), timedOut: false };
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true });
+    }
+  }
+
   #inputArgs(target: Located, input: MobileDeviceInput): string[] {
     switch (input.kind) {
       case 'tap': return ['shell', 'input', 'tap', String(input.x), String(input.y)];
       case 'swipe': return ['shell', 'input', 'swipe', String(input.from.x), String(input.from.y), String(input.to.x), String(input.to.y), String(input.durationMs ?? 300)];
       case 'text': return ['shell', 'input', 'text', adbText(input.text)];
       case 'key':
-        if (input.key !== 'rotate') return ['shell', 'input', 'keyevent', String(KEYCODES[input.key])];
-        if (target.kind !== 'emulator') throw refused('only an emulator rotates from the panel', { deviceId: target.id });
+        if (input.key !== 'rotate') return ['shell', 'input', 'keyevent', String(ANDROID_KEYCODES[input.key])];
+        if (target.kind !== 'emulator') throw refused('without the live stream, only an emulator rotates from the panel', { deviceId: target.id });
         return ['emu', 'rotate'];
+      default: throw refused(`${input.kind} needs the device's live stream`, { deviceId: target.id });
     }
+  }
+
+  // --- live stream ---
+
+  #streaming(): boolean {
+    return this.#core.settings.get().deviceStream === true;
+  }
+
+  #loadStreams(): Promise<DeviceStreams> {
+    this.#streams ??= import('./stream.ts').then(({ DeviceStreams }) => {
+      const streams = new DeviceStreams({
+        dataDir: this.#core.dataDir,
+        adb: async (serial, args, timeoutMs) => {
+          const run = await this.#run(this.#adb().adb, ['-s', serial, ...args], timeoutMs);
+          return { ok: run.code === 0, output: run.timedOut ? 'timed out' : `${text(run.stdout)}\n${run.stderr}`.trim().slice(-2000) };
+        },
+        spawnAdb: (serial, args) => this.#core.procs.spawn(SCOPE, this.#adb().adb, ['-s', serial, ...args], { agentRoot: false }),
+        log: (level, message, event, data) => this.#core.logs[level](message, { source: 'devices', event, data }),
+      }, this.#streamOptions);
+      this.#live = streams;
+      this.#offSettings = this.#core.bus.onCommitted((name, payload) => {
+        if (name === 'settings.updated' && (payload as Settings).deviceStream !== true) streams.stopAll('the live stream was turned off in Settings');
+      });
+      return streams;
+    });
+    return this.#streams;
   }
 
   // --- sessions ---
@@ -535,29 +651,13 @@ export class MobileDevices {
     return ['xcrun', 'simctl'];
   }
 
-  #why(run: Run): string {
+  #why(run: CommandRun): string {
     if (run.timedOut) return 'timed out';
     return (run.stderr.trim() || text(run.stdout).trim()).slice(-400);
   }
 
-  async #run(command: string, args: string[], timeoutMs: number): Promise<Run> {
-    let child: ReturnType<Core['procs']['spawn']>;
-    try {
-      child = this.#core.procs.spawn(SCOPE, command, args, { agentRoot: false });
-    } catch (error) {
-      return { code: null, stdout: new Uint8Array(), stderr: error instanceof Error ? error.message : String(error), timedOut: false };
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.proc.kill();
-    }, timeoutMs);
-    try {
-      const [stdout, stderr, code] = await Promise.all([new Response(child.proc.stdout).bytes(), new Response(child.proc.stderr).text(), child.exited]);
-      return { code, stdout, stderr, timedOut };
-    } finally {
-      clearTimeout(timer);
-    }
+  #run(command: string, args: string[], timeoutMs: number): Promise<CommandRun> {
+    return runCommand(this.#core.procs, SCOPE, command, args, timeoutMs);
   }
 }
 

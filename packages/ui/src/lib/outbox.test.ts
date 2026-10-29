@@ -11,11 +11,11 @@ vi.mock('./draft-journal', () => ({ readDraftJournal: vi.fn(async () => null), w
 const stores: Store[] = [];
 const clients: FakeClient[] = [];
 
-/** A Store on `machine` whose client records every start, connected only when asked. */
+/** A Store on `machine` whose client records every start, connected only when asked. Its core keeps no composer records, so the frontend delivers. */
 async function machine(id: string, before?: (client: FakeClient) => Promise<void>, delayMs = 0) {
   const store = new Store();
   store.machineId = id;
-  const client = new FakeClient({ delayMs });
+  const client = new FakeClient({ delayMs, missing: ['composer.list'] });
   clients.push(client);
   if (before) { await client.connect(); await before(client); }
   const original = client.call.bind(client);

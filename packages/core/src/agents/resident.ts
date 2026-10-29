@@ -1,20 +1,21 @@
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
+import { AGENT_DAILY_BUDGET } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentProfile, AgentRuntimeConfig, AgentSelection, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { agentProvider, checkSavedSelection } from '../threads/selection.ts';
-import { ids, integer, object, text } from './validation.ts';
-import { OPEN_WORK } from './repository.ts';
-import { withLoad } from '../threads/records.ts';
+import { checkBrainPath, createBrainFile, readBrainFile, rewriteBrainFile } from './brain-files.ts';
+import { ids, object, text } from './validation.ts';
+import type { AgentsRepository } from './repository.ts';
 import { slugOf } from '../worktree.ts';
 
 const BRAIN_ROOT = 'agents:brain-root';
 const BRAIN_DIR = 'agents:brain-dir:';
 /** What a new agent's brain starts with. */
 const BRAIN_FILES: Record<string, string> = {
-  'AGENTS.md': '# Individual brain\n\nKeep reusable procedures in skills/. Use scoped memory for group and mission findings.\n',
+  'AGENTS.md': '# Individual brain\n\nKeep reusable procedures in skills/. Durable facts go to MEMORY.md through boite bot remember.\n',
   'MEMORY.md': '',
 };
 const inside = (root: string, path: string) => { const rel = relative(root, path); return rel === '' || rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -23,16 +24,16 @@ export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model
 
 /** Identity-owned configuration. Provider sessions and browser clients may come and go. */
 export class ResidentAgents {
-  constructor(private readonly core: Core) {}
-  private get records() { return this.core.workforce.records; }
+  constructor(private readonly core: Core, private readonly records: AgentsRepository) {}
   config(agentId: string): AgentRuntimeConfig {
     const agent = this.records.get('profile',agentId);
-    const saved = this.core.journal.getSetting(`agents:runtime:${agentId}`) as AgentRuntimeConfig | undefined;
-    if (saved) return { ...saved, defaultRoute: agent.selection };
+    // Configurations saved by older cores also hold `compactAfterTurns` and `maxRunMinutes`: nothing reads them.
+    const saved = this.core.journal.getSetting(`agents:runtime:${agentId}`) as (AgentRuntimeConfig & Record<string, unknown>) | undefined;
+    if (saved) return { defaultRoute: agent.selection, allowedRoutes: saved.allowedRoutes, subagents: saved.subagents, autoMemory: saved.autoMemory !== false, eventWakes: saved.eventWakes === true, dailyBudgetUsd: saved.dailyBudgetUsd ?? null };
     const model = agent.selection.model ?? agentProvider(this.core, agent).models.find(m => m.default)?.id ?? agentProvider(this.core, agent).models[0]?.id;
-    if (!model) throw refused('default model: choose a model for this agent');
+    if (!model) throw refused('default model: choose a model for this bot');
     // Subagents are on by default: an agent splits its work the way a thread does, on any granted model.
-    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, compactAfterTurns:12,maxRunMinutes:10,autoMemory:true };
+    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:true,paused:false,profiles:[],anyModel:true}, autoMemory:true, eventWakes:false, dailyBudgetUsd:null };
   }
   grants(): AgentAccountGrant[] { return (this.core.journal.getSetting('agents:account-grants') as AgentAccountGrant[] | undefined) ?? []; }
   accountAllowed(agentId: string, accountId: string): boolean { const grant=this.grants().find(g=>g.accountId===accountId); return !grant || grant.agentIds===null || grant.agentIds.includes(agentId); }
@@ -51,7 +52,7 @@ export class ResidentAgents {
     object(value,'route');
     const provider=this.core.providers.require(text(value.providerId,'route.providerId',100));
     const account=this.core.accounts.require(text(value.accountId,'route.accountId',160));
-    if(account.providerId!==provider.id || !this.accountAllowed(agentId,account.id))throw refused('route.accountId: account is not granted to this agent');
+    if(account.providerId!==provider.id || !this.accountAllowed(agentId,account.id))throw refused('route.accountId: account is not granted to this bot');
     const model=text(value.model,'route.model',256);
     checkSavedSelection(provider,account.id,{...value,model},previous);
     return {...value,model};
@@ -68,14 +69,17 @@ export class ResidentAgents {
     const subagents=this.core.delegation.validateConfig(v.subagents,previous.subagents);
     for(const p of subagents.profiles)this.route(agent.id,{...p,permissionMode:selection.permissionMode},previous.subagents.profiles.find(r=>r.id===p.id));
     if(v.autoMemory!==undefined&&typeof v.autoMemory!=='boolean')throw refused('autoMemory: expected true or false');
-    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,compactAfterTurns:integer(v.compactAfterTurns,'compactAfterTurns',2,100),maxRunMinutes:integer(v.maxRunMinutes,'maxRunMinutes',1,120),autoMemory:v.autoMemory!==false};
+    if(v.eventWakes!==undefined&&typeof v.eventWakes!=='boolean')throw refused('eventWakes: expected true or false');
+    const budget=v.dailyBudgetUsd??null;
+    if(budget!==null&&(typeof budget!=='number'||!Number.isFinite(budget)||budget<AGENT_DAILY_BUDGET.min||budget>AGENT_DAILY_BUDGET.max))throw refused(`dailyBudgetUsd: expected dollars a day from ${AGENT_DAILY_BUDGET.min} to ${AGENT_DAILY_BUDGET.max}, or null for no cap`,{field:'dailyBudgetUsd'});
+    const config:AgentRuntimeConfig={defaultRoute:selection,allowedRoutes:routes,subagents,autoMemory:v.autoMemory!==false,eventWakes:v.eventWakes??previous.eventWakes??false,dailyBudgetUsd:budget===null?null:Math.round(budget*100)/100};
     const saved=this.records.transaction(()=>{
       // saveProfile validates the permission mode. Persist policy first in the same transaction.
       this.core.journal.setSetting(`agents:runtime:${agent.id}`,config);
       return this.core.workforce.saveProfile({id:agent.id,expectedRevision:params.expectedRevision,value:{...agent,selection}});
     });
     this.enforce();
-    // An archived session keeps its old config; delegation.configure refuses it after the commit above.
+    // An archived thread keeps its old config; delegation.configure refuses it after the commit above.
     for(const session of this.records.list('session').filter(s=>s.agentId===agent.id&&this.core.journal.getThread(s.threadId)?.archived===false))this.core.delegation.configure(session.threadId,config.subagents);
     this.core.workforce.changed();return saved;
   }
@@ -86,34 +90,34 @@ export class ResidentAgents {
     this.core.journal.append({type:'agents.limits',threadId:null,version:1,payload:{grants:checked}},()=>this.core.journal.setSetting('agents:account-grants',checked));
     this.enforce();this.core.workforce.changed();return checked;
   }
+  /** The agent whose thread this is, or whose thread is this subagent's parent. */
   ownerOf(threadId: string): string | null {
     const thread=this.core.journal.getThread(threadId);
     if(!thread)return null;
     const root=thread.parentThreadId?this.core.journal.getThread(thread.parentThreadId):thread;
     if(!root?.agentSessionId)return null;
-    return this.records.get('session',root.agentSessionId).agentId;
+    return this.records.sessionOfThread(root.id)?.agentId??null;
   }
+  /**
+   * An agent's turns and its subagents' run on routes its policy allows. A
+   * paused agent still answers the user; only its wakes wait.
+   */
   assertThreadRoute(threadId:string, selection:AgentSelection):void {
     const owner=this.ownerOf(threadId);if(!owner)return;
-    if(this.records.get('profile',owner).status!=='active'||!this.allowed(owner,selection,!!this.core.threads.require(threadId).parentThreadId))throw refused('account/model access was withdrawn from this agent');
+    if(this.records.get('profile',owner).status==='archived'||!this.allowed(owner,selection,!!this.core.threads.require(threadId).parentThreadId))throw refused('account/model access was withdrawn from this bot');
   }
-  isCompacting(threadId: string): boolean {
-    if (!this.core.journal.getThread(threadId)?.agentSessionId) return false;
-    return this.records.withStatus('run', ['accepted', 'running']).some(run => run.threadId === threadId && this.records.get('work', run.workId).purpose === 'compaction');
-  }
+  /** Stops what runs on a route the owner withdrew, and the subagents of an archived agent. */
   enforce():void {
-    for(const run of this.records.withStatus('run',['accepted','running'])) {
-      const status=this.records.get('profile',run.agentId).status;
-      if(status==='active'&&this.allowed(run.agentId,run.execution))continue;
-      // The card says what the owner did: a paused or archived agent is not a withdrawn route.
-      const error=status==='paused'?'The agent was paused. Resume it to continue.':status==='archived'?'The agent was archived.':'Model or account access withdrawn. Review before resuming.';
-      const work=this.records.get('work',run.workId);
-      if(work.status==='running')this.records.update('work',work.id,work.revision,{...work,status:'paused',error});
-      this.core.threads.stopTurn(run.threadId);
+    for(const session of this.records.list('session')){
+      const thread=this.core.journal.getThread(session.threadId);
+      if(!thread||!['running','queued','waiting'].includes(thread.status))continue;
+      const status=this.records.find('profile',session.agentId)?.status;
+      if(status!=='archived'&&this.allowed(session.agentId,thread))continue;
+      this.core.threads.stopTurn(thread.id);
     }
-    for(const thread of this.core.journal.listThreads()){
-      const owner=this.ownerOf(thread.id);if(!owner||!thread.parentThreadId)continue;
-      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status!=='active')this.core.delegation.stop(thread.id,undefined,'owner');
+    for(const thread of this.core.journal.listChildThreads()){
+      const owner=this.ownerOf(thread.id);if(!owner)continue;
+      if(!this.allowed(owner,thread,true)||this.records.get('profile',owner).status==='archived')this.core.delegation.stop(thread.id,undefined,'owner');
     }
   }
   /** Where brains live: the folder the owner chose, else the core's data directory. */
@@ -144,10 +148,15 @@ export class ResidentAgents {
   }
   brain(agentId:string):AgentBrain {
     this.records.get('profile',agentId);
-    const path=this.brainPath(agentId);
+    const root=this.brainRoot().path,path=this.brainPath(agentId);
+    // A linked folder is refused before anything is created through it (`brain-files.ts`).
+    checkBrainPath(root,join(path,'skills'),true);
     mkdirSync(join(path,'skills'),{recursive:true});
-    for(const [name,content] of Object.entries(BRAIN_FILES))if(!existsSync(join(path,name)))writeFileSync(join(path,name),content,{flag:'wx'});
-    const instructions=readFileSync(join(path,'AGENTS.md'),'utf8'),memory=readFileSync(join(path,'MEMORY.md'),'utf8');
+    for(const [name,content] of Object.entries(BRAIN_FILES)){
+      try{createBrainFile(root,join(path,name),content);}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
+    }
+    const instructions=readBrainFile(root,join(path,'AGENTS.md')),memory=readBrainFile(root,join(path,'MEMORY.md'));
     const revision=createHash('sha256').update(JSON.stringify([instructions,memory])).digest('hex');
     return{path,instructions,memory,revision};
   }
@@ -169,7 +178,7 @@ export class ResidentAgents {
       if(path!==fallback&&(inside(data,path)||inside(path,data)))throw refused(`path: ${path} holds the core's own data; choose a folder of its own`);
       root=path===fallback?{path:join(this.core.dataDir,'agent-workspaces'),custom:false}:{path,custom:true};
     }
-    if(this.records.withStatus('run',['accepted','running']).length||this.core.workforce.memory.busy())throw refused('agents are at work; move their brains once they finish');
+    if(this.records.list('session').some(s=>['running','queued','waiting'].includes(this.core.journal.getThread(s.threadId)?.status??'idle'))||this.core.workforce.memory.busy())throw refused('agents are at work; move their brains once they finish');
     const current=this.brainRoot();
     if(current.path===root.path&&current.custom===root.custom)return root;
     // A new root names its folders afresh, and nothing is written until every destination checked out.
@@ -207,29 +216,9 @@ export class ResidentAgents {
   saveBrain(p:RpcParams<'agents.brain.save'>):AgentBrain {
     const brain=this.brain(p.agentId);
     if(brain.revision!==p.expectedRevision)throw refused('brain revision changed; reload before saving');
+    // An older MEMORY.md may run past AGENT_MEMORY_MAX: the owner can still save it while cutting it down.
     const instructions=text(p.instructions,'instructions',32000,true),memory=text(p.memory,'memory',64000,true);
-    for(const [name,content] of [['AGENTS.md',instructions],['MEMORY.md',memory]]){const target=join(brain.path,name!);writeFileSync(target+'.tmp',content!);renameSync(target+'.tmp',target);}
+    for(const [name,content] of [['AGENTS.md',instructions],['MEMORY.md',memory]])rewriteBrainFile(this.brainRoot().path,join(brain.path,name!),content!);
     this.core.workforce.changed();return this.brain(p.agentId);
-  }
-  enqueue(agentId:string,prompt:string,scope:AgentScope={kind:'agent',id:agentId},episodeId:string=crypto.randomUUID()):AgentWork {
-    return this.records.create('work',{agentId,scope,taskId:null,taskGeneration:null,messageId:null,episodeId,prompt,status:'pending',error:null,runId:null,notBefore:Date.now()});
-  }
-  compact(sessionId:string,requestId:string):AgentWork {
-    const session=this.records.get('session',sessionId);
-    return this.records.command(`compact:${sessionId}`,requestId,{sessionId},()=>{
-      if(this.records.withStatus('work',OPEN_WORK).some(w=>w.agentId===session.agentId&&w.scope.kind===session.scope.kind&&w.scope.id===session.scope.id&&w.purpose==='compaction'))throw refused('compaction already unfinished');
-      const work=this.records.create('work',{agentId:session.agentId,scope:session.scope,taskId:null,taskGeneration:null,messageId:null,episodeId:crypto.randomUUID(),purpose:'compaction',prompt:'Create a compact continuation note for THIS context only. Preserve the objective, decisions, unfinished tasks, paths, verification evidence and unresolved questions. Distinguish completed actions from proposed actions. Do not execute tools or continue the task. Return only the note, at most 6000 characters. This note will replace the native conversation context, not durable memory.',status:'pending',error:null,runId:null,notBefore:Date.now()});
-      this.core.workforce.changed();return work;
-    });
-  }
-  checkpoint(threadId:string,work:AgentWork,result:string):void {
-    if(!result.trim())throw refused('compaction returned no continuation note; existing context retained');
-    const session=this.core.workforce.session(threadId);
-    this.core.journal.setSetting(`agents:checkpoint:${session.id}`,{text:result.slice(0,12000),at:Date.now(),workId:work.id});
-    const thread=this.core.threads.require(threadId);
-    this.core.threads.releaseAgent(threadId);
-    // The explicit checkpoint replaces history. Keep the journal for inspection, without replaying it.
-    const next={...thread,sessionId:null,sessionGeneration:(thread.sessionGeneration ?? 0)+1,context:null,promptCache:null};
-    this.core.journal.putThread(next);this.core.bus.emit('thread.updated',withLoad(this.core,next));
   }
 }

@@ -4,13 +4,14 @@ import { refusal } from './shared';
 import { hasActiveSideQuestion, retainedFamilyIds } from './side-questions';
 
 /** What still holds a member of the family, in the core's words. */
-function pending(ctx: FakeContext, id: ThreadId, scheduled: Set<ThreadId>): string | null {
+function pending(ctx: FakeContext, id: ThreadId, scheduled: Set<ThreadId>, explicit: boolean): string | null {
   const thread = ctx.threads.get(id)!;
   if (threadActive(thread.status) || scheduled.has(id) || ctx.inFlight.has(id)) return 'a turn is still running';
   if (thread.background?.length) return 'background work is still running';
   if (thread.pendingMove) return 'a move is still in progress';
   if (ctx.heldAnswers.get(id)?.length) return 'a message is still waiting to be delivered';
-  if (ctx.workflows.active(id)) return 'a workflow is still running';
+  // Done stops a paused run, as archiving does; only the expiry pass keeps it for its resume.
+  if (explicit ? ctx.workflows.atWork(id) : ctx.workflows.active(id)) return 'a workflow is still running';
   // Done is the user's own ask: only input a client named stops it, never a client that names none.
   if (ctx.bus.protectedThreadIds.has(id)) return 'unsent input is still open on a device';
   if (hasActiveSideQuestion(ctx, id)) return 'a side question is still open';
@@ -19,12 +20,12 @@ function pending(ctx: FakeContext, id: ThreadId, scheduled: Set<ThreadId>): stri
 }
 
 /** Same final Done guard as the core, before archive changes or cancellation. */
-export function assertIdleFamily(ctx: FakeContext, threadId: ThreadId): void {
+export function assertIdleFamily(ctx: FakeContext, threadId: ThreadId, explicit = false): void {
   const scheduled = new Set([...ctx.scheduler.running, ...ctx.scheduler.queued].map(turn => turn.threadId));
   for (const id of retainedFamilyIds(ctx, threadId)) {
     const thread = ctx.threads.get(id);
     if (!thread) continue;
-    const reason = pending(ctx, id, scheduled);
+    const reason = pending(ctx, id, scheduled, explicit);
     if (reason === null) continue;
     const where = id === threadId ? '' : ` in "${thread.title}"`;
     throw refusal(`threadId: ${reason}${where}; expected an idle conversation family`, {

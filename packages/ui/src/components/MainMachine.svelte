@@ -4,7 +4,7 @@
   import type { MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { insideTauri } from '../lib/endpoint';
-  import { workspace } from '../lib/workspace.svelte';
+  import { listedName, workspace } from '../lib/workspace.svelte';
 
   /**
    * The machine this device opens on at every start, chosen among the ones it
@@ -17,7 +17,7 @@
   let chosen = $derived(workspace.machines.find((machine) => workspace.isMain(machine)));
   let items = $derived<MenuItem[]>([
     { id: LAST, label: s.mainLast, active: chosen === undefined },
-    ...workspace.machines.map((machine) => ({ id: machine.id, label: machine.label, active: machine === chosen }))
+    ...workspace.machines.map((machine) => ({ id: machine.id, label: listedName(machine), active: machine === chosen }))
   ]);
 
   function pick(id: string) {
@@ -33,7 +33,7 @@
         <span class="hint">{chosen ? s.mainHint : s.mainLastHint}</span>
       </span>
       <Menu {items} onpick={pick} label={s.main} placement="bottom" align="end" testid="main-machine-pick">
-        <span class="current ui-label">{chosen?.label ?? s.mainLast}</span><ChevronDown size={13} />
+        <span class="current ui-label">{chosen ? listedName(chosen) : s.mainLast}</span><ChevronDown size={13} />
       </Menu>
     </div>
   </section>

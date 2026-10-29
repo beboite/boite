@@ -12,8 +12,9 @@
  *   than the protocol's allow and reject kinds. The contract has no part for a
  *   free-form question, so the driver draws the permission card it arrived as
  *   and picks the agent's first choice on allow.
- * - A subagent launch. `start_subagent` is an ordinary tool call; its card
- *   carries the batch it launched, which the Subagents panel lists.
+ * - A subagent launch. `invoke_subagent` (`start_subagent` before 1.4.1) is an
+ *   ordinary tool call; its card carries the batch it launched, which the
+ *   Subagents panel lists.
  *
  * Its launch environment also names a CA bundle on Linux distributions where
  * the server's own Python finds none.
@@ -155,12 +156,15 @@ export function normalizeAntigravityTool(
   return Object.keys(result).length === 0 ? null : result;
 }
 
-/** The titles Antigravity gives its subagent launcher, running and asking leave to run. */
-const SUBAGENT_TITLES = new Set(['Running start_subagent', 'Run start_subagent?']);
+/**
+ * The titles Antigravity gives its subagent launcher, running and asking leave
+ * to run: 1.4.1 renamed the tool `invoke_subagent`, earlier agents call it `start_subagent`.
+ */
+const SUBAGENT_TITLES = new Set(['Running invoke_subagent', 'Run invoke_subagent?', 'Running start_subagent', 'Run start_subagent?']);
 
 /**
  * What one tool update says about a subagent launch: `subagent` for
- * Antigravity's `start_subagent`, `mcp` for an MCP tool that happens to share
+ * Antigravity's `invoke_subagent`, `mcp` for an MCP tool that happens to share
  * its title, null when the update does not say (a later update carries no
  * title). The launcher is an ordinary tool: no child ids, names or models.
  */
@@ -170,7 +174,7 @@ export function antigravitySubagentKind(update: { title?: unknown; kind?: unknow
 }
 
 /**
- * The batch a `start_subagent` call launched, as the Subagents panel draws it.
+ * The batch an `invoke_subagent` call launched, as the Subagents panel draws it.
  * The call returns once the batch is launched and its output is the launch's
  * description, not a child's answer: the batch stays running for as long as
  * the turn does, and once the turn ends its children's state is unknown. Only

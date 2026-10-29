@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { MobileDevice, MobileHostPlatform } from '@boite/contracts';
+import type { MobileDevice, MobileDeviceKey, MobileHostPlatform } from '@boite/contracts';
 
 export interface SdkEnvironment {
   os: NodeJS.Platform;
@@ -24,6 +24,9 @@ export interface AndroidTools {
   /** Absent when the SDK lacks the Emulator package: connected phones and running emulators still list. */
   emulator?: string;
 }
+
+/** Android's KeyEvent codes for the panel's keys; rotating is no key. */
+export const ANDROID_KEYCODES: Record<Exclude<MobileDeviceKey, 'rotate'>, number> = { back: 4, home: 3, recents: 187, enter: 66, backspace: 67, power: 26, tab: 61, delete: 112, up: 19, down: 20, left: 21, right: 22 };
 
 export const NO_ANDROID_SDK = 'Android SDK was not found. Install it with Android Studio or set ANDROID_HOME to your SDK directory.';
 export const IOS_NEEDS_MAC = 'iOS Simulators need macOS with Xcode.';

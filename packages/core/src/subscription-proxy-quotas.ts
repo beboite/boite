@@ -1,4 +1,4 @@
-import type { AccountQuota, GatewayQuotaCredit, GatewayQuotaEntry, GatewayQuotaProvider, QuotaWindow, SubscriptionProxy, SubscriptionProxyQuotas } from '@boite/contracts';
+import { subscriptionProxyOf, type AccountQuota, type GatewayQuotaCredit, type GatewayQuotaEntry, type GatewayQuotaProvider, type QuotaWindow, type SubscriptionProxy, type SubscriptionProxyQuotas } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { proxyApiUrl, proxyKey } from './subscription-proxy.ts';
 
@@ -128,7 +128,7 @@ async function boundedJson(response: Response, max: number): Promise<unknown> {
  * `refresh` marks a read the user asked for: Douane reads every account first
  * and reports a failure at once instead of after several in a row.
  */
-export async function fetchGatewayQuotas(proxy: SubscriptionProxy, key: string, names?: (providerId: string) => string | null, max = MAX_BYTES, refresh = false): Promise<Pick<SubscriptionProxyQuotas, 'providers' | 'updatedAt'> | null> {
+export async function fetchGatewayQuotas(proxy: SubscriptionProxy, key: string, names?: (providerId: string) => string | null, max = MAX_BYTES, refresh = false): Promise<Pick<SubscriptionProxyQuotas, 'providers' | 'updatedAt' | 'nativeMuse'> | null> {
   let response: Response;
   try {
     response = await fetch(`${proxyApiUrl(proxy)}/quotas${refresh ? '?refresh=1' : ''}`, {
@@ -139,7 +139,31 @@ export async function fetchGatewayQuotas(proxy: SubscriptionProxy, key: string, 
   // Never the raw body: a gateway's error page can echo a credential.
   if (response.status === 404) { await response.body?.cancel().catch(() => {}); return null; }
   if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(`Douane quotas returned HTTP ${response.status}.`); }
-  return parseGatewayQuotas(await boundedJson(response, max), names);
+  const quotas = parseGatewayQuotas(await boundedJson(response, max), names);
+  if (quotas.providers.some(pool => pool.providerId === 'meta' && pool.entries.some(entry => entry.status !== 'disabled'))) {
+    return { ...quotas, nativeMuse: await nativeMuseRoutes(proxy, key, max) };
+  }
+  return quotas;
+}
+
+/** Older Douane versions report Meta quotas without serving the native CLI routes. Never POST a probe. */
+async function nativeMuseRoutes(proxy: SubscriptionProxy, key: string, max: number): Promise<boolean> {
+  const base = proxyApiUrl(proxy).replace(/\/v1$/, '/muse-code');
+  const options = { headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15_000), redirect: 'error' as const };
+  try {
+    const catalog = await fetch(`${base}/models`, options);
+    if (!catalog.ok) { await catalog.body?.cancel().catch(() => {}); return false; }
+    const root = object(await boundedJson(catalog, max));
+    if (!Array.isArray(root?.['data']) || !root['data'].some(value => {
+      const row = object(value);
+      const metadata = object(row?.['metadata']);
+      const muse = object(metadata?.['muse-code']);
+      return typeof row?.['id'] === 'string' && row['id'].length > 0 && typeof muse?.['name'] === 'string';
+    })) return false;
+    const responses = await fetch(`${base}/responses`, { ...options, method: 'OPTIONS' });
+    await responses.body?.cancel().catch(() => {});
+    return (responses.ok || responses.status === 405) && (responses.headers.get('allow') ?? '').split(',').some(method => method.trim().toUpperCase() === 'POST');
+  } catch { return false; }
 }
 
 /**
@@ -183,7 +207,16 @@ export class GatewayQuotas {
     this.readAt = 0;
     this.last = { ...OFF, status: 'unavailable' };
     this.core.bus.emit('subscriptionProxy.quotasUpdated', this.state());
+    this.checkMuseAccounts();
     this.onReset();
+  }
+
+  /** A newly discovered Meta pool changes Muse's login state without touching its native sign-in. */
+  private checkMuseAccounts(): void {
+    if (subscriptionProxyOf(this.core.settings.get(), { id: 'muse', protocol: 'muse' }, this.state())) this.core.accounts.ensureDefaults();
+    for (const account of this.core.accounts.list()) {
+      if (account.providerId === 'muse') this.core.accounts.check(account.id);
+    }
   }
 
   /** What is known without asking the gateway. */
@@ -214,6 +247,7 @@ export class GatewayQuotas {
       if (epoch !== this.epoch) return this.state();
       this.last = next;
       this.readAt = Date.now();
+      this.checkMuseAccounts();
       this.core.bus.emit('subscriptionProxy.quotasUpdated', next);
       return next;
     })();

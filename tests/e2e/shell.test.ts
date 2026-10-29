@@ -336,12 +336,16 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     found = await waitForHealthyCore(ownDataDir, shellPid);
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    // A new agent's introduction runs first; the turn under test is the next one on its thread.
+    const introduced = client.next('turn.finished', turn => turn.execution?.operation === 'event', 30000);
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    const { threadId } = await client.call('agents.open', { agentId: agent.id });
+    await introduced;
     ownPage = await attachShell(port, ownDataDir, shellPid); await shellReady(ownPage);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
-    const started = client.next('turn.started', () => true, 10000);
-    const finished = client.next('turn.finished', () => true, 30000);
-    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:12000] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
+    const started = client.next('turn.started', turn => turn.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 30000);
+    await client.call('turns.start', { threadId, prompt: '[sleep:12000] finish after closing the window' });
     await started;
     await ownPage.waitFor(`document.querySelector('[data-testid=titlebar] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid=titlebar] .close').click()`);
@@ -367,7 +371,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     expect(pidAlive(shellPid)).toBe(false);
     expect(await healthy(found.port)).toBe(true);
     expect((await finished).status).toBe('done');
-    expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
+    expect((await client.call('agents.snapshot', {})).status.find(status => status.agentId === agent.id)?.state).toBe('idle');
     await ownPage.close(); ownPage = undefined;
     const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
     ownPage = await attachShell(secondPort, ownDataDir, shellPid); await shellReady(ownPage);
@@ -1097,10 +1101,6 @@ shellTest('native preview references attach to the composer and highlight from s
   let url = '';
   let child: BrowserPage | undefined;
   try {
-    await page.click(testid('nav-settings'));
-    await page.click(testid('settings-tab-experiments'));
-    await page.click(testid('experiment-preview-comments'));
-    await page.click(testid('settings-back'));
     await page.type(testid('composer-input'), 'Make clearer.');
     await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
     await core.call('artifacts.preview', { threadId: thread.id, path: 'preview-fixture.html' });

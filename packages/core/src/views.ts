@@ -6,13 +6,13 @@
  * with it goes back to the agent as the refusal's sentence, so the user is
  * only ever shown a page that loaded cleanly. docs/chat-files.md has the rest.
  */
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { gzip, type InputType, type ZlibOptions } from 'node:zlib';
 import {
-  VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
+  RPC_MAX_FRAME_BYTES, VIEW_BLEED, VIEW_DEFAULT_HEIGHT, VIEW_MAX_BYTES, VIEW_NARROW_WIDTH, VIEW_ROUTE, VIEW_TITLE_MAX, VIEW_WIDTH,
   clampViewHeight, viewDocument, viewTitleOf,
   type InlineView, type Message, type RpcParams, type RpcResult,
 } from '@boite/contracts';
@@ -41,10 +41,24 @@ const EMBEDDED: Record<string, string> = {
   '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json',
 };
 
+/**
+ * The rest of a tag up to its `>`: a quoted value after `=` is one piece, so
+ * a `>` inside it does not end the tag, and a quote anywhere else is a letter.
+ * Each character has one reading, and a `<` outside quotes gives up on the
+ * tag, so a page full of tags left open is still read in one pass.
+ */
+/** Where a tag's name ends: `<title-card>` is not a `<title>`. */
+const NAME_END = String.raw`(?=[\s/>])`;
+const TAG_REST = String.raw`(?:[^<>"'=]|=(?!\s*["'])|=\s*"[^"]*"|=\s*'[^']*'|(?<!=\s*)["'])*>`;
 /** Tags whose address is fetched when the page loads. An `<a>` is not one: its link opens in the user's browser on a click. */
-const LOADING_TAG = /<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)\b[^>]*>/gi;
-const ADDRESS = /\s(src|href|xlink:href|poster|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+const LOADING_TAG = new RegExp(`<(img|image|source|video|audio|track|script|link|use|input|iframe|embed|object)${NAME_END}${TAG_REST}`, 'gi');
+const ADDRESS = new Set(['src', 'href', 'xlink:href', 'poster', 'data']);
+/** The attributes whose value is CSS: `style` and SVG's presentation attributes that take a `url(`. */
+const CSS_ATTRIBUTE = new Set(['style', 'fill', 'stroke', 'mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end', 'cursor']);
 const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]+))\s*\)/gi;
+const TAG = new RegExp(`<[a-z]${TAG_REST}`, 'gi');
+/** Each attribute of a tag in turn, so a name written inside another's quoted value is never read. */
+const ATTRIBUTE = /\s([^\s=>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/dg;
 
 interface Edit { start: number; end: number; text: string }
 
@@ -59,7 +73,7 @@ const kept = (address: string) => address === '' || /^(?:data:|blob:|#|javascrip
  * front of the user, or a local file that is missing, outside the working
  * directory or of a kind a page has no use for. Each problem names its line.
  */
-export function buildView(source: string, directory: string, cwd: string): BuiltView {
+export function buildView(source: string, directory: string, cwd: string, guard?: (path: string) => import('./contacts/access-policy.ts').SharedFilePermit | undefined): BuiltView {
   const problems: string[] = [];
   const edits: Edit[] = [];
   const lineOf = (offset: number) => source.slice(0, offset).split('\n').length;
@@ -77,13 +91,18 @@ export function buildView(source: string, directory: string, cwd: string): Built
     if (!mime) loaded = `${address} is not a file a view can embed (images, fonts, audio, video, .css, .js)`;
     else {
       try {
+        const permit = guard?.(isAbsolute(path) ? path : resolve(folder, path));
         const found = existingInside(cwd, isAbsolute(path) ? path : resolve(folder, path), 'file', 'local file');
         // Read through the descriptor of the file that was checked: a link swapped in since is not followed.
         const fd = openSync(found.real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
         try {
           const stats = fstatSync(fd, { bigint: true });
+          permit?.opened?.(found.real, stats);
           if (!stats.isFile() || stats.dev !== found.stats.dev || stats.ino !== found.stats.ino) loaded = `${address} changed while it was opened`;
-          else loaded = stats.size > BigInt(VIEW_MAX_BYTES) ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+          else {
+            loaded = stats.size > BigInt(VIEW_MAX_BYTES) ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+            if (typeof loaded !== 'string') permit?.inspect(loaded.data);
+          }
         } finally { closeSync(fd); }
       } catch (error) { loaded = `${address}: ${messageOf(error)}`; }
     }
@@ -109,15 +128,24 @@ export function buildView(source: string, directory: string, cwd: string): Built
   };
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
-  const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b[^>]*>)([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
-    (match: string, open?: string, _tag?: string, body?: string) => open === undefined ? ' '.repeat(match.length) : open + ' '.repeat(body?.length ?? 0));
-  const markup = blank('script|style');
-  /** The page without its scripts: where a `url(` or an `@import` is a rule and not a string. */
-  const styled = blank('script');
+  // Every other tag is read whole, and a `<` in its quoted values blanked, so a tag spelled there starts nothing.
+  // A script's, style's, textarea's or title's body is text, not tags: what it spells is never loaded.
+  const inert = (tag: string) => tag[0] + tag.slice(1).replace(/</g, ' ');
+  /** Where each style body is: its rules are CSS, read from `source`. */
+  const styles: [number, number][] = [];
+  /** The page in one pass without its comments and element bodies: where a tag is the page's. */
+  const markup = source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(script|style|textarea|title)${NAME_END}${TAG_REST})([\\s\\S]*?)(?=<\\/\\2\\s*>|$)|<\\/?[a-z]${TAG_REST}`, 'gi'),
+    (match: string, open: string | undefined, element: string | undefined, body: string | undefined, at: number) => {
+      if (match.startsWith('<!--')) return ' '.repeat(match.length);
+      if (open === undefined) return inert(match);
+      if (element!.toLowerCase() === 'style') styles.push([at + open.length, at + match.length]);
+      return inert(open) + ' '.repeat(body!.length);
+    });
   for (const tag of markup.matchAll(LOADING_TAG)) {
     const name = tag[1]!.toLowerCase();
     const at = tag.index;
-    for (const attribute of tag[0].matchAll(ADDRESS)) {
+    for (const attribute of tag[0].matchAll(ATTRIBUTE)) {
+      if (!ADDRESS.has(attribute[1]!.toLowerCase())) continue;
       const address = (attribute[2] ?? attribute[3] ?? attribute[4] ?? '').trim();
       if (kept(address)) continue;
       const offset = at + attribute.index;
@@ -140,21 +168,39 @@ export function buildView(source: string, directory: string, cwd: string): Built
       }
     }
   }
-  for (const found of source.matchAll(CSS_URL)) {
-    const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
-    // An import is refused below, whatever it names.
-    if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(0, found.index - 16), found.index))) continue;
-    // Inside a script a `url(` is often no address at all: it is embedded when it names a file, and left as written otherwise.
-    const rule = styled.slice(found.index, found.index + 4).toLowerCase() === 'url(';
-    if (remote(address)) { if (rule) problem(found.index, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
-    const file = load(address);
-    if (typeof file === 'string') { if (rule) problem(found.index, file); continue; }
-    edits.push({ start: found.index, end: found.index + found[0].length, text: `url("${dataUrl(file)}")` });
+  /**
+   * Where a `url(` is CSS: the bodies of `<style>` elements and the values of
+   * CSS attributes (`style`, SVG's `fill` or `mask`). Script text, prose, a
+   * `title` or an `onclick` keep theirs as written. The data URL goes
+   * unquoted, which no attribute's quotes can end early.
+   */
+  const css: [number, number][] = [...styles];
+  for (const tag of markup.matchAll(TAG)) {
+    for (const value of tag[0].matchAll(ATTRIBUTE)) {
+      if (!CSS_ATTRIBUTE.has(value[1]!.toLowerCase())) continue;
+      const [start, end] = (value.indices![2] ?? value.indices![3] ?? value.indices![4])!;
+      css.push([tag.index + start, tag.index + end]);
+    }
   }
-  for (const found of styled.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
-    problem(found.index, remote(found[1] ?? '')
-      ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
-      : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(CSS_URL)) {
+      const at = start + found.index;
+      const address = (found[1] ?? found[2] ?? found[3] ?? '').trim();
+      // An import is refused below, whatever it names.
+      if (kept(address) || /@import\s+$/i.test(source.slice(Math.max(start, at - 16), at))) continue;
+      if (remote(address)) { problem(at, `url(${address}) is remote, and a view loads nothing remote. Embed the file from disk.`); continue; }
+      const file = load(address);
+      if (typeof file === 'string') { problem(at, file); continue; }
+      edits.push({ start: at, end: at + found[0].length, text: `url(${dataUrl(file)})` });
+    }
+  }
+  // An import in prose is no rule either: only the same CSS regions are read.
+  for (const [start, end] of css) {
+    for (const found of source.slice(start, end).matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)/gi)) {
+      problem(start + found.index, remote(found[1] ?? '')
+        ? `@import of ${found[1]} is remote, and a view loads nothing remote.`
+        : `@import of ${found[1]} is not followed: name the stylesheet with <link rel="stylesheet" href="${found[1]}">.`);
+    }
   }
 
   let html = '';
@@ -208,7 +254,72 @@ function titleOf(asked: string | undefined, source: string, file: string): strin
   return title || 'View';
 }
 
-const notReady = (problems: string[]) => refused(`artifacts.view page is not ready to show. Fix the file and run the command again:\n${problems.map(problem => `- ${problem}`).join('\n')}`, { problems });
+const notReady = (problems: string[], method = 'artifacts.view') => refused(`${method} page is not ready to show. Fix the file and run the command again:\n${problems.map(problem => `- ${problem}`).join('\n')}`, { problems });
+
+/** The same checked input and embedded document for publication and private checks. */
+async function prepareView(core: Core, params: { threadId: string; path: string }, method: string) {
+  const thread = core.threads.require(params.threadId);
+  const permit = core.sharedAccess.file(thread.id, params.path, 'publish');
+  const permits = permit ? [permit] : [];
+  if (thread.archived) throw refused(`${method} needs an active thread`, { threadId: thread.id });
+  const turn = core.journal.lastTurn(thread.id);
+  if (!turn) throw refused(`${method} needs a thread with a turn`, { threadId: thread.id });
+  const found = existingInside(thread.cwd, params.path, 'file', `${method} path`);
+  if (!/\.html?$/i.test(found.relative)) throw refused(`${method} path must be an HTML file`, { path: params.path });
+  if (found.stats.size > VIEW_MAX_BYTES) throw refused(`${method} page must be at most 4 MB`, { path: params.path });
+  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, `${method} path`, params.path);
+  let source: string;
+  try {
+    if (permit) permit.opened?.(found.real, await handle.stat({bigint: true}));
+    source = await handle.readFile('utf8');
+  } finally { await handle.close(); }
+  permit?.inspect(source);
+  if (!source.trim()) throw refused(`${method} page is empty`, { path: params.path });
+  const built = buildView(source, dirname(found.absolute), thread.cwd, permit ? path => {
+    const logical = relative(thread.cwd, path).split(sep).join('/');
+    const dependency = core.sharedAccess.file(thread.id, logical, 'publish')!;
+    permits.push(dependency); return dependency;
+  } : undefined);
+  if (built.problems.length) throw notReady(built.problems, method);
+  const data = Buffer.from(viewDocument(built.html), 'utf8');
+  if (data.length > VIEW_MAX_BYTES) throw refused(`${method} page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
+  return { thread, turn, found, source, data, permit, permits };
+}
+
+/** Render a disposable draft. No journal entry, panel request or browser tab is created. */
+export async function checkView(core: Core, params: RpcParams<'artifacts.viewCheck'>): Promise<RpcResult<'artifacts.viewCheck'>> {
+  if (params.script !== undefined && typeof params.script !== 'string') throw refused('artifacts.viewCheck script must be JavaScript text');
+  if (params.scheme !== undefined && params.scheme !== 'dark' && params.scheme !== 'light') throw refused('artifacts.viewCheck scheme must be dark or light');
+  const { found, source, data, permits } = await prepareView(core, params, 'artifacts.viewCheck');
+  const root = join(core.dataDir, 'view-checks');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 'draft-'));
+  let ticket: string | undefined;
+  try {
+    const destination = join(directory, 'page.html');
+    await writeFile(destination, data, { flag: 'wx' });
+    ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), basename(found.absolute), undefined, true,
+      permits.length ? {check: () => {for (const p of permits) p.check();}, inspect: () => {for (const p of permits) p.check();}} : undefined);
+    const probe = await core.browser.checkView(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, { script: params.script, scheme: params.scheme });
+    for (const p of permits) p.check();
+    const result: RpcResult<'artifacts.viewCheck'> = {
+      checked: probe !== null,
+      errors: probe?.errors ?? ['the draft could not be checked: this machine has no available browser, or the browser did not answer in time'],
+      advice: viewAdvice(source),
+      captures: probe?.captures ?? [],
+    };
+    // Captures and a script return share one RPC frame. Keep room for its envelope.
+    if (Buffer.byteLength(JSON.stringify(result)) > RPC_MAX_FRAME_BYTES - 64 * 1024) {
+      result.captures = [];
+      result.errors.push('the draft captures and script results exceed the 16 MB RPC response limit; reduce image detail or return a smaller script result');
+    }
+    return result;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    // Resolving the deleted file also drops its ticket from memory.
+    if (ticket) core.fileTickets.resolve(ticket);
+  }
+}
 
 /**
  * Publish a page as a view. The message is journalled where the command ran;
@@ -217,22 +328,7 @@ const notReady = (problems: string[]) => refused(`artifacts.view page is not rea
  * in two where the command ran: only the answer's own line places it.
  */
 export async function publishView(core: Core, params: RpcParams<'artifacts.view'>): Promise<RpcResult<'artifacts.view'>> {
-  const thread = core.threads.require(params.threadId);
-  if (thread.archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
-  const turn = core.journal.lastTurn(thread.id);
-  if (!turn) throw refused('artifacts.view needs a thread with a turn', { threadId: thread.id });
-  const found = existingInside(thread.cwd, params.path, 'file', 'artifacts.view path');
-  if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.view path must be an HTML file', { path: params.path });
-  if (found.stats.size > VIEW_MAX_BYTES) throw refused('artifacts.view page must be at most 4 MB', { path: params.path });
-  // Read through the handle of the file that was checked: a link swapped in since is refused.
-  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'artifacts.view path', params.path);
-  let source: string;
-  try { source = await handle.readFile('utf8'); } finally { await handle.close(); }
-  if (!source.trim()) throw refused('artifacts.view page is empty', { path: params.path });
-  const built = buildView(source, dirname(found.absolute), thread.cwd);
-  if (built.problems.length) throw notReady(built.problems);
-  const data = Buffer.from(viewDocument(built.html), 'utf8');
-  if (data.length > VIEW_MAX_BYTES) throw refused(`artifacts.view page is ${(data.length / 1024 / 1024).toFixed(1)} MB with its files embedded; the limit is 4 MB. Use smaller images.`, { path: params.path });
+  const { thread, turn, found, source, data, permit, permits } = await prepareView(core, params, 'artifacts.view');
 
   const id = randomUUID();
   const directory = join(core.dataDir, 'artifacts');
@@ -246,7 +342,7 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
     await writeFile(`${destination}${VIEW_GZIP_SUFFIX}`, await gzipped(data, { level: 9 }), { flag: 'wx' });
     const name = basename(found.absolute);
     // The check loads the page exactly as a client will: from the view route, under its sandbox and policy, in a frame as wide as the client's.
-    const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true);
+    const ticket = core.fileTickets.mint(destination, VIEW_MIME, Date.now(), name, undefined, true, permit ? {check: () => {for (const p of permits) p.check();}, inspect: () => {for (const p of permits) p.check();}} : undefined);
     const probe = await core.browser.probe(`${core.baseUrl()}${VIEW_ROUTE}/${ticket}`, [VIEW_WIDTH, VIEW_NARROW_WIDTH].map(width => width + 2 * VIEW_BLEED));
     if (probe?.errors.length) throw notReady(probe.errors);
     const [height, narrowHeight] = probe?.heights ?? [];
@@ -257,10 +353,12 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
       source: found.relative,
     };
     if (core.threads.require(thread.id).archived) throw refused('artifacts.view needs an active thread', { threadId: thread.id });
+    for (const p of permits) p.check();
     const message: Message = {
       id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: Date.now(),
       parts: [{ type: 'artifact', id, name, mimeType: VIEW_MIME, bytes: data.length, view }],
     };
+    core.sharedAccess.published(thread.id, message.id, permits);
     core.journal.append({ type: 'artifact.published', threadId: thread.id, version: 1, payload: message }, () => core.journal.putMessage(message));
     committed = true;
     core.bus.emit('message.started', message);

@@ -47,11 +47,8 @@ export class ThreadBranching {
 
   async rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
     const thread = this.threads.require(threadId);
-    if (thread.agentSessionId) {
-      throw refused('a persistent agent session takes its work through Agents and cannot be rewound', { threadId, field: 'threadId', expected: 'a conversation thread' });
-    }
     if (thread.archived) throw refused('cannot rewind an archived thread', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
-    if (threadActive(thread.status) || this.threads.runner.handles.has(threadId)) {
+    if (this.threads.isBusy(threadId)) {
       throw refused('this thread has a turn running or queued; stop it before editing a message', {
         threadId,
         reason: 'turn-in-flight',
@@ -183,7 +180,7 @@ export class ThreadBranching {
   async fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
     const source = this.threads.require(threadId);
     if (source.agentSessionId || source.projectId === null) {
-      throw refused('a persistent agent session takes its work through Agents and cannot be forked', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a bot\'s thread has no project to fork into', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (source.incognito) {
       throw refused('an incognito conversation cannot be forked: a copy would outlive it', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
@@ -394,7 +391,7 @@ export class ThreadBranching {
     const provider = this.core.providers.require(thread.providerId);
     const codex = getDriver(provider.protocol).forkSession !== undefined;
     if (!codex && provider.protocol !== 'claude-sdk') return false;
-    if (codex && (threadActive(thread.status) || this.threads.runner.handles.has(thread.id) || thread.sessionId === null)) return false;
+    if (codex && (this.threads.isBusy(thread.id) || thread.sessionId === null)) return false;
     const nativeConditions = codex
       ? "AND t.status = 'done' AND json_extract(t.checkpoint, '$.sessionId') = ? AND json_extract(t.execution, '$.sessionGeneration') = ?"
       : "AND t.status IN ('done','stopped','error') AND (SELECT COUNT(*) FROM messages u WHERE u.thread_id = t.thread_id AND u.turn_id = t.id AND u.role = 'user') <= 1";
@@ -416,7 +413,7 @@ export class ThreadBranching {
 
   private nativeForkCheckpoint(thread: ThreadSummary, turnId: TurnId): { sessionId: string; entry: string } | null {
     const provider = this.core.providers.require(thread.providerId);
-    if (!getDriver(provider.protocol).forkSession || threadActive(thread.status) || this.threads.runner.handles.has(thread.id)) return null;
+    if (!getDriver(provider.protocol).forkSession || this.threads.isBusy(thread.id)) return null;
     const turn = this.core.journal.getTurn(turnId);
     if (turn?.status !== 'done' || !turn.checkpoint || turn.checkpoint.sessionId !== thread.sessionId) return null;
     if (turn.execution?.providerId !== thread.providerId || turn.execution.accountId !== thread.accountId

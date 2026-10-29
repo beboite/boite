@@ -118,7 +118,7 @@ jobs:
   # from being deleted, so one taken before them outlived every failed build.
   reserve:
     name: Reserve tag
-    needs: [revision, ci, desktop, image, android]
+    needs: [revision, ci, desktop, image, android, android-server]
     if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-24.04
     permissions:
@@ -141,6 +141,21 @@ jobs:
     needs: [ci, revision]
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/android.yml
+    secrets:
+      ANDROID_KEYSTORE: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE || '' }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+    with:
+      ref: ${{ needs.ci.outputs.sha }}
+      release: ${{ !inputs.dry-run }}
+
+  # Boite Server, signed with the same key, or the previous release's APK taken
+  # back when apps/android-server outside termux/ and the key are unchanged
+  # (docs/android-server.md). Its version is its own too.
+  android-server:
+    name: Android server
+    needs: [ci, revision]
+    if: needs.revision.outputs.changed == 'true'
+    uses: ./.github/workflows/android-server.yml
     secrets:
       ANDROID_KEYSTORE: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE || '' }}
       ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
@@ -180,7 +195,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [revision, ci, desktop, publish-image, android]
+    needs: [revision, ci, desktop, publish-image, android, android-server]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -207,6 +222,10 @@ jobs:
         with:
           name: android-apk
           path: android
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: android-server-apk
+          path: android-server
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -216,7 +235,7 @@ jobs:
           NIGHTLY_SHA: ${{ needs.ci.outputs.sha }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
-          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
+          bun scripts/ci/changelog.ts released.json artifacts/release-notes.md artifacts android android-server
           bun scripts/ci/updater-manifest.ts artifacts
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
@@ -226,6 +245,10 @@ jobs:
           apks=(../android/boite-*.apk)
           test "${#apks[@]}" -eq 1 && test -f "${apks[0]}"
           (cd ../android && sha256sum ./boite-*.apk) >> SHA256SUMS.txt
+          server_apks=(../android-server/boite-server-android-*.apk)
+          test "${#server_apks[@]}" -eq 1 && test -f "${server_apks[0]}"
+          (cd ../android-server && sha256sum ./boite-server-android-*.apk) >> SHA256SUMS.txt
+          apks+=("${server_apks[@]}")
           if [[ -n "$existing" ]]; then
             echo "$existing" | jq -e '.draft == true' >/dev/null
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
@@ -234,7 +257,7 @@ jobs:
               test "$(echo "$existing" | jq -r .target_commitish)" = "$NIGHTLY_SHA"
             fi
             gh release upload "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false --notes-file release-notes.md
           else
             gh release create "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$NIGHTLY_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

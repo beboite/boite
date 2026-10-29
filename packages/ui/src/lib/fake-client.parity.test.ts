@@ -125,6 +125,99 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
   expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.load']);
 });
 
+test('an agent reaches only its own methods on its own thread and hears only its events, as access.ts assertAllowed', async () => {
+  const client = await fake();
+  const before = await client.call('settings.get', {});
+  client.becomes('agent', 't-trace');
+  const log = heard(client, ['thread.load']);
+  // The owner's methods, which the fake once let an agent call.
+  await expect(client.call('settings.set', { muteAgents: !before.muteAgents })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: "settings.set is not one of the agent's methods" });
+  await expect(client.call('projects.list', {})).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  // An agent method on another thread, or with no thread at all.
+  await expect(client.call('todos.list', { threadId: 't-other' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'todos.list is for thread t-trace, not thread t-other' });
+  await expect(client.call('git.status', {} as never)).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  await expect(client.call('todos.list', { threadId: 't-trace' })).resolves.toBeDefined();
+  client.sampleLoad('t-trace');
+  expect(log).toEqual([]);
+  client.becomes('owner');
+  expect((await client.call('settings.get', {})).muteAgents).toBe(before.muteAgents);
+});
+
+test('an agent hears its own thread and its project\'s board only, as server.ts broadcast', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const ctx = new FakeContext({ delayMs: 0, principal: 'agent', agentThreadId: 't-trace' });
+  seed(ctx);
+  ctx.bus.setState('ready');
+  const own = ctx.thread('t-trace');
+  const foreign = [...ctx.threads.values()].find(thread => thread.projectId !== own.projectId)!;
+  const lines: string[] = [];
+  ctx.bus.on('thread.activity', payload => lines.push(`activity ${payload.threadId}`));
+  ctx.bus.on('todos.updated', payload => lines.push(`todos ${payload.projectId}`));
+  for (const thread of [own, foreign]) {
+    ctx.bus.deliver('thread.activity', { threadId: thread.id } as never);
+    ctx.bus.deliver('todos.updated', { projectId: thread.projectId!, todos: [] });
+  }
+  expect(lines).toEqual([`activity ${own.id}`, `todos ${own.projectId}`]);
+});
+
+test('team and subagent changes reach a socket only while it is subscribed to their thread, as server.ts broadcast', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const ctx = new FakeContext({ delayMs: 0, principal: 'agent', agentThreadId: 't-trace' });
+  seed(ctx);
+  ctx.bus.setState('ready');
+  const lines: string[] = [];
+  for (const name of ['collaboration.changed', 'delegation.changed', 'workflows.changed', 'thread.activity'] as const) ctx.bus.on(name, () => lines.push(name));
+  // Core-side listeners, such as `delegation.wait`, still hear every change.
+  let observed = 0;
+  ctx.bus.observe('delegation.changed', () => { observed += 1; });
+  const round = () => {
+    ctx.bus.deliver('collaboration.changed', { threadId: 't-trace' } as never);
+    ctx.bus.deliver('delegation.changed', { threadId: 't-trace' });
+    ctx.bus.deliver('workflows.changed', { threadId: 't-trace', runId: 'run' } as never);
+    ctx.bus.deliver('thread.activity', { threadId: 't-trace' } as never);
+    return lines.splice(0);
+  };
+  // An agent socket still gets its own thread's activity without a subscription.
+  expect(round()).toEqual(['thread.activity']);
+  ctx.bus.subscribed.add('t-trace');
+  // Workflow changes are the owner's alone.
+  expect(round()).toEqual(['collaboration.changed', 'delegation.changed', 'thread.activity']);
+  ctx.bus.subscribed.delete('t-trace');
+  expect(round()).toEqual(['thread.activity']);
+  expect(observed).toBe(3);
+});
+
+test('settings.set refuses what is not a setting before applying any of it, as router.ts checkRpcParams', async () => {
+  const client = await fake();
+  const before = await client.call('settings.get', {});
+  for (const [params, field] of [[null, 'params'], [{ unknownTypo: true, muteAgents: !before.muteAgents }, 'unknownTypo']] as const) {
+    await expect(client.call('settings.set', params as never)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, data: { field } });
+  }
+  expect((await client.call('settings.get', {})).muteAgents).toBe(before.muteAgents);
+});
+
+
+test('a bot on another provider account refuses a turn before journalling it, as threads.ts', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const { threadMethods } = await import('./fake-client/threads');
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const thread = ctx.thread('t-trace');
+  const foreign = ctx.accounts.find(a => a.providerId !== thread.providerId && a.status === 'ok')!;
+  Object.assign(thread, { accountId: foreign.id, agentSessionId: 'agt_session_foreign', status: 'idle' });
+  const before = thread.turns.length;
+  const methods = threadMethods(ctx);
+  try {
+    const refusal = await methods['turns.start']({ threadId: thread.id, prompt: 'Do not use another provider account' }).catch(error => error);
+    expect(refusal).toMatchObject({ code: RpcErrorCode.Refused,
+      message: `accountId: account ${foreign.id} belongs to provider ${foreign.providerId}; expected provider ${thread.providerId}`,
+      data: { field: 'accountId', accountId: foreign.id, providerId: foreign.providerId, expected: thread.providerId } });
+    expect(thread.turns).toHaveLength(before);
+  } finally { await methods['turns.stop']({ threadId: thread.id }); }
+});
 
 test('a provider turned off refuses a turn and reports provider-disabled, as drivers/index.ts and threads/capabilities.ts', async () => {
   const client = await fake();
@@ -163,4 +256,16 @@ test('an experimental provider is off until its owner turns it on, and a paired 
   expect(await code(phone.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true }))).toBe(RpcErrorCode.Refused);
   const { loaded } = await client.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
   expect(loaded.find(provider => provider.id === 'opencode-v2')?.enabled).toBe(true);
+});
+
+test('an archived thread with no project reports archived before agent-session, as threads/capabilities.ts', async () => {
+  const { FakeContext } = await import('./fake-client/context');
+  const { seed } = await import('./fake-client/seed');
+  const { capabilityMethods } = await import('./fake-client/capabilities');
+  const ctx = new FakeContext({});
+  seed(ctx);
+  const thread = [...ctx.threads.values()][0]!;
+  Object.assign(thread, { projectId: null, agentSessionId: undefined, archived: true });
+  const capabilities = await capabilityMethods(ctx)['threads.capabilities']({ threadId: thread.id });
+  expect(capabilities.steering.reason).toBe('archived');
 });

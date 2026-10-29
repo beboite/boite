@@ -5,15 +5,16 @@ import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
-import { authenticationFailureOf, authenticationSuspectOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
+import { authenticationFailureOf, authenticationSuspectOf, backgroundKind, commandsOf, isApiRetry, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
-import { agentEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX, THINKING_DISPLAY_FLAG } from './query.ts';
+import { cliEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX, THINKING_DISPLAY_FLAG } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
-import { CONTEXT_ENV, CONTEXT_GUIDES_ENV } from '../../context-mode.ts';
 import { noteClaudeMessage } from './diagnostics.ts';
 import { userStdioServers, type LazyServerEntry } from '../../mcp/lazy.ts';
+import {protectedClaudeOptions} from './protected.ts';
+import { openWithCompaction } from './compaction.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 /** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
@@ -37,11 +38,6 @@ const WAKE_TEXT = 'Background work finished';
 
 type Timer = ReturnType<typeof setTimeout>;
 
-/** `api_retry`: the CLI is running a request that failed and will try again. */
-function isApiRetry(message: SDKMessage): boolean {
-  return message.type === 'system' && message.subtype === 'api_retry';
-}
-
 /** What the driver has to do for a session that ends, and for turns it hands back. */
 export interface SessionHooks {
   ended(session: ClaudeSession): void;
@@ -62,7 +58,10 @@ export interface SessionHooks {
 export class ClaudeSession {
   private readonly retention = new SessionRetention();
   private readonly abortController = new AbortController();
-  private readonly prompts = new PromptQueue();
+  private prompts = new PromptQueue();
+  /** The launch policy. Changes take effect between turns, never by interrupting one. */
+  private compactionTokens: number | null = null;
+  private compactionModel: string | null = null;
   private readonly timers = new Set<Timer>();
   private readonly waiting: ClaudeTurn[] = [];
   /** Turns whose prompt was queued, or which adopted the CLI's own run. */
@@ -157,7 +156,7 @@ export class ClaudeSession {
     this.retention.prepare(forTurn);
     if (!this.started) {
       this.started = true;
-      this.applied = liveSetup(this.ctx.thread);
+      this.applied = liveSetup(this.ctx.thread, !!this.ctx.protectedExecution);
       void this.run();
     }
     return this.ready;
@@ -216,12 +215,15 @@ export class ClaudeSession {
     if (!this.started) {
       this.started = true;
       // The options the query opens on are this turn's: nothing to apply yet.
-      this.applied = liveSetup(turn.ctx.thread);
-      this.send(turn, turn.promptText(), turn.ctx.attachments);
-      this.forgetPrompt(turn);
-      this.steerable.add(turn);
+      this.applied = liveSetup(turn.ctx.thread, !!turn.ctx.protectedExecution);
+      if ((turn.ctx.autoCompactTokens?.() ?? null) === null) {
+        this.send(turn, turn.promptText(), turn.ctx.attachments);
+        this.forgetPrompt(turn);
+        this.steerable.add(turn);
+        void this.run(turn);
+        return;
+      }
       void this.run(turn);
-      return;
     }
     // A warm query takes a changed model, effort, speed or mode through the SDK's own
     // setters, and this turn's prompt only goes in once they landed. The chain
@@ -253,6 +255,7 @@ export class ClaudeSession {
   }
 
   async setPermissionMode(turn: ClaudeTurn, mode: PermissionMode): Promise<boolean> {
+    if (turn.ctx.protectedExecution) return false;
     await this.ready;
     await this.pending;
     if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return false;
@@ -260,7 +263,7 @@ export class ClaudeSession {
     const applied = this.applied;
     const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
       this.query === query && this.applied === applied && !this.closing && !this.ended;
-    const wanted = liveSetup({ ...turn.ctx.thread, permissionMode: mode });
+    const wanted = liveSetup({ ...turn.ctx.thread, permissionMode: mode }, !!turn.ctx.protectedExecution);
     this.permissionTurn = turn;
     try {
       if (wanted.disableHooks !== applied.disableHooks) {
@@ -344,6 +347,14 @@ export class ClaudeSession {
     // would otherwise send its prompt with nothing applied.
     await this.ready;
     if (turn.isStopped || this.closing || this.ended) return;
+    const tokens = turn.ctx.autoCompactTokens?.() ?? null;
+    if (tokens !== this.compactionTokens || (tokens !== null && turn.ctx.thread.model !== this.compactionModel)) {
+      if (this.head() === turn && !this.holding()) {
+        this.strand(turn, 'native compaction launch settings changed');
+        return;
+      }
+      turn.ctx.log('warn', 'claude: native compaction settings wait for active and background work to finish; keeping the between-turn fallback');
+    }
     if (!(await this.applyLive(turn))) return;
     if (turn.isStopped || this.closing || this.ended) return;
     this.send(turn, turn.promptText(), turn.ctx.attachments);
@@ -374,7 +385,7 @@ export class ClaudeSession {
     const query = this.query;
     const applied = this.applied;
     if (query === null || applied === null) return true;
-    const wanted = liveSetup(turn.ctx.thread);
+    const wanted = liveSetup(turn.ctx.thread, !!turn.ctx.protectedExecution);
     const live = { ...applied };
     try {
       if (wanted.model !== live.model) {
@@ -480,13 +491,25 @@ export class ClaudeSession {
     const lazy = this.lazyServers(this.ctx);
     try {
       const options = this.options(this.ctx, lazy?.entries ?? null);
+      if (this.ctx.protectedExecution) {
+        this.ctx.protectedExecution.check();
+        const protectedOptions = await protectedClaudeOptions(() => this.head(), this.ctx.protectedExecution.toolsAllowed !== false);
+        Object.assign(options, protectedOptions, {settings: {...options.settings as object, ...protectedOptions.settings as object}});
+      }
+      this.compactionTokens = this.ctx.autoCompactTokens?.() ?? null;
+      this.compactionModel = this.ctx.thread.model;
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
       if (!first?.isStopped && !this.closing) {
         // This frame lives as long as the CLI: holding the first turn here would
         // keep its tool outputs and images for the whole warm session.
         first = undefined;
-        this.query = queryFn({ prompt: this.prompts.stream(), options });
+        const opened = await openWithCompaction(queryFn, options, this.compactionTokens,
+          () => this.closing || this.abortController.signal.aborted,
+          reason => this.ctx.log('warn', reason), this.prompts);
+        if (opened === null) { this.finish(null); return; }
+        this.query = opened.query;
+        this.prompts = opened.prompts;
         // The next turn's setters have something to talk to from here on.
         this.markReady();
         // Not awaited: an older CLI that has no answer for this is one warning,
@@ -513,26 +536,16 @@ export class ClaudeSession {
    * cannot take them over.
    */
   private lazyServers(ctx: SessionContext): ReturnType<NonNullable<SessionContext['lazyMcp']>> {
+    if (ctx.protectedExecution) return null;
     const mode = ctx.thread.contextMode ?? null;
     if (ctx.lazyMcp === undefined || (mode !== null && !mode.mcp)) return null;
     try {
       const servers = userStdioServers(ctx.accountEnv.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR, ctx.thread.cwd);
-      return ctx.lazyMcp(this.cliEnv(ctx), servers);
+      return ctx.lazyMcp(cliEnv(ctx), servers);
     } catch (error) {
       ctx.log('warn', `claude: MCP servers start with the CLI: ${messageOf(error)}`);
       return null;
     }
-  }
-
-  private cliEnv(ctx: SessionContext): Record<string, string | undefined> {
-    const mode = ctx.thread.contextMode ?? null;
-    const env = agentEnv(ctx.accountEnv, ctx.toolSummaries === true, ctx.shortAnswers === true);
-    return mode === null ? env : {
-      ...env,
-      [CONTEXT_ENV]: mode.label,
-      [CONTEXT_GUIDES_ENV]: mode.guides ? undefined : '0',
-      CLAUDE_CODE_DISABLE_CLAUDE_MDS: mode.instructions ? undefined : '1',
-    };
   }
 
   /** `replayed` is an adopted message handed to the turn that opened for it: already diagnosed when it came. */
@@ -801,7 +814,7 @@ export class ClaudeSession {
     }
     // The same values the setters carry later, so what the query opens on
     // and what the session records as applied can never say different things.
-    const setup = liveSetup(ctx.thread);
+    const setup = liveSetup(ctx.thread, !!ctx.protectedExecution);
     const mode = ctx.thread.contextMode ?? null;
     return {
       resume: ctx.sessionId ?? undefined,
@@ -853,7 +866,7 @@ export class ClaudeSession {
       // model thinks stays the CLI's call (effort, `alwaysThinkingEnabled`).
       extraArgs: { [THINKING_DISPLAY_FLAG]: 'summarized' },
       abortController: this.abortController,
-      env: this.cliEnv(ctx),
+      env: cliEnv(ctx),
       canUseTool: this.gate.canUseTool,
       hooks: {
         PreToolUse: [{ hooks: [this.gate.preToolUse] }],

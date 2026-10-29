@@ -12,13 +12,13 @@
   import { relativeTime } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import QuotaList from './QuotaList.svelte';
-  import type { Snippet } from 'svelte';
+  import { SnapshotFeed } from '../lib/snapshot-feed';
 
   /**
    * One machine's plugins. The page mounts a fresh one per machine, so an
    * answer still on its way from the previous core lands in a discarded page.
    */
-  let { store, machineMenu }: { store: Store; machineMenu?: Snippet } = $props();
+  let { store }: { store: Store } = $props();
   const t = strings.plugins;
 
   let plugins = $state<PluginState[]>([]);
@@ -263,20 +263,29 @@
   $effect(() => {
     const client = store.client;
     if (!client) return;
-    let disposed = false;
-    const off = client.on('plugins.updated', (value) => {
+    // An update that lands while the list is out is applied after it, never under it.
+    const feed = new SnapshotFeed<PluginState>((value) => {
       const before = plugins.find((plugin) => plugin.id === value.id);
       put(value);
       if (value.status === 'installed' && value.pools.length > 0 && before?.status !== 'installed') void loadPools(value.id);
     });
-    void client.call('plugins.list', {}).then(async (rows) => {
-      if (disposed) return;
+    const off = client.on('plugins.updated', (value) => feed.push(value));
+    let disposed = false, listed = false;
+    void feed.read(() => client.call('plugins.list', {}), (rows) => {
       plugins = rows;
+      listed = true;
+    }).then(async () => {
+      // The list as it stands once the updates held meanwhile are applied.
+      if (disposed || !listed) return;
+      const rows = plugins;
+      for (const plugin of rows) {
+        if (plugin.origin === 'recommended' && plugin.version === null && plugin.updates != null) void checkUpdates(plugin);
+      }
       await Promise.all(rows.filter((plugin) => plugin.status === 'installed' && plugin.pools.length > 0).map((plugin) => loadPools(plugin.id)));
-    }).catch((cause) => {
+    }, (cause) => {
       if (!disposed) error = messageOf(cause);
     });
-    return () => { disposed = true; off(); };
+    return () => { disposed = true; feed.dispose(); off(); };
   });
 </script>
 
@@ -336,11 +345,13 @@
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
             <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? strings.common.retry : t.reinstall}</span></button>
           {/if}
-          {#if plugin.updates && plugin.version !== null}
-            {@const looking = plugin.updates.checking || checking[plugin.id] === true}
-            <button class="ghost small icon" class:spinning={looking} data-testid="plugin-check-updates" data-plugin={plugin.id} title={t.checkUpdates} aria-label={t.checkUpdates}
-              disabled={working || looking} onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /></button>
-          {/if}
+        {/if}
+        {#if plugin.updates && plugin.status !== 'installing'}
+          {@const looking = plugin.updates.checking || checking[plugin.id] === true}
+          <button class="ghost small icon" class:spinning={looking} data-testid="plugin-check-updates" data-plugin={plugin.id} title={t.checkUpdates} aria-label={t.checkUpdates}
+            disabled={working || looking} onclick={() => void checkUpdates(plugin)}><RefreshCw size={14} /></button>
+        {/if}
+        {#if plugin.status !== 'installing' && plugin.status !== 'not-installed'}
           <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
       </div>
@@ -356,7 +367,7 @@
         <span class="mono">{fill(t.atCommit, { ref: plugin.source.ref, commit: short(plugin.source.commit) })}</span>
       </p>
     {/if}
-    {#if plugin.updates && plugin.version !== null}
+    {#if plugin.updates}
       {@const line = updatesLine(plugin.updates)}
       {#if line}
         <p class="hint" data-testid="plugin-updates" data-plugin={plugin.id} data-available={plugin.updates.available?.version ?? ''}><span data-testid="plugin-updates-line">{line}</span></p>
@@ -459,7 +470,6 @@
 <div class="page" data-testid="plugins-page">
   <header>
     <div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div>
-    {@render machineMenu?.()}
   </header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 

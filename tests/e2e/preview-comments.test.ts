@@ -27,8 +27,11 @@ test('preview references attach to the existing composer and remain clickable af
   await page.type(id('composer-input'), 'Keep this existing draft.');
   await onStore(`store.panel.open('browser');`);
   await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.contentDocument?.body`);
-  expect(await page.evaluate(`!!document.querySelector('${id('preview-annotate')}')`)).toBe(false);
-  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('preview-comments', true))`);
+  // On by default; switched off in Settings, the browser offers no picker.
+  await page.waitFor(`document.querySelector('${id('preview-annotate')}')`);
+  await page.evaluate(`import('/src/lib/features.ts').then(({ setFeature }) => setFeature('preview-comments', false))`);
+  await page.waitFor(`!document.querySelector('${id('preview-annotate')}')`);
+  await page.evaluate(`import('/src/lib/features.ts').then(({ setFeature }) => setFeature('preview-comments', true))`);
   await page.waitFor(`document.querySelector('${id('preview-annotate')}')`);
   await page.evaluate(`(() => {
     const doc = document.querySelector('iframe[data-browser-id]').contentDocument;
@@ -71,7 +74,7 @@ test('preview references attach to the existing composer and remain clickable af
   expect(await onStore(`return store.openThread.turns.length;`)).toBe(Number(turnsBefore) + 1);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${id('text-part')}')).at(-1).textContent`)).toBe('Make this button easier to find. @Buy now');
   // Disabling new selections keeps the references already in history usable.
-  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('preview-comments', false))`);
+  await page.evaluate(`import('/src/lib/features.ts').then(({ setFeature }) => setFeature('preview-comments', false))`);
   await page.click(id('panel-close'));
   await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
   await page.click(`[data-role="user"] ${id('preview-reference')}`);
@@ -80,7 +83,7 @@ test('preview references attach to the existing composer and remain clickable af
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await capture('preview-reference-highlight-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('preview-comments', true))`);
+  await page.evaluate(`import('/src/lib/features.ts').then(({ setFeature }) => setFeature('preview-comments', true))`);
   await page.click(id('preview-annotate'));
   await page.evaluate(`document.querySelector('iframe[data-browser-id]').contentDocument.querySelector('#preview-buy').click()`);
   await page.waitFor(`!document.querySelector('${id('right-panel')}')`);

@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { readFileSync, statSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative } from 'node:path';
 import type { Attachment, FileAttachment } from '@boite/contracts';
 import { ATTACHMENT_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
@@ -23,7 +24,7 @@ test('files reach the driver as persistent host paths and remain in history', as
   const messages = harness.core.journal.listMessages(threadId);
   expect(messages[0]!.parts).toContainEqual({ type: 'file', name: file.name, mimeType: file.mimeType, data: file.data });
   const reply = messages.filter(m => m.role === 'assistant').flatMap(m => m.parts).filter(p => p.type === 'text').map(p => p.text).join('');
-  expect(reply).toContain('boite agents send');
+  expect(reply).toContain('boite threads send');
   const referenceLine = reply.split('\n').find(line => line.startsWith('{"name":"report.pdf"'));
   expect(referenceLine).toBeDefined();
   const reference = JSON.parse(referenceLine!);
@@ -61,6 +62,41 @@ test('re-uploading a file does not reuse an agent-modified copy', async () => {
   const fresh = JSON.parse(references.of('thr', part, place));
   expect(fresh.path).not.toBe(JSON.parse(line).path);
   expect(readFileSync(fresh.path).toString()).toBe('notes');
+});
+
+test('re-uploading checks same-size edits but does not read an enlarged local copy', () => {
+  const first = JSON.parse(fileReference(harness.dataDir, file));
+  const read = spyOn(fs, 'readFileSync');
+  try {
+    expect(JSON.parse(fileReference(harness.dataDir, file)).path).toBe(first.path);
+    expect(read.mock.calls.filter(([path]) => path === first.path)).toHaveLength(0);
+
+    const earlier = new Date(Date.now() - 2000);
+    utimesSync(first.path, earlier, earlier);
+    expect(JSON.parse(fileReference(harness.dataDir, file)).path).toBe(first.path);
+    expect(read.mock.calls.filter(([path]) => path === first.path)).toHaveLength(1);
+    read.mockClear();
+
+    const edit = 'x'.repeat(Buffer.from(file.data, 'base64').length);
+    writeFileSync(first.path, edit);
+    const later = new Date(Date.now() + 2000);
+    utimesSync(first.path, later, later);
+    const changed = JSON.parse(fileReference(harness.dataDir, file));
+    expect(changed.path).not.toBe(first.path);
+    expect(read.mock.calls.filter(([path]) => path === first.path)).toHaveLength(1);
+    expect(readFileSync(first.path, 'utf8')).toBe(edit);
+    expect(readFileSync(changed.path, 'utf8')).toBe('%PDF-test');
+
+    truncateSync(first.path, 8 * 1024 * 1024);
+    read.mockClear();
+    const grown = JSON.parse(fileReference(harness.dataDir, file));
+    expect(grown.path).not.toBe(first.path);
+    expect(read.mock.calls.filter(([path]) => path === first.path)).toHaveLength(0);
+    expect(statSync(first.path).size).toBe(8 * 1024 * 1024);
+    expect(readFileSync(grown.path, 'utf8')).toBe('%PDF-test');
+  } finally {
+    read.mockRestore();
+  }
 });
 
 test('only images depend on provider image support; malformed and oversized files are refused', () => {

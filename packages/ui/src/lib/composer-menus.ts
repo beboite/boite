@@ -6,13 +6,32 @@
  * pure pieces it derives from.
  */
 import type { AgentCommand, PreviewReference } from '@boite/contracts';
-import { AGENT_PREFIX } from './commands.svelte';
+import { AGENT_PREFIX, isAgentCommand } from './commands.svelte';
 import { experimentOn } from './experiments.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 
 /** A command the composer runs itself: the testid of the chip whose menu it opens, and its line. */
 export type ChipCommand = { testid: string; description: string };
+export const SKILL_PREFIX = 'skill:';
+const PROMPT_COMMANDS = ['goal', 'goal2', 'loop', 'btw'];
+
+/** Prompt rows insert their token; control rows return null to open their picker. */
+export function slashCompletion(item: PaletteItem): string | null {
+  if (item.id.startsWith(SKILL_PREFIX)) return `${item.label} `;
+  if (isAgentCommand(item)) return `/${item.id.slice(AGENT_PREFIX.length)} `;
+  return PROMPT_COMMANDS.includes(item.id) ? `/${item.id} ` : null;
+}
+
+/** Global manual skills are prompt text, with native and Boite commands taking name collisions. */
+export function skillSlashItems(skills: AgentCommand[], commands: AgentCommand[], reserved: readonly string[] = []): PaletteItem[] {
+  const seen = new Set([...commands.map(command => command.name), ...PROMPT_COMMANDS, ...reserved]);
+  return skills.filter(skill => {
+    if (!skill.name || /\s/.test(skill.name) || seen.has(skill.name)) return false;
+    seen.add(skill.name);
+    return true;
+  }).map(skill => ({ id: `${SKILL_PREFIX}${skill.name}`, kind: 'command', label: `/${skill.name}`, description: skill.description ?? undefined }));
+}
 
 /** What was typed after the slash, or null while the box is not a bare `/word`. */
 export function slashQueryOf(text: string): string | null {
@@ -29,7 +48,7 @@ export function mentionQueryOf(text: string, caret: number, previewReferences: P
 
 /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
 export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
-  return commands.filter((command) => !['goal', 'goal2', 'loop', 'btw'].includes(command.name)).map((command) => ({
+  return commands.filter((command) => !PROMPT_COMMANDS.includes(command.name)).map((command) => ({
     id: `${AGENT_PREFIX}${command.name}`,
     kind: 'command' as const,
     label: `/${command.name}`,

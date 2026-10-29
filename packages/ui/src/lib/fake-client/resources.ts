@@ -1,5 +1,5 @@
 /** Process trace, live resources and token usage. */
-import { RpcErrorCode, type AgentResourceSnapshot, type ResourceByteUsage, type ThreadId, type ThreadResources, type Usage } from '@boite/contracts';
+import { RpcErrorCode, type AgentResourceSnapshot, type MachineResourceSnapshot, type ResourceByteUsage, type ThreadId, type ThreadResources, type Usage } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage } from './shared';
 import { fakeUsageHistory } from '../fake-usage';
@@ -38,6 +38,22 @@ export function resourceMethods(ctx: FakeContext) {
           status: thread.status, projectId: thread.projectId, parentThreadId: thread.parentThreadId ?? null,
           load: resource.load, loadAvailable: { cpu: thread.load !== null, memory: thread.load !== null }, disk: unavailable(), network: unavailable() };
       }) };
+    },
+    'resources.machine': async (params): Promise<MachineResourceSnapshot> => {
+      if (ctx.bus.principal === 'agent') throw new RpcFailure({ code: RpcErrorCode.Refused, message: "resources.machine is not one of the agent's methods" });
+      if (params === null || typeof params !== 'object' || Array.isArray(params)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'resources.machine: expected an object' });
+      const live = resources(ctx);
+      // A slow wave, so a demo's curves move without a random number in a test.
+      const wave = (period: number, low: number, high: number) => low + (high - low) * (0.5 + 0.5 * Math.sin(ctx.now() / period));
+      const gib = 1024 ** 3;
+      return {
+        sampledAt: ctx.now(), hostname: 'fake-pc', os: 'windows', osLabel: 'Windows 11 Pro',
+        cpu: { model: 'AMD Ryzen 7 7800X3D 8-Core Processor', cores: 16, percent: wave(7000, 12, 38) },
+        memory: { totalBytes: 32 * gib, availableBytes: Math.round((32 - wave(23000, 13, 15)) * gib), agentBytes: live.reduce((sum, row) => sum + row.load.memoryBytes, 0) },
+        gpus: [{ name: 'AMD Radeon RX 6750 XT', percent: wave(5000, 2, 21), memoryUsedBytes: Math.round(wave(19000, 2.8, 3.4) * gib), memoryTotalBytes: 12 * gib }],
+        agentGpu: live.map(row => ({ threadId: row.threadId, percent: 0 })),
+        volumes: [{ name: 'C:', totalBytes: 931 * gib, freeBytes: 284 * gib }, { name: 'D:', totalBytes: 1863 * gib, freeBytes: 1210 * gib }],
+      };
     },
     'trace.get': async (params) => {
       const rows = ctx.processes

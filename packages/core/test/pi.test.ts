@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
+import { TOOL_FREE_CONTEXT } from '@boite/contracts';
 import type { MessagePart, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
@@ -389,6 +390,21 @@ describe('pi driver', () => {
     expect(argvLines()[0]).toContain('model=anthropic/claude-sonnet-5:high');
   });
 
+  test('a conversation that must run no tool starts pi with none, and no extension, context file, skill or template', async () => {
+    const client = await startCore();
+    const parent = harness!.core.threads.require(await piThread(client));
+    // An ordinary thread keeps them.
+    await runTurn(client, parent.id, 'first');
+    const plain = (await client.call('trace.get', { threadId: parent.id })).find(process => process.commandLine?.includes('--session-id'));
+    expect(plain?.commandLine).not.toContain('--no-tools');
+    const child = harness!.core.delegation.createChild(parent, { id: 'memory', name: 'Memory', providerId: 'pi-fake', accountId: parent.accountId, model: parent.model, effort: null },
+      'Memory', () => {}, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: 'plan' });
+    await client.call('threads.subscribe', { threadId: child });
+    await runTurn(client, child, 'Rewrite the memory');
+    const launched = (await client.call('trace.get', { threadId: child })).find(process => process.commandLine?.includes('--session-id'));
+    for (const flag of ['--no-tools', '--no-extensions', '--no-context-files', '--no-skills', '--no-prompt-templates']) expect(launched?.commandLine).toContain(flag);
+  });
+
   test('a thinking delta becomes a thinking part ahead of the answer', async () => {
     const client = await startCore();
     const threadId = await piThread(client);
@@ -438,6 +454,7 @@ describe('pi driver', () => {
       outputTokens: 4,
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
+      buckets: 1,
       costUsdEquivalent: 0.03,
     });
   });

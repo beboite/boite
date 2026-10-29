@@ -16,6 +16,63 @@ function open() {
   flushSync();
 }
 
+test('the meter follows the automatic compaction threshold and keeps a smaller model window', async ({ ready }) => {
+  const { store } = await ready();
+  await store.open('t-trace');
+  store.openThread!.context = { tokens: 212_569, window: 1_000_000, at: 0,
+    breakdown: { input: 150_000, cache: 50_000, output: 12_569 } };
+  store.settings = { ...store.settings!, autoCompact: { tokens: 250_000, moments: ['turn-end'] } };
+  view = mount(ContextControl, { target: document.body, props: { store } });
+  flushSync(); open();
+  const meter = () => document.querySelector<HTMLElement>('[data-testid="context-meter"]')!;
+  const popup = () => document.querySelector<HTMLElement>('[data-testid="context-popup"]')!;
+  const exact = (n: number) => n.toLocaleString();
+  expect(meter().dataset.percent).toBe('85');
+  expect(meter().dataset.level).toBe('high');
+  expect(popup().querySelector('.total .mono')!.textContent).toBe(`${exact(212_569)} / ${exact(250_000)}`);
+  expect(popup().querySelector('[data-testid="context-remaining"]')!.textContent).toBe(`${exact(37_431)} tokens before auto-compaction`);
+  expect(popup().querySelector<HTMLElement>('.bar .input')!.style.width).toBe('60%');
+  const info = popup().querySelector<HTMLButtonElement>('[data-testid="context-info"]')!;
+  const detail = document.getElementById(info.getAttribute('aria-controls')!)!;
+  expect(info.getAttribute('aria-expanded')).toBe('false');
+  expect(detail.hidden).toBe(true);
+  info.click(); flushSync();
+  expect(info.getAttribute('aria-expanded')).toBe('true');
+  expect(detail.hidden).toBe(false);
+  expect(detail.querySelector('dl')!.textContent).toContain(exact(150_000));
+  expect(popup().querySelector('[data-testid="context-auto-compact"]')!.textContent).toBe('Auto-compaction threshold. The model supports ' + exact(1_000_000) + ' tokens.');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); flushSync();
+  expect(detail.hidden).toBe(true);
+  expect(info.getAttribute('aria-expanded')).toBe('false');
+  expect(popup()).not.toBeNull();
+
+  for (const [window, threshold, percent, limit, notice] of [
+    [128_000, 250_000, '100', 128_000, false],
+    [250_000, 250_000, '85', 250_000, false],
+    [1_000_000, null, '21', 1_000_000, false],
+    [null, 250_000, '85', 250_000, true],
+    [0, 250_000, '85', 250_000, true],
+    [-1, 250_000, '85', 250_000, true],
+  ] as const) {
+    store.openThread!.context = { ...store.openThread!.context!, window };
+    store.settings = { ...store.settings!, autoCompact: { tokens: threshold, moments: ['turn-end'] } };
+    flushSync();
+    expect(meter().dataset.percent).toBe(percent);
+    expect(popup().querySelector('.total .mono')!.textContent).toBe(`${exact(212_569)} / ${exact(limit)}`);
+    expect(popup().querySelector('[data-testid="context-remaining"]')!.textContent).toBe(notice
+      ? strings.thread.contextRemainingCompact(exact(Math.max(0, limit - 212_569)))
+      : strings.thread.contextRemaining(exact(Math.max(0, limit - 212_569))));
+    expect(!!popup().querySelector('[data-testid="context-auto-compact"]')).toBe(notice);
+    if (notice) expect(popup().querySelector('[data-testid="context-auto-compact"]')!.textContent).toBe('Auto-compaction threshold.');
+  }
+  store.settings = { ...store.settings!, autoCompact: null };
+  flushSync();
+  expect(meter().dataset.percent).toBe('');
+  expect(popup().querySelector('.total .mono')!.textContent).toBe(exact(212_569));
+  expect(popup().querySelector('[data-testid="context-remaining"]')).toBeNull();
+  expect(popup().querySelector('[data-testid="context-auto-compact"]')).toBeNull();
+});
+
 test('the core can disable a locally supported control and no action escapes a pending capability read', async ({ ready }) => {
   const { store, client } = await ready();
   await store.open('t-trace');

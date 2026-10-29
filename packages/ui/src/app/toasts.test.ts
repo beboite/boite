@@ -1,10 +1,25 @@
 import { expect, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { type FakeClient } from '../lib/fake-client';
+import { droppedFailure } from '../lib/client';
 import { store } from '../lib/store.svelte';
 import { test, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
+
+test('an offline read failure stays in machine status while action errors remain visible', async ({ app: _app }) => {
+  const connection = store.connection;
+  try {
+    store.connection = 'connecting';
+    store.reportError(droppedFailure('connection lost; check the conversation before resending'));
+    flushSync();
+    expect(store.errorOffline).toBe(true);
+    expect(document.querySelector('[data-testid=error-toast]')).toBeNull();
+    store.reportError(new Error('project permission denied'));
+    flushSync();
+    expect(document.querySelector('[data-testid=error-toast]')?.textContent).toContain('project permission denied');
+  } finally { store.connection = connection; store.error = null; flushSync(); }
+});
 
 test('an error line of the core log shows the error toast, a warning does not', async ({ app: _app }) => {
   const fake = store.client as unknown as FakeClient;

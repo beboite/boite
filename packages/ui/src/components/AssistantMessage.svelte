@@ -10,7 +10,7 @@
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
-  import QuestionCard from './QuestionCard.svelte';
+  import Deferred, { parts } from './Deferred.svelte';
   import { openQuestionPage } from '../lib/question-page';
   import SettingRequestCard from './SettingRequestCardLoader.svelte';
   import AgentSettingCard from './AgentSettingCardLoader.svelte';
@@ -25,7 +25,9 @@
   import MemoryRow from './MemoryRow.svelte';
   import KeepaliveMarker from './KeepaliveMarker.svelte';
   import ErrorCard from './ErrorCard.svelte';
+  import WindowCard from './WindowCardLoader.svelte';
   import { keepaliveRun } from '../lib/message-order';
+  import { AgentsView, agentOfThread } from '../lib/agents.svelte';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -64,6 +66,8 @@
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
+  /** The persistent agent whose own thread this is: its answers carry its name. */
+  const agentName = $derived(store.openThread?.id === threadId && store.openThread.agentSessionId ? agentOfThread(AgentsView.of(store).snapshot, threadId)?.name ?? null : null);
   /** Boite's ping of the prompt cache: one line in place of its message (`quietKeepalives`). */
   const ping = $derived(execution?.operation === 'keepalive' ? store.openThread?.turns.find((turn) => turn.id === message.turnId) : undefined);
   const compacting = $derived(execution?.operation === 'compact' ||
@@ -87,9 +91,9 @@
 
 {#if showModel && message.role === 'assistant' && execution}
   {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
-  <div class="model-attribution" data-testid="message-model">
-    {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
-  </div>
+  {@const engine = execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : providerName(store, execution.providerId)}
+  <!-- A persistent agent's answers are signed with its name; the model it ran on is the tooltip. -->
+  <div class="model-attribution" data-testid="message-model" title={agentName ? engine : undefined}>{agentName ?? engine}</div>
 {/if}
 {#if ping}
   {#if from === 0}<KeepaliveMarker turn={ping} count={keepaliveRun(store.openThread?.turns ?? [], ping.id)} />{/if}
@@ -171,7 +175,7 @@
       {:else if part.type === 'question'}
         {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
         {@const reply = replyOf(store, part.questionId)}
-        <QuestionCard
+        <Deferred part={parts.QuestionCard}>{#snippet children(QuestionCard)}<QuestionCard
           text={part.text}
           options={part.options}
           allowText={part.allowText}
@@ -187,7 +191,9 @@
           onwrite={() => writeAnswer(store, part.questionId)}
           page={part.open?.url}
           onopen={() => openQuestionPage(store, message.threadId, part.questionId)}
-        />
+        />{/snippet}</Deferred>
+      {:else if part.type === 'secret_request'}
+        <Deferred part={parts.SecretCard}>{#snippet children(SecretCard)}<SecretCard {store} threadId={message.threadId} {part} />{/snippet}</Deferred>
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>
           <span class="rule"></span>
@@ -198,6 +204,7 @@
                   .replace('{pre}', formatTokens(part.preTokens))
                   .replace('{post}', formatTokens(part.postTokens))}
             {#if part.trigger === 'manual'}({strings.chat.compactionManual}){/if}
+            {#if part.background}({strings.chat.compactionBackground}){/if}
           </span>
           <span class="rule"></span>
         </div>
@@ -209,6 +216,10 @@
           <span class="text">{part.message.trim() ? fill(strings.chat.hookSays, { label, message: part.message.trim() }) : label}</span>
           <span class="event">{part.event}</span>
         </p>
+      {:else if part.type === 'window_capture'}
+        <WindowCard {part} />
+      {:else if part.type === 'window_consent'}
+        <WindowCard {store} threadId={message.threadId} agent={agentName ?? (execution ? providerName(store, execution.providerId) : strings.windows.consent.anAgent)} {part} />
       {:else if part.type === 'error'}
         {@const account = store.owner ? signedOut : null}
         <ErrorCard message={part.message} reconnect={account ? () => store.openConnect(account.providerId, account.id) : undefined} />
