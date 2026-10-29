@@ -3,13 +3,26 @@ import { randomUUID, verify } from 'node:crypto';
 import type { Core } from '../core.ts';
 import { refused, RpcFailure } from '../errors.ts';
 import type { ContactStore } from './store.ts';
+import { TextSocket } from '../ws-client.ts';
+import { checkTailnetName } from './invite.ts';
 
 /** What the server keeps on a contact's link socket. */
 export interface ContactSocketData { contact: { coreId: string; routeId: string } }
 
+export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
 export const HELLO_INPUT = 'boite-contact-hello\n';
+/** How long the upgrade to a host may take before the link counts as failed. */
+const LINK_DIAL_MS = 8000;
+
+/** DNS can yield while an administrator disables contacts; admit the dial afterwards. */
+export async function dialContact(core: Core, url: string, headers: Record<string, string>): Promise<TextSocket> {
+  await checkTailnetName(url, 'contact.url');
+  core.policy.assert(core.policy.networkOff('contacts'), 'network.contacts');
+  return TextSocket.connect(`${url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers });
+}
+
 export function contactHello(core: Core, store: ContactStore, request: Request): ContactSocketData['contact'] | Response {
-    if (store.isClosed || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
+    if (store.isClosed || core.policy.networkOff('contacts') || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
     const guest = request.headers.get('x-boite-peer') ?? '';
     const contact = store.find(guest);
     if (!contact || contact.role !== 'host') return new Response('not a contact that dials this core', { status: 403 });

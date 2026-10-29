@@ -51,6 +51,7 @@ import type { TodosRpcEvents, TodosRpcMethods } from './todos';
 import type { TraceRpcEvents, TraceRpcMethods } from './trace';
 import type { TurnsRpcEvents, TurnsRpcMethods } from './turns';
 import type { UsageRpcMethods } from './usage';
+import type { PolicyRpcEvents, PolicyRpcMethods } from './policy';
 export * from './ids';
 export * from './providers';
 export * from './local-acp';
@@ -87,6 +88,7 @@ export * from './hooks';
 export * from './terminals';
 export * from './shared-projects';
 export * from './wire';
+export * from './policy';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -151,7 +153,8 @@ export interface RpcMethods extends
   BrainRpcMethods,
   HooksRpcMethods,
   SharedProjectsRpcMethods,
-  TerminalsRpcMethods {}
+  TerminalsRpcMethods,
+  PolicyRpcMethods {}
 
 export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
@@ -190,7 +193,8 @@ export interface RpcEvents extends
   BrainRpcEvents,
   HooksRpcEvents,
   SharedProjectsRpcEvents,
-  TerminalsRpcEvents {}
+  TerminalsRpcEvents,
+  PolicyRpcEvents {}
 
 export type RpcEventName = keyof RpcEvents;
 

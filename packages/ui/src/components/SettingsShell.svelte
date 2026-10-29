@@ -18,6 +18,7 @@
   import ExperimentsPage from './ExperimentsPage.svelte';
   import DiagnosticsPage from './DiagnosticsPage.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
+  import PolicyBanner from './PolicyBanner.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import TaskManagerLoader from './TaskManagerLoader.svelte';
@@ -52,6 +53,8 @@
   let target = $derived(machinePage(store.settingsTab) ? chosen?.store ?? store : store);
   /** The bar when there is a machine to pick or a default machine to speak of. */
   let bar = $derived(machinePage(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
+  /** The policy banner stands above the page, so the panel scrolls both on one column, as under the bar. */
+  let banner = $derived(target.policy?.present === true && target.policy.problems.length > 0);
   /**
    * A page reads the card it was asked to show off its own machine's layout:
    * on another machine than the window's, that layout follows the window's.
@@ -99,7 +102,8 @@
       { id: 'secrets', label: strings.secrets.heading },
       ...(store.owner ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
       { id: 'app', label: strings.settings.app },
-      ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
+      ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : []),
+      ...(target.policy?.present ? [{ id: 'policy', label: strings.policy.heading }] : [])
     ],
     appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
     keyboard: [
@@ -345,9 +349,10 @@
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
   {#key tab}
-    <section class="framed" class:with-bar={bar} onscrollcapture={spy}>
+    <section class="framed" class:with-bar={bar || banner} onscrollcapture={spy}>
       {#if bar && tab !== 'experiments'}{@render machineBar()}{/if}
       {#key target}
+      <PolicyBanner store={target} />
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
@@ -393,12 +398,15 @@
   .framed.with-bar { scrollbar-gutter: stable both-edges; }
   .framed.with-bar > :global(.machine-bar) { padding: 24px clamp(20px, 4vw, 64px) 0; }
   .framed.with-bar > :global(.page) { height: auto; overflow: visible; padding-top: 20px; }
+  .framed > :global(.policy-banner) { margin: 24px clamp(20px, 4vw, 64px) 0; }
   @media (min-width: 721px) {
     .framed.with-bar > :global(.machine-bar) { padding-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2)); max-width: none; }
+    .framed > :global(.policy-banner) { margin-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2)); }
   }
   @media (max-width: 720px) {
     .framed.with-bar > :global(.machine-bar) { padding: 16px 16px 0; }
     .framed.with-bar > :global(.page) { padding-top: 16px; }
+    .framed > :global(.policy-banner) { margin: 16px 16px 0; }
   }
   .category { flex: none; }
   .rule { flex: none; height: 1px; margin: 8px 10px; background: var(--color-border); }

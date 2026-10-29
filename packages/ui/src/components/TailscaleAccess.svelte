@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { errorText } from '../lib/errors';
   import { untrack } from 'svelte';
   import type { TailscaleStatus } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -14,6 +16,7 @@
    * 443 already serving something else is replaced only after a confirmation.
    */
   let { store }: { store: Store } = $props();
+  const locked = $derived(lockedBy(store.policy, 'network.tailscaleServe') !== null);
   const text = strings.phone.tailscale;
 
   let status = $state<TailscaleStatus | null>(null);
@@ -97,15 +100,15 @@
 </script>
 
 <div class="tailscale" data-testid="tailscale-access" data-state={status?.state ?? 'checking'}>
-  <span class="title">{text.heading}<InfoTip topic={text.heading} text={text.hint} /></span>
+  <span class="title">{text.heading}<InfoTip topic={text.heading} text={text.hint} /><PolicyLock {store} keys={['network.tailscaleServe']} /></span>
   <p class="hint" class:ok={status?.state === 'on'} data-testid="tailscale-state" role="status">{sentence}{#if status?.state === 'on' && status.publicUrlMatches}{' '}{text.onPublic}{/if}</p>
   {#if status?.detail}<p class="hint warn" data-testid="tailscale-detail">{text.details[status.detail]}</p>{/if}
   {#if failure}<p class="hint error" role="alert">{failure}</p>{/if}
   <div class="actions">
     {#if status?.state === 'off'}
-      <button type="button" class="primary" data-testid="tailscale-enable" disabled={busy} onclick={() => void enable()}>{text.enable}</button>
+      <button type="button" class="primary" data-testid="tailscale-enable" disabled={busy || locked} onclick={() => void enable()}>{text.enable}</button>
     {:else if status?.state === 'conflict'}
-      <button type="button" class="danger" data-testid="tailscale-replace" disabled={busy} onclick={() => void enable(true)}>{text.replace}</button>
+      <button type="button" class="danger" data-testid="tailscale-replace" disabled={busy || locked} onclick={() => void enable(true)}>{text.replace}</button>
     {:else if status?.state === 'on'}
       <button type="button" class="primary" data-testid="tailscale-pair" disabled={busy} onclick={pair}>{text.pair}</button>
       <button type="button" data-testid="tailscale-disable" disabled={busy} onclick={() => void disable()}>{text.disable}</button>

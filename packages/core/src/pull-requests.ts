@@ -578,10 +578,10 @@ export class PullRequests {
     if (read === null) return null;
     const { index } = read;
     const found = displayCandidate(this.#onBranch(index, branch));
-    // The pages hold every change to a branch read on its own since the last gap,
-    // and every pull request when one page held them all. A branch the pages
-    // show answers from them; any other, and a refresh, is asked for alone.
-    if (index.whole || (!refresh && (found || index.branches.has(branch)))) return found;
+    // The index covers a branch after its own read, or every branch when the
+    // page held all pull requests. A partial page alone cannot decide between
+    // reused-branch candidates; read that branch (also on refresh).
+    if (index.whole || (!refresh && index.branches.has(branch))) return found;
     const key = `${target}\n${branch}`;
     if (refresh) this.#branches.delete(key);
     const epoch = index.epoch;
@@ -682,6 +682,8 @@ export class PullRequests {
   }
 
   async #run(thread: Pick<ThreadSummary, 'id'>, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
+    // Every read of a forge goes through `gh` here: discovery, links, watches, reviews and the merged-PR archive.
+    this.core.policy.assert(command === 'gh' && this.core.policy.pullRequestsOff(), 'pullRequests');
     const release = await this.#acquire(signal);
     const scope = `pull-request:${thread.id}:${++this.#sequence}`;
     try {

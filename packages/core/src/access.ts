@@ -43,6 +43,9 @@
  * encrypted link (`Connection.encrypted`): loopback, Tailscale, or HTTPS
  * terminated on this machine. Plain HTTP from the LAN is refused with the
  * reason, so a key or its deletion never crosses the network in clear.
+ * policy.get lets a paired device draw the controls the admin policy locks,
+ * as the desktop does. It holds no secret, only what the file says and where
+ * it lies; no RPC changes it, only an administrator editing the file.
  */
 
 import { AGENT_EVENTS, AGENT_METHODS, accessRefusal, DEVICE_EVENTS, DEVICE_METHODS, mayHearEvent, type RpcEventName, type RpcMethodName } from '@boite/contracts';

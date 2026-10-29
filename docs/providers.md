@@ -573,8 +573,10 @@ and is refused before downloading. Antigravity's pinned archives support x64
 on Windows/Linux and ARM64 on macOS.
 
 `format` defaults to `zip`. A `binary` download installs one executable directly;
-its single `files` entry must have the same size as `archiveBytes`. Both formats
-verify the download's length and SHA-256 before making it available. Claude on
+its single `files` entry must have the same size as `archiveBytes`. `tgz` is a
+gzipped tar, the shape of an npm package tarball: its members sit under
+`package/`, and `files` names them with that prefix. Every format verifies the
+download's length and SHA-256 before making it available. Claude on
 Windows uses the official x64 binary this way. Its managed copy lives under
 Boite's data directory, without replacing a CLI installation elsewhere.
 
@@ -604,15 +606,17 @@ directory to run its tools, so a pin whose archive lacks it, as 0.155.1's
 did, leaves the agent unable to run any tool. The
 managed copy is the first executable candidate, so an update reaches the agent
 Boite runs even when an npm copy exists. `test/shipped-installs.live.test.ts`,
-opt-in behind `BOITE_E2E_INSTALLS=1`, downloads both and runs `--version`.
+opt-in behind `BOITE_E2E_INSTALLS=1`, downloads each pinned release and runs `--version`.
 Muse Code ships the same way on Windows x64, as the single binary Meta's own
 installer downloads (`format: "binary"`, pinned with its SHA-256). The official
 installer puts a `muse.cmd` launcher on PATH instead, which Bun cannot spawn, so
 the driver reads `.muse-version` beside it and runs the `muse-bin-<version>.exe`
 it names; a launcher with no such binary beside it is refused with a sentence
 saying to install Muse Code from Providers.
-Grok and pi have no archive Boite can pin, so their row links to the agent's own
-install guide.
+OpenCode 2 ships on Windows x64 as the tarball of its npm platform package,
+`@opencode/cli-windows-x64` (`format: "tgz"`), since it publishes no GitHub
+release. Grok and pi have no archive Boite can pin, so their row links to the
+agent's own install guide.
 
 Settings > Providers offers the next install or sign-in step. Install adopts
 an existing CLI login before `providers.updated`; otherwise it continues to
@@ -624,7 +628,8 @@ the guided connection and account controls.
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and
 refuses a wrong digest or a wrong length naming both values. It unpacks with a
-streaming unzip into `releases/<version>/`, so no member is held whole in memory:
+streaming unzip, or a streaming gunzip and tar reader, into `releases/<version>/`,
+so no member is held whole in memory:
 an entry that is absolute or carries a `..` segment is refused by name, a member
 the descriptor does not list is skipped rather than written, and each listed file
 is checked against its size once it is out. Then `current` is repointed, a
@@ -836,8 +841,10 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 - The plugin API changed: a plugin written for version 1 does not load in
   version 2. Version 2 loads plugins from its own configuration home only.
   Isolated version 2 accounts share those plugins; Settings counts that source.
-- It has no managed install: version 2 is published as npm tarballs, a
-  format the installer does not unpack, so its row links to the install guide.
+- Its managed install on Windows x64 is the npm platform tarball, unpacked to
+  `{agentsDir}/package/bin/opencode.exe`, the first executable candidate. It
+  never claims the `opencode` name, so OpenCode 1 stays where it is. Linux and
+  macOS have no managed install and link to the install guide.
 
 `test/opencode2.live.test.ts`, opt-in behind `BOITE_E2E_OPENCODE2=1`, turns the
 provider on, runs a turn, resumes it on a new process and moves the session to

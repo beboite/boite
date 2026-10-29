@@ -3,6 +3,7 @@ import { QUOTA_ALERT_MAX, QUOTA_ALERT_PERIODS, quotaAlertThresholds, RpcErrorCod
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
+import { quotaReadBlocked } from './policy';
 import type { FakeContext, FakeMethods } from './context';
 
 /** What OpenCode's menu looks like once the command is typed: the capture shows the real thing's shape. */
@@ -69,7 +70,7 @@ function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const signedOut = (account: (typeof accounts)[number]) => account.providerId === 'antigravity'
     && 'status' in account && account.status === 'unauthenticated';
   const enabled = (id: string) => ctx.quotaEnabled[id] !== false;
-  return accounts.map((account, index) => ({
+  return accounts.map((account, index) => quotaReadBlocked(ctx, {
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
       resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },
       credits: account.providerId === 'claude'

@@ -1,9 +1,10 @@
+import { providerOffFailure } from '../policy.ts';
 import type { AccountId, ModelInfo, ProviderId, RpcEvents, RpcParams, RpcResult, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes, holdModels, probedModelsOf, probeModels, readModelsOf, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
 import { launchTemp, type LaunchTemp } from '../drivers/launch-temp.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
-import { invalidParams, refused, unavailable } from '../errors.ts';
+import { invalidParams, refused } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { forgetSavedCatalog, readSavedCatalog, saveCatalog } from './saved-catalogs.ts';
 
@@ -40,10 +41,7 @@ async function probeProvider(
   }
   // The probe starts the agent: a provider turned off lists nothing.
   if (!core.providers.enabled(provider.id)) {
-    throw unavailable(`${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`, {
-      providerId: provider.id,
-      disabled: true,
-    });
+    throw providerOffFailure(provider.name, core.providers.policyBlock(provider.id), { providerId: provider.id });
   }
 
   const proxyModels = await readSubscriptionProxyModels(core, provider);

@@ -166,6 +166,8 @@ async function removeTree(path: string): Promise<void> {
 }
 
 export class PluginStore {
+  #core: Core;
+
   #recommended: PluginManifest[] | undefined;
   #updateSources: Record<string, UpdateSource> | undefined;
   /** The manifests `plugins.list` offers. Tests swap an entry to point an install at a fixture. */
@@ -178,7 +180,7 @@ export class PluginStore {
   allowLocalSources = false;
   /** Test seam: how an update source is read. The git path of `plugins.inspect` otherwise. */
   readUpdateSource = (source: UpdateSource): Promise<{ commit: string; text: string | null }> =>
-    fetchManifest(this.core, source.url, source.ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
+    fetchManifest(this.#core, source.url, source.ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
 
   #jobs = new Map<string, Job>();
   #failures = new Map<string, string>();
@@ -206,10 +208,12 @@ export class PluginStore {
   /** Newer releases of recommended plugins, read from the update sources the list names. */
   readonly updates: PluginUpdateChecks;
 
-  constructor(private core: Core) {
+  constructor(core: Core) {
+    this.#core = core;
     this.updates = new PluginUpdateChecks({
-      source: (id) => (this.#recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
-      ids: () => this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
+      // The admin policy's `plugins.recommended: false` leaves every source unread.
+      source: (id) => (core.policy.recommendedPluginsOff() || this.#recommendedManifest(id) === null ? null : this.updateSources[id] ?? null),
+      ids: () => core.policy.recommendedPluginsOff() ? [] : this.recommended.map((manifest) => manifest.id).filter((id) => this.updateSources[id] !== undefined),
       pinned: (id) => this.#recommendedManifest(id),
       installed: (id) => {
         try {
@@ -252,7 +256,7 @@ export class PluginStore {
   }
 
   #root(): string {
-    return resolve(this.core.dataDir, 'plugins');
+    return resolve(this.#core.dataDir, 'plugins');
   }
 
   #directory(id: string): string {
@@ -304,7 +308,7 @@ export class PluginStore {
     // An activation a stopped core left half done settles first, unless it is this core's own, still running.
     if (this.#lanes.rewrite(id) === null) {
       try {
-        if (recoverActivation(dir) === 'restored') this.core.log('warn', `plugin ${id}: an update that did not finish was rolled back`);
+        if (recoverActivation(dir) === 'restored') this.#core.log('warn', `plugin ${id}: an update that did not finish was rolled back`);
       } catch (error) {
         return { kind: 'error', message: `${dir} holds an update that did not finish and could not be rolled back (${messageOf(error)}). Reinstall ${id}.` };
       }
@@ -385,14 +389,15 @@ export class PluginStore {
 
   #emit(id: string): void {
     try {
-      this.core.bus.emit('plugins.updated', this.state(id));
+      this.#core.bus.emit('plugins.updated', this.state(id));
     } catch (error) {
-      this.core.log('warn', `plugin ${id} state unreadable: ${messageOf(error)}`);
+      this.#core.log('warn', `plugin ${id} state unreadable: ${messageOf(error)}`);
     }
   }
 
   /** Installs a recommended plugin, or reinstalls a URL one from the manifest it recorded. */
   install(id: string): PluginState {
+    this.#core.policy.assert(this.#core.policy.pluginInstallsOff(), 'plugins.install', id);
     this.#known(id);
     if (this.#jobs.has(id)) return this.state(id);
     const recommended = this.#recommendedManifest(id);
@@ -560,7 +565,7 @@ export class PluginStore {
     if (this.#closing) throw refused('Boite is shutting down.');
     const url = normalizeSourceUrl(params.url, this.allowLocalSources);
     const ref = checkRef(params.ref);
-    const fetching = fetchManifest(this.core, url, ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
+    const fetching = fetchManifest(this.#core, url, ref, { allowLocal: this.allowLocalSources, signal: this.#shutdown.signal });
     this.#inspecting.add(fetching);
     let fetched: Awaited<typeof fetching>;
     try { fetched = await fetching; } finally { this.#inspecting.delete(fetching); }
@@ -675,7 +680,7 @@ export class PluginStore {
       this.#cache.delete(id);
       return this.state(id);
     }, 'Wait for the current plugin operation before uninstalling.').then((state) => {
-      this.core.bus.emit('plugins.updated', state);
+      this.#core.bus.emit('plugins.updated', state);
       return state;
     });
   }
@@ -693,7 +698,7 @@ export class PluginStore {
   async #run(id: string, installed: Installed, args: string[]): Promise<string> {
     if (this.#closing) throw refused('Boite is shutting down.');
     const threadId = `plugin:${id}:${++this.#sequence}`;
-    const spawned = this.core.procs.spawn(threadId, installed.binary, args, { cwd: this.#directory(id) });
+    const spawned = this.#core.procs.spawn(threadId, installed.binary, args, { cwd: this.#directory(id) });
     this.#running.set(threadId, id);
     this.#exits.add(spawned.exited);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -716,7 +721,7 @@ export class PluginStore {
       return stdout;
     } finally {
       clearTimeout(timer);
-      this.core.procs.killTree(threadId);
+      this.#core.procs.killTree(threadId);
       await spawned.exited;
       this.#running.delete(threadId);
       this.#exits.delete(spawned.exited);
@@ -744,7 +749,7 @@ export class PluginStore {
 
   blocksAccount(accountId: string): boolean {
     if (this.#action === null) return false;
-    const account = this.core.journal.getAccount(accountId);
+    const account = this.#core.journal.getAccount(accountId);
     return account?.providerId === this.#action.provider && account.isolationDir === null;
   }
 
@@ -763,10 +768,10 @@ export class PluginStore {
   async #changeLogin(id: string, installed: Installed, params: RpcParams<'plugins.accountAction'>): Promise<PluginPool[]> {
     this.#action = { id, provider: params.provider };
     try {
-      const affected = this.core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
-      if (this.core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
+      const affected = this.#core.journal.listThreads().filter((thread) => this.blocksAccount(thread.accountId));
+      if (this.#core.scheduler.activeAccountIds().some((accountId) => this.blocksAccount(accountId))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
       if (affected.some((thread) => threadActive(thread.status))) throw refused('Stop this provider\'s default-account turns before changing its saved login.');
-      for (const thread of affected) this.core.threads.releaseAgent(thread.id);
+      for (const thread of affected) this.#core.threads.releaseAgent(thread.id);
       const args = params.action === 'add' ? POOL_COMMANDS.add(params.provider)
         : params.action === 'switch' ? POOL_COMMANDS.switch(params.provider, params.email!)
         : POOL_COMMANDS.remove(params.provider, params.email!);
@@ -774,15 +779,15 @@ export class PluginStore {
       if (this.#closing) throw refused('Boite is shutting down.');
       this.#cache.delete(id);
       // The saved login changed hands: its last quota reading is someone else's now.
-      this.core.quotas.forget((accountId) => this.blocksAccount(accountId));
-      this.core.quotas.invalidate();
+      this.#core.quotas.forget((accountId) => this.blocksAccount(accountId));
+      this.#core.quotas.invalidate();
       // Announced whatever the status reads: a switch between two signed-in
       // logins leaves it at 'ok', yet the model lists belong to the old login.
-      for (const account of this.core.accounts.list()) if (this.blocksAccount(account.id)) this.core.accounts.check(account.id, true);
+      for (const account of this.#core.accounts.list()) if (this.blocksAccount(account.id)) this.#core.accounts.check(account.id, true);
       return await this.accounts(id);
     } finally {
       this.#action = null;
-      if (!this.#closing) this.core.scheduler.onSettingsChanged();
+      if (!this.#closing) this.#core.scheduler.onSettingsChanged();
     }
   }
 
@@ -794,7 +799,7 @@ export class PluginStore {
       if (disk.kind === 'installed' && providesApp(disk.installed.manifest)) this.apps.resume(id, this.#directory(id), atStart);
       if (disk.kind === 'installed' && providesGateway(disk.installed.manifest)) this.gateways.resume(id, this.#directory(id), atStart);
     } catch (error) {
-      this.core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
+      this.#core.log('warn', `plugin ${id} app did not start: ${messageOf(error)}`);
     }
   }
 
@@ -808,7 +813,7 @@ export class PluginStore {
     try {
       ids = this.#ids();
     } catch (error) {
-      this.core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
+      this.#core.log('warn', `desktop apps did not start: ${messageOf(error)}`);
       return;
     }
     for (const id of ids) if (!this.#jobs.has(id)) this.#resumeApp(id, true);
@@ -881,7 +886,7 @@ export class PluginStore {
     const jobs = [...this.#jobs.values()];
     for (const job of jobs) job.controller.abort();
     await Promise.all([...jobs.map((job) => job.promise), ...this.#lanes.rewrites()]);
-    for (const threadId of this.#running.keys()) this.core.procs.killTree(threadId);
+    for (const threadId of this.#running.keys()) this.#core.procs.killTree(threadId);
     await Promise.all(this.#exits);
     await Promise.all([...this.#listings.values(), ...this.#inspecting].map((pending) => pending.catch(() => undefined)));
     await apps;

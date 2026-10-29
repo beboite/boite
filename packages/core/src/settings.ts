@@ -1,4 +1,4 @@
-import { checkSettingsPatch, followedPatch, keepLaterFavorites, readSettings, MACHINE_SETTINGS, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings, type SubscriptionProxy } from '@boite/contracts';
+import { checkSettingsPatch, followedPatch, keepLaterFavorites, readSettings, MACHINE_SETTINGS, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type AdminPolicy, type Settings, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -24,15 +24,30 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export class SettingsStore {
-  constructor(private readonly core: Core) {}
+  readonly #core: Core;
 
+  constructor(core: Core) {
+    this.#core = core;
+  }
+
+  /** The settings in force: the user's, with what the admin policy locks read over them. */
   get(): Settings {
-    const stored = this.core.journal.getSetting('settings');
+    return this.#overlay(this.stored());
+  }
+
+  /** The user's own choices as saved; a policy that goes away gives them back untouched. */
+  stored(): Settings {
+    const stored = this.#core.journal.getSetting('settings');
     if (typeof stored !== 'object' || stored === null) return { ...DEFAULT_SETTINGS };
     const patch = { ...stored } as Partial<Settings>;
     Reflect.deleteProperty(patch, 'maxConcurrentTurns');
     Reflect.deleteProperty(patch, 'perAccountConcurrency');
     return { ...DEFAULT_SETTINGS, ...patch };
+  }
+
+  #overlay(settings: Settings): Settings {
+    const locked = this.#core.policy.lockedSettings(settings);
+    return Object.keys(locked).length === 0 ? settings : { ...settings, ...locked };
   }
 
   /**
@@ -43,6 +58,8 @@ export class SettingsStore {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    const locked = this.#core.policy.settingsRefusal(checked.patch, this.get());
+    if (locked !== null) throw locked;
     const storage = checked.patch.worktreeStorage;
     if (storage?.directory) {
       if (!isAbsolute(storage.directory) || (process.platform === 'win32' && !/^(?:[a-z]:[\\/]|\\\\)/i.test(storage.directory))) {
@@ -52,10 +69,10 @@ export class SettingsStore {
     }
     // Local mode: Douane's kind and the Douane plugin's loopback URLs, whatever the client sent.
     const proxy = checked.patch.subscriptionProxy;
-    if (proxy?.mode === 'local') checked.patch.subscriptionProxy = localProxy(proxy, this.core.plugins.gateways.port(DOUANE_PLUGIN));
+    if (proxy?.mode === 'local') checked.patch.subscriptionProxy = localProxy(proxy, this.#core.plugins.gateways.port(DOUANE_PLUGIN));
     const titleModel = checked.patch.titleModel;
     if (titleModel !== undefined && titleModel !== null) {
-      const provider = this.core.providers.get(titleModel.providerId);
+      const provider = this.#core.providers.get(titleModel.providerId);
       if (provider === undefined || !writesTitles(provider.protocol)) {
         throw invalidParams(`titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, {
           field: 'titleModel',
@@ -64,8 +81,8 @@ export class SettingsStore {
       }
     }
     const tracker = checked.patch.goalTracker;
-    if (tracker !== undefined && tracker !== null && this.core.providers.get(tracker.providerId) === undefined) {
-      throw invalidParams(`goalTracker names ${tracker.providerId}, which is not a loaded provider`, { field: 'goalTracker', expected: this.core.providers.available().map(provider => provider.id) });
+    if (tracker !== undefined && tracker !== null && this.#core.providers.get(tracker.providerId) === undefined) {
+      throw invalidParams(`goalTracker names ${tracker.providerId}, which is not a loaded provider`, { field: 'goalTracker', expected: this.#core.providers.available().map(provider => provider.id) });
     }
     return checked.patch;
   }
@@ -74,44 +91,84 @@ export class SettingsStore {
   followGateway(port: number): void {
     const proxy = this.get().subscriptionProxy;
     if (proxy?.mode !== 'local') return;
+    // The policy holds the proxy off: saving it now would store that over the user's choice.
+    if (this.stored().subscriptionProxy?.enabled !== proxy.enabled) return;
     const next = localProxy(proxy, port);
     if (next.baseUrl !== proxy.baseUrl || next.dashboardUrl !== proxy.dashboardUrl || next.kind !== proxy.kind) this.set({ subscriptionProxy: next });
   }
 
   set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
-    const previous = this.get();
+    const saved = this.stored();
+    const previous = this.#overlay(saved);
     const checked = keepLaterFavorites(previous, this.normalize(patch));
-    const next: Settings = { ...previous, ...checked };
-    this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
+    const kept: Settings = { ...saved, ...this.#withoutHeld(saved, checked) };
+    const next = this.#overlay(kept);
+    this.#core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
       persistPrivate?.();
-      this.core.journal.setSetting('settings', next);
+      this.#core.journal.setSetting('settings', kept);
     });
-    logSettingsChange(this.core, previous, next);
-    this.core.scheduler.onSettingsChanged();
-    this.core.procs.applySettings(next);
-    this.core.bus.emit('settings.updated', next);
-    this.core.threads.cards.settleSettings(next);
+    logSettingsChange(this.#core, previous, next);
+    this.#core.scheduler.onSettingsChanged();
+    this.#core.procs.applySettings(next);
+    this.#core.bus.emit('settings.updated', next);
+    this.#core.threads.cards.settleSettings(next);
     for (const key of MACHINE_SETTINGS) {
       if ((previous[key] === true) === (next[key] === true)) continue;
       // Turned off, the bots of the other machines lose this machine's projects before anyone hears of it.
-      if (key === 'groupBots') this.core.workforce.groupHost.allowedChanged(next[key] === true);
-      announceMachineSetting(this.core, key, next[key] === true);
+      if (key === 'groupBots') this.#core.workforce.groupHost.allowedChanged(next[key] === true);
+      announceMachineSetting(this.#core, key, next[key] === true);
     }
-    if (checked.subscriptionProxy !== undefined) {
-      for (const account of this.core.accounts.list()) {
-        const provider = this.core.providers.get(account.providerId);
-        // Only an account the gateway answered for before or answers for now: a
-        // refusal kept on any other one came from its own sign-in, and a proxy
-        // that never served it has nothing to say about it.
-        if (subscriptionProxyOf(previous, provider) !== null || subscriptionProxyOf(next, provider) !== null) {
-          this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
-          this.core.accounts.check(account.id, true);
-        }
+    if (checked.subscriptionProxy !== undefined) this.#recheckProxied(previous, next);
+    this.#core.group.settingsChanged();
+    return next;
+  }
+
+  #recheckProxied(previous: Settings, next: Settings): void {
+    for (const account of this.#core.accounts.list()) {
+      const provider = this.#core.providers.get(account.providerId);
+      // Only an account the gateway answered for before or answers for now: a
+      // refusal kept on any other one came from its own sign-in, and a proxy
+      // that never served it has nothing to say about it.
+      if (subscriptionProxyOf(previous, provider) !== null || subscriptionProxyOf(next, provider) !== null) {
+        this.#core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
+        this.#core.accounts.check(account.id, true);
       }
     }
-    this.core.group.settingsChanged();
-    return next;
+  }
+
+  /** A value the policy holds anyway is not the user's choice: the saved one stays for when the policy lifts. */
+  #withoutHeld(saved: Settings, patch: Partial<Settings>): Partial<Settings> {
+    const held = this.#core.policy.lockedSettings(saved);
+    const kept = { ...patch };
+    for (const key of ['listenOnLan', 'autoInstallUpdates', 'autoUpdateHarnesses', 'groupThreads', 'groupBots'] as const) {
+      if (key in held) Reflect.deleteProperty(kept, key);
+    }
+    const proxy = kept.subscriptionProxy;
+    // Switched off where the policy would hold it off anyway: the saved switch stays on.
+    if (proxy && !proxy.enabled && saved.subscriptionProxy?.enabled && this.#core.policy.lockedSettings({ ...saved, subscriptionProxy: { ...proxy, enabled: true } }).subscriptionProxy) {
+      kept.subscriptionProxy = { ...proxy, enabled: true };
+    }
+    return kept;
+  }
+
+  /** The admin policy changed what it locks: everything that follows a setting hears of the new value. */
+  policyChanged(before: AdminPolicy): void {
+    const saved = this.stored();
+    const previous = { ...saved, ...this.#core.policy.lockedSettings(saved, before) };
+    const next = this.get();
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    this.#core.scheduler.onSettingsChanged();
+    this.#core.procs.applySettings(next);
+    this.#core.bus.emit('settings.updated', next);
+    this.#core.threads.cards.settleSettings(next);
+    for (const key of MACHINE_SETTINGS) {
+      if ((previous[key] === true) === (next[key] === true)) continue;
+      if (key === 'groupBots') this.#core.workforce.groupHost.allowedChanged(next[key] === true);
+      announceMachineSetting(this.#core, key, next[key] === true);
+    }
+    if (JSON.stringify(previous.subscriptionProxy) !== JSON.stringify(next.subscriptionProxy)) this.#recheckProxied(previous, next);
+    this.#core.group.settingsChanged();
   }
 }
 

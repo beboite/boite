@@ -5,6 +5,8 @@
   import { subscriptionProxyName, type AccountQuota, type QuotaAlertPeriod } from '@boite/contracts';
   import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
+  import { lockedBy } from '../lib/policy';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
@@ -119,6 +121,7 @@
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     <QuotaPin />
+    <PolicyLock {store} keys={['quotaReads']} />
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />
@@ -126,6 +129,7 @@
     {/if}
   </header>
   <GatewaySwitch {store} />
+  {#if lockedBy(store.policy, 'quotaReads')}<p class="hint policy-note" data-testid="limits-policy">{strings.policy.quotasOff}</p>{/if}
   {#if proxyEnabled}<div class="actions proxy-switch">
     {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
     <GatewayOpenButton {store} />
@@ -201,6 +205,8 @@
 
 <style>
   .top { display: flex; align-items: center; gap: 8px; max-width: var(--settings-width); }
+  .top > :global(.policy-lock) { align-self: center; }
+  .policy-note { max-width: var(--settings-width); margin: -8px 0 20px; }
   .proxy-switch { margin-bottom: 12px; }
   .gateway-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: var(--settings-width); margin-bottom: 16px; }
   .group-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); font-weight: 600; }

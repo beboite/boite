@@ -145,6 +145,8 @@ function updaterEnv(program: string, updateEnv: Record<string, string>): Record<
  * on does it with nobody connected.
  */
 export class HarnessUpdates {
+  readonly #core: Core;
+
   readonly #entries = new Map<ProviderId, Entry>();
   #skips: Record<string, string> = {};
   #checking: Promise<HarnessUpdate[]> | null = null;
@@ -161,7 +163,8 @@ export class HarnessUpdates {
   pauseLimitMs = PAUSE_LIMIT_MS;
   backgroundLimitMs = BACKGROUND_LIMIT_MS;
 
-  constructor(private readonly core: Core) {
+  constructor(core: Core) {
+    this.#core = core;
     const log = (level: 'warn', message: string): void => core.log(level, message);
     this.#skips = readSkips(core.dataDir, log);
     this.#lastCheckAt = readReadings(core.dataDir, this.#entries, log);
@@ -208,9 +211,9 @@ export class HarnessUpdates {
         moved ||= entry.route === 'self';
       }
     }
-    for (const summary of this.core.providers.list().loaded) {
+    for (const summary of this.#core.providers.list().loaded) {
       const id = summary.id;
-      if (this.core.providers.installs.installedVersion(id) === null) continue;
+      if (this.#core.providers.installs.installedVersion(id) === null) continue;
       const target = this.#targetOf(id);
       const previous = this.#entries.get(id);
       if (target?.route !== 'managed' || previous?.state === 'updating' || previous?.state === 'checking') continue;
@@ -235,7 +238,7 @@ export class HarnessUpdates {
     this.#closed = true;
     if (this.#timer !== null) clearTimeout(this.#timer);
     this.#timer = null;
-    for (const id of this.#entries.keys()) this.core.procs.killTree(updateThreadId(id));
+    for (const id of this.#entries.keys()) this.#core.procs.killTree(updateThreadId(id));
     for (const drain of this.#drains.values()) {
       if (drain.limit !== null) clearTimeout(drain.limit);
       if (drain.bound !== null) clearTimeout(drain.bound);
@@ -254,7 +257,8 @@ export class HarnessUpdates {
   }
 
   check(): Promise<HarnessUpdate[]> {
-    if (this.#closed || this.core.stopping) return Promise.reject(refused('the core is stopping; agent updates are closed'));
+    if (this.#closed || this.#core.stopping) return Promise.reject(refused('the core is stopping; agent updates are closed'));
+    if (this.#core.policy.update('agents') === 'off') return Promise.reject(this.#core.policy.refusal('updates.agents', 'the version check'));
     this.#checking ??= this.#runCheck().finally(() => {
       this.#checking = null;
     });
@@ -268,6 +272,7 @@ export class HarnessUpdates {
    */
   async update(providerId: ProviderId, automatic = false): Promise<HarnessUpdate> {
     this.#assertOpen();
+    this.#core.policy.assert(this.#core.policy.update('agents') === 'off', 'updates.agents', providerId);
     const target = this.#targetOf(providerId);
     if (target === null) throw refused(`${providerId} has no update Boite can run on this machine`, { providerId });
     // A check in flight writes its reading when it lands: an update started under it
@@ -299,7 +304,7 @@ export class HarnessUpdates {
       });
     }
     // Turns of this agent in flight pause between two tool calls rather than refuse the update.
-    const held = automatic && backgroundHolders(this.core, providerId).size > 0;
+    const held = automatic && backgroundHolders(this.#core, providerId).size > 0;
     const drain: Drain = { target, before: entry, phase: held ? 'background' : 'pause', limit: null, resume: Promise.withResolvers(), waitingFor: 0, forced: !automatic, bound: null, cut: new Map() };
     this.#drains.set(providerId, drain);
     this.#entries.set(providerId, { ...entry, state: 'updating', message: null });
@@ -308,10 +313,10 @@ export class HarnessUpdates {
       drain.bound = setTimeout(() => this.#force(providerId), this.backgroundLimitMs);
       drain.bound.unref?.();
     }
-    if (!held) for (const threadId of this.#runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
+    if (!held) for (const threadId of this.#runningThreads(providerId)) this.#core.threads.runner.requestPause(threadId, providerId);
     drain.waitingFor = this.#waitingFor(providerId, drain);
     // `advance` logs only a change of this count: the first wait is said here.
-    if (drain.waitingFor > 0) logUpdate(this.core, providerId, 'waiting', { running: drain.waitingFor });
+    if (drain.waitingFor > 0) logUpdate(this.#core, providerId, 'waiting', { running: drain.waitingFor });
     this.#emit();
     this.#advance(providerId);
     return this.#describe(providerId)!;
@@ -344,7 +349,7 @@ export class HarnessUpdates {
     if (drain !== undefined) {
       return drain.resume.promise.then((resume) => resume === null || threadId === undefined ? resume : withCut(resume, drain.target.descriptor.name, drain.cut.get(threadId)));
     }
-    return Promise.resolve(resumeUnwaited(this.core.providers.get(providerId)?.name ?? providerId));
+    return Promise.resolve(resumeUnwaited(this.#core.providers.get(providerId)?.name ?? providerId));
   }
 
   /** A turn paused: the update may start, and the pause limit runs from the first one. */
@@ -363,7 +368,7 @@ export class HarnessUpdates {
     if (current === null) throw notFound('provider update', providerId);
     if (version === null) delete this.#skips[providerId];
     else this.#skips[providerId] = version;
-    writeSkips(this.core.dataDir, this.#skips);
+    writeSkips(this.#core.dataDir, this.#skips);
     this.#emit();
     return this.#describe(providerId)!;
   }
@@ -382,6 +387,8 @@ export class HarnessUpdates {
 
   async #tick(): Promise<void> {
     try {
+      // Checks turned off by the admin policy: the timer keeps its pace and reads nothing.
+      if (this.#core.policy.update('agents') === 'off') { this.#schedule(CHECK_EVERY_MS); return; }
       // A check started by hand since the timer was armed already counts.
       const recent = this.#lastCheckAt !== null && Date.now() - this.#lastCheckAt < CHECK_EVERY_MS - BUSY_RETRY_MS;
       if (!recent) {
@@ -392,38 +399,38 @@ export class HarnessUpdates {
         }
         await this.check();
       }
-      if (this.#closed || this.core.stopping) return;
-      if (this.core.settings.get().autoUpdateHarnesses) {
+      if (this.#closed || this.#core.stopping) return;
+      if (this.#core.settings.get().autoUpdateHarnesses) {
         for (const update of this.#snapshot()) {
           if (!update.pending) continue;
           // A turn in flight pauses at its next tool boundary for it, and goes on after.
           await this.update(update.providerId, true).catch((error: unknown) => {
-            this.core.log('warn', `automatic update of ${update.providerId}: ${error instanceof Error ? error.message : String(error)}`);
+            this.#core.log('warn', `automatic update of ${update.providerId}: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
       }
     } catch (error) {
-      if (this.#closed || this.core.stopping) return;
-      this.core.log('warn', `checking agent updates: ${error instanceof Error ? error.message : String(error)}`);
+      if (this.#closed || this.#core.stopping) return;
+      this.#core.log('warn', `checking agent updates: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.#schedule(CHECK_EVERY_MS);
   }
 
   /** The route this provider updates by on this machine, null when there is none. */
   #targetOf(providerId: ProviderId): Target | null {
-    const descriptor = this.core.providers.get(providerId);
-    const summary = this.core.providers.summary(providerId);
+    const descriptor = this.#core.providers.get(providerId);
+    const summary = this.#core.providers.summary(providerId);
     // A provider turned off is never asked its version and never updated.
     if (descriptor === undefined || summary === undefined || !summary.available || summary.enabled === false) return null;
     if (this.only !== null && !this.only.has(providerId)) return null;
     const profile = profileFor(descriptor);
     if (profile === undefined) return null;
     const command = resolveCommand(profile);
-    const managedDir = resolve(this.core.providers.installs.currentDir(providerId));
+    const managedDir = resolve(this.#core.providers.installs.currentDir(providerId));
     // A release on disk under `current` is what makes the route managed, whatever
     // the install card is doing: an update under way or a failed one still leave it there.
     const runsManaged =
-      this.core.providers.installs.installedVersion(providerId) !== null &&
+      this.#core.providers.installs.installedVersion(providerId) !== null &&
       command !== null &&
       inside(managedDir, resolve(command.executable));
     if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed', program: programIdentity(command.shown) };
@@ -433,7 +440,7 @@ export class HarnessUpdates {
   }
 
   async #runCheck(): Promise<HarnessUpdate[]> {
-    const targets = this.core.providers
+    const targets = this.#core.providers
       .list()
       .loaded.map((summary) => this.#targetOf(summary.id))
       .filter((target): target is Target => target !== null);
@@ -520,8 +527,8 @@ export class HarnessUpdates {
    */
   #readManaged(target: Target): { current: string | null; latest: string | null } {
     const id = target.descriptor.id;
-    const current = this.core.providers.installs.installedVersion(id);
-    const install = this.core.providers.installBlock(id);
+    const current = this.#core.providers.installs.installedVersion(id);
+    const install = this.#core.providers.installBlock(id);
     const latest = install?.version ?? null;
     return { current, latest: install !== undefined && upToDate(current, install) ? current : latest };
   }
@@ -537,12 +544,12 @@ export class HarnessUpdates {
     // An updater just rewrote the program, or it was never asked its version: a
     // candidate that names a major resolves once the program has answered.
     // The program as installed, a launcher included: an updater reads its install method from what the launcher sets.
-    if (via === undefined && resolveCommand(target.profile, true, true) === null) await this.core.providers.settle(this.versionTimeoutMs);
+    if (via === undefined && resolveCommand(target.profile, true, true) === null) await this.#core.providers.settle(this.versionTimeoutMs);
     const command = via?.command ?? resolveCommand(target.profile, true, true);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const label = via?.label ?? args.join(' ');
-    const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
-      cwd: this.core.dataDir,
+    const spawned = this.#core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
+      cwd: this.#core.dataDir,
       env: updaterEnv(command.shown, command.updateEnv),
     });
     spawned.proc.stdin.end();
@@ -557,7 +564,7 @@ export class HarnessUpdates {
       timedOut = true;
       // The whole tree: a launcher's child that inherited the pipes would hold them open.
       // A check and an update of one agent never overlap, so nothing else runs under this id.
-      this.core.procs.killTree(updateThreadId(target.descriptor.id));
+      this.#core.procs.killTree(updateThreadId(target.descriptor.id));
       grace = setTimeout(giveUp, PIPE_GRACE_MS);
     }, timeoutMs);
     try {
@@ -593,7 +600,7 @@ export class HarnessUpdates {
       forgetWhich();
       recheckVersions();
       const read = await this.#read(target, INSTALL_LATEST_MAX_AGE_MS);
-      if (this.#closed || this.core.stopping) return;
+      if (this.#closed || this.#core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.#newer({ ...before, ...read });
       const reason = stuck ? stuckReason(said) : undefined;
       // An updater that checks by itself and exits cleanly has just named its
@@ -613,9 +620,9 @@ export class HarnessUpdates {
       forgetWhich();
       recheckVersions();
       // The list that goes out names the program as it stands after the update.
-      await this.core.providers.settle(this.versionTimeoutMs);
-      if (this.#closed || this.core.stopping) return;
-      this.core.bus.emit('providers.updated', this.core.providers.list());
+      await this.#core.providers.settle(this.versionTimeoutMs);
+      if (this.#closed || this.#core.stopping) return;
+      this.#core.bus.emit('providers.updated', this.#core.providers.list());
     } catch (error) {
       this.#entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now(), program: target.program });
     }
@@ -671,7 +678,7 @@ export class HarnessUpdates {
    */
   async #runManaged(target: Target): Promise<void> {
     const id = target.descriptor.id;
-    const installs = this.core.providers.installs;
+    const installs = this.#core.providers.installs;
     const settled = async (done: ReturnType<typeof installs.whenDone>): Promise<void> => {
       const result = await done;
       if (result === null || result.outcome === 'cancelled') throw new Error('the download was cancelled');
@@ -688,7 +695,7 @@ export class HarnessUpdates {
   }
 
   #freshInstall(target: Target, maxAgeMs: number): Promise<ProviderInstall | undefined> {
-    return this.core.providers.freshInstallBlock(target.descriptor.id, (level, message) => this.core.log(level, message), maxAgeMs);
+    return this.#core.providers.freshInstallBlock(target.descriptor.id, (level, message) => this.#core.log(level, message), maxAgeMs);
   }
 
   /**
@@ -706,16 +713,16 @@ export class HarnessUpdates {
       this.#put(outcome.providerId, { ...entry, ...read, state: 'idle', message: null, checkedAt: Date.now() });
       this.#writeReadings();
     }).catch((error: unknown) => {
-      this.core.log('warn', `reading ${outcome.providerId} after its install: ${error instanceof Error ? error.message : String(error)}`);
+      this.#core.log('warn', `reading ${outcome.providerId} after its install: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
 
   /** The threads whose turn of this provider is running, a paused one included. */
   #runningThreads(providerId: ProviderId): ThreadId[] {
     const threads = new Set<ThreadId>();
-    for (const turn of this.core.journal.unfinishedTurns()) {
+    for (const turn of this.#core.journal.unfinishedTurns()) {
       if (turn.status !== 'running') continue;
-      const owner = turn.execution?.providerId ?? this.core.journal.getThread(turn.threadId)?.providerId;
+      const owner = turn.execution?.providerId ?? this.#core.journal.getThread(turn.threadId)?.providerId;
       if (owner === providerId) threads.add(turn.threadId);
     }
     return [...threads];
@@ -727,8 +734,8 @@ export class HarnessUpdates {
    * background work still runs.
    */
   #waitingFor(providerId: ProviderId, drain: Drain): number {
-    const turns = this.#runningThreads(providerId).filter((threadId) => !this.core.threads.runner.isPaused(threadId)).length;
-    return turns + (drain.forced ? 0 : backgroundHolders(this.core, providerId).size);
+    const turns = this.#runningThreads(providerId).filter((threadId) => !this.#core.threads.runner.isPaused(threadId)).length;
+    return turns + (drain.forced ? 0 : backgroundHolders(this.#core, providerId).size);
   }
 
   #advanceAll(): void {
@@ -740,14 +747,14 @@ export class HarnessUpdates {
     const drain = this.#drains.get(providerId);
     if (drain === undefined || drain.phase === 'run' || this.#closed) return;
     // The background work ended or stopped holding the update: the turns in flight pause for it now.
-    if (drain.phase === 'background' && (drain.forced || backgroundHolders(this.core, providerId).size === 0)) {
+    if (drain.phase === 'background' && (drain.forced || backgroundHolders(this.#core, providerId).size === 0)) {
       drain.phase = 'pause';
-      for (const threadId of this.#runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
+      for (const threadId of this.#runningThreads(providerId)) this.#core.threads.runner.requestPause(threadId, providerId);
     }
     const waiting = this.#waitingFor(providerId, drain);
     if (waiting > 0) {
       if (waiting !== drain.waitingFor) {
-        logUpdate(this.core, providerId, 'waiting', { running: waiting });
+        logUpdate(this.#core, providerId, 'waiting', { running: waiting });
         drain.waitingFor = waiting;
         this.#emit();
       }
@@ -760,29 +767,29 @@ export class HarnessUpdates {
     drain.limit = null;
     drain.bound = null;
     // What the release below ends in the background, and whose agents are resumed on the new version.
-    drain.cut = backgroundHolders(this.core, providerId);
+    drain.cut = backgroundHolders(this.#core, providerId);
     // A running program cannot be replaced, and a warm session is one: a paused turn's included.
-    for (const thread of this.core.journal.listThreads()) {
-      if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
+    for (const thread of this.#core.journal.listThreads()) {
+      if (thread.providerId === providerId) this.#core.threads.releaseAgent(thread.id);
     }
     // Planned now rather than after the updater, so a Stop meanwhile cancels the resume and a crash keeps it.
-    resumeCut(this.core, drain.cut, drain.target.descriptor.name);
+    resumeCut(this.#core, drain.cut, drain.target.descriptor.name);
     this.#emit();
-    const updateAt = logUpdate(this.core, providerId, 'started', { from: drain.before.current });
+    const updateAt = logUpdate(this.#core, providerId, 'started', { from: drain.before.current });
     void this.#runUpdate(drain.target, drain.before)
       // A shutdown leaves the entry mid-update: no finish happened to log.
-      .then(() => { if (this.#closed || this.core.stopping) return; logUpdate(this.core, providerId, 'finished', { from: drain.before.current, to: this.#entries.get(providerId)?.current ?? null, state: this.#entries.get(providerId)?.state ?? null }, updateAt); })
+      .then(() => { if (this.#closed || this.#core.stopping) return; logUpdate(this.#core, providerId, 'finished', { from: drain.before.current, to: this.#entries.get(providerId)?.current ?? null, state: this.#entries.get(providerId)?.state ?? null }, updateAt); })
       .catch((error: unknown) => {
-        this.core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
+        this.#core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
       })
       .finally(() => {
         if (this.#drains.get(providerId) !== drain) return;
         this.#drains.delete(providerId);
         const entry = this.#entries.get(providerId);
-        drain.resume.resolve(this.#closed || this.core.stopping ? null
+        drain.resume.resolve(this.#closed || this.#core.stopping ? null
           : resumeAfterUpdate(drain.target.descriptor.name, drain.before.current, entry?.current ?? null, entry?.state === 'failed'));
         // The turns queued while the updater ran start now, on the new version.
-        if (!this.#closed && !this.core.stopping) this.core.scheduler.retry();
+        if (!this.#closed && !this.#core.stopping) this.#core.scheduler.retry();
       });
   }
 
@@ -797,7 +804,7 @@ export class HarnessUpdates {
     drain.bound = null;
     drain.forced = true;
     const why = byHand ? 'asked by hand' : `background work still running after ${Math.round(this.backgroundLimitMs / 60000)} min`;
-    this.core.log('info', `${drain.target.descriptor.name}: ${why}; the update goes on and resumes those agents after it`);
+    this.#core.log('info', `${drain.target.descriptor.name}: ${why}; the update goes on and resumes those agents after it`);
     this.#advance(providerId);
   }
 
@@ -810,19 +817,19 @@ export class HarnessUpdates {
     if (drain === undefined || drain.phase !== 'pause') return;
     drain.limit = null;
     drain.phase = 'idle';
-    for (const threadId of this.#runningThreads(providerId)) this.core.threads.runner.cancelPause(threadId);
+    for (const threadId of this.#runningThreads(providerId)) this.#core.threads.runner.cancelPause(threadId);
     const name = drain.target.descriptor.name;
     const waiting = drain.resume;
     drain.resume = Promise.withResolvers();
-    this.core.log('info', `${name}: turns still in a tool call after ${Math.round(this.pauseLimitMs / 60000)} min; the paused ones go on and the update waits for an idle moment`);
+    this.#core.log('info', `${name}: turns still in a tool call after ${Math.round(this.pauseLimitMs / 60000)} min; the paused ones go on and the update waits for an idle moment`);
     waiting.resolve(resumePostponed(name));
     this.#advance(providerId);
   }
 
   /** True while any turn of any agent is queued, running or waiting. */
   #anyBusy(): boolean {
-    return this.core.journal.unfinishedTurns().length > 0 ||
-      this.core.journal.listThreads().some((thread) => threadActive(thread.status));
+    return this.#core.journal.unfinishedTurns().length > 0 ||
+      this.#core.journal.listThreads().some((thread) => threadActive(thread.status));
   }
 
   #newer(entry: Pick<Entry, 'route' | 'current' | 'latest'>): boolean {
@@ -838,7 +845,7 @@ export class HarnessUpdates {
 
   #describe(providerId: ProviderId): HarnessUpdate | null {
     const entry = this.#entries.get(providerId);
-    const descriptor = this.core.providers.get(providerId);
+    const descriptor = this.#core.providers.get(providerId);
     if (entry === undefined || descriptor === undefined) return null;
     const skipped = this.#skips[providerId] ?? null;
     return {
@@ -864,17 +871,17 @@ export class HarnessUpdates {
   }
 
   #emit(): void {
-    if (this.#closed || this.core.stopping) return;
-    this.core.bus.emit('providers.updatesChanged', this.#snapshot());
+    if (this.#closed || this.#core.stopping) return;
+    this.#core.bus.emit('providers.updatesChanged', this.#snapshot());
   }
 
   #assertOpen(): void {
-    if (this.#closed || this.core.stopping) throw refused('the core is stopping; agent updates are closed');
+    if (this.#closed || this.#core.stopping) throw refused('the core is stopping; agent updates are closed');
   }
 
   #writeReadings(): void {
-    if (this.#closed || this.core.stopping) return;
-    writeReadings(this.core.dataDir, this.#entries, this.#lastCheckAt, (level, message) => this.core.log(level, message));
+    if (this.#closed || this.#core.stopping) return;
+    writeReadings(this.#core.dataDir, this.#entries, this.#lastCheckAt, (level, message) => this.#core.log(level, message));
   }
 }
 

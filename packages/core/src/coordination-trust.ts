@@ -4,7 +4,18 @@ import type { CoordinationPeer } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import { coordinationUrl, text } from './coordination-letter.ts';
-import { migrateGroupPeer } from './coordination-group.ts';
+import { groupPeers, migrateGroupPeer } from './coordination-group.ts';
+
+/**
+ * Every machine a letter may cross to: the hand-made links first, so the
+ * permissions the owner set on one win, then the members of this core's
+ * group, then contacts, whose reach is decided per project (`contacts/store.ts`).
+ */
+export function trustedCoordinationPeers(core: Core): CoordinationPeer[] {
+  const manual = core.coordination.peers();
+  const own = [...manual, ...groupPeers(core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
+  return [...own, ...(core.contacts?.peers() ?? []).filter(peer => !own.some(known => known.coreId === peer.coreId))];
+}
 
 export function trustCoordination(core: Core, peer: CoordinationPeer): CoordinationPeer {
     if (!peer) throw invalidParams('peer: expected a public contact card');

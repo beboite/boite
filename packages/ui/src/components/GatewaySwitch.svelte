@@ -4,6 +4,8 @@
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
+  import { gatewayBlocked } from '../lib/policy';
 
   /**
    * The gateway the owner configured, on or off, from Limits. A paired phone
@@ -15,6 +17,8 @@
   const proxy = $derived(store.settings?.subscriptionProxy);
   const name = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
   let busy = $state(false);
+  /** The admin policy keeps this gateway from being turned on; turning it off stays open. */
+  const blocked = $derived(proxy?.enabled !== true && gatewayBlocked(store.policy, proxy?.baseUrl) !== null);
   let error = $state('');
 
   /** The switch saves when it flips; a refusal puts it back. */
@@ -35,11 +39,11 @@
   <section class="card gateway-switch" data-testid="gateway-switch">
     <label for="{uid}-gateway" class="switch-row">
       <span class="text">
-        <span class="ui-label-box"><span class="ui-label" id="{uid}-gateway-name">{fill(strings.subscriptionProxy.use, { name })}</span><InfoTip topic={fill(strings.subscriptionProxy.use, { name })} text={strings.subscriptionProxy.enabledHint} /></span>
+        <span class="ui-label-box"><span class="ui-label" id="{uid}-gateway-name">{fill(strings.subscriptionProxy.use, { name })}</span><InfoTip topic={fill(strings.subscriptionProxy.use, { name })} text={strings.subscriptionProxy.enabledHint} />{#if blocked}<PolicyLock {store} keys={['gateway', 'gateway.allowedBaseUrls']} />{/if}</span>
         <span class="hint where">{proxy.mode === 'local' ? strings.subscriptionProxy.local : subscriptionProxyOrigin(proxy)}</span>
       </span>
       <input id="{uid}-gateway" type="checkbox" role="switch" data-testid="gateway-switch-input" aria-labelledby="{uid}-gateway-name"
-        checked={proxy.enabled} disabled={busy || store.connection !== 'ready'} onchange={(event) => void toggle(event.currentTarget)} />
+        checked={proxy.enabled} disabled={busy || store.connection !== 'ready' || blocked} onchange={(event) => void toggle(event.currentTarget)} />
     </label>
     {#if error}<p class="error" role="alert" data-testid="gateway-switch-error">{error}</p>{/if}
   </section>

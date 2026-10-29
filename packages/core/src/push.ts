@@ -113,7 +113,8 @@ export class PushStore {
 
   readonly #core: Core;
 
-  constructor(core: Core) { this.#core = core;
+  constructor(core: Core) {
+    this.#core = core;
     this.#offAttention = core.threads.focus.onAttention(report => this.#attention(report));
     this.#off = core.bus.onAny((name, payload) => {
       if (name === 'sessions.updated' && (payload as RpcEvents['sessions.updated']).state === 'revoked') {
@@ -193,7 +194,7 @@ export class PushStore {
     return sessionId;
   }
 
-  #keys(): Promise<Keys> {
+  private keys(): Promise<Keys> {
     this.#keysPromise ??= (async () => {
       const existing = this.#core.journal.getSetting(KEYS) as Keys | null;
       if (existing) return existing;
@@ -209,7 +210,7 @@ export class PushStore {
   async status(sessionId: string | null) {
     const id = this.#requireSession(sessionId);
     const subscription = this.#subscriptions()[id];
-    return { publicKey: (await this.#keys()).publicKey, subscribed: Boolean(subscription), ...(subscription ? { kinds: subscription.kinds ?? [...NOTIFICATION_KINDS] } : {}) };
+    return { publicKey: (await this.keys()).publicKey, subscribed: Boolean(subscription), ...(subscription ? { kinds: subscription.kinds ?? [...NOTIFICATION_KINDS] } : {}) };
   }
 
   subscribe(sessionId: string | null, input: Subscription) {
@@ -329,7 +330,7 @@ export class PushStore {
       if (!wants(subscription, text.kind)) continue;
       // A device of the group may run a page no machine serves: its push says which machine the thread is on.
       const self = this.#core.group.clients.deviceOf(sessionId) === undefined ? undefined : this.#core.coordination.card().coreId;
-      this.#track(this.#deliver(sessionId, { title, ...news, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
+      this.#track(this.deliver(sessionId, { title, ...news, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
         // `deliver` already wrote the warning with its cause: this one is detail.
         this.#core.logs.debug('Web Push delivery failed; the conversation remains available in Boite', { source: 'push', event: 'push.delivery-failed' });
       }));
@@ -381,7 +382,7 @@ export class PushStore {
     const badge = (push.badge ?? 0) + this.badge();
     // A tag of that machine's never replaces a notification of this one's.
     const tag = `${from.coreId.slice(0, 16)}:${push.tag}`;
-    this.#track(this.#deliver(sessionId, { ...push, tag, badge, core: from.coreId }).catch(() => {
+    this.#track(this.deliver(sessionId, { ...push, tag, badge, core: from.coreId }).catch(() => {
       this.#core.logs.debug(`Web Push delivery of a notification from ${from.name} failed`, { source: 'push', event: 'push.delivery-failed' });
     }));
     return { delivered: true };
@@ -402,9 +403,11 @@ export class PushStore {
     });
   };
 
-  async #deliver(sessionId: string, payload: PushPayload): Promise<void> {
+  private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
+    // Subscriptions made before the admin policy turned push off are kept and sent nothing.
+    if (this.#core.policy.networkOff('push')) return;
     let keys: Keys;
-    try { keys = await this.#keys(); }
+    try { keys = await this.keys(); }
     catch (error) {
       // The callers log a delivery failure as detail: this cause is said here, once.
       this.#core.logs.warn(`Web Push keys could not be read or created: ${error instanceof Error ? error.message : String(error)}`, { source: 'push', event: 'push.failed', ...(payload.threadId && !payload.core ? { threadId: payload.threadId } : {}), data: { sessionId, stage: 'keys' } });
@@ -412,7 +415,8 @@ export class PushStore {
     }
     if (this.#closed || !this.#core.journal.getSession(sessionId)) return;
     const subscription = this.#subscriptions()[sessionId];
-    if (!subscription) return;
+    // The policy may have turned push off while the keys were read.
+    if (!subscription || this.#core.policy.networkOff('push')) return;
     try {
       await this.send({ endpoint: subscription.endpoint, keys: subscription.keys }, JSON.stringify(payload), keys, createHash('sha256').update(payload.tag).digest('base64url').slice(0, 32));
     } catch (error) {
@@ -434,7 +438,7 @@ export class PushStore {
   async test(sessionId: string | null) {
     const id = this.#requireSession(sessionId);
     if (!this.#subscriptions()[id]) throw refused('Enable notifications on this device first');
-    await this.#track(this.#deliver(id, { title: 'Boite', body: 'Notifications are connected', label: 'connected', threadId: null, tag: 'test' }));
+    await this.#track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', label: 'connected', threadId: null, tag: 'test' }));
     return { ok: true } as const;
   }
 

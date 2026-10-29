@@ -17,6 +17,9 @@ export interface ServerUpdateOptions {
 
 /** One updater per core, shared by all its owner clients; a desktop update remains the shell's. */
 export class ServerUpdates {
+  readonly #core: Core;
+  readonly #options: ServerUpdateOptions;
+
   #state: ServerUpdateStatus;
   #installation: ServerInstallation | null = null;
   #inspected = false;
@@ -31,10 +34,9 @@ export class ServerUpdates {
   #interval: ReturnType<typeof setInterval> | null = null;
   #closed = false;
 
-  readonly #core: Core;
-  readonly #options: ServerUpdateOptions;
-
-  constructor(core: Core, options: ServerUpdateOptions = {}) { this.#core = core; this.#options = options;
+  constructor(core: Core, options: ServerUpdateOptions = {}) {
+    this.#core = core;
+    this.#options = options;
     this.#state = { mode: existsSync('/.dockerenv') ? 'docker' : 'manual', phase: 'idle', currentVersion: core.version,
       version: null, channel: core.version.includes('-nightly.') ? 'nightly' : 'stable', publishedAt: null,
       checkedAt: null, received: 0, total: null, error: null };
@@ -79,6 +81,7 @@ export class ServerUpdates {
 
   async status(refresh = false): Promise<ServerUpdateStatus> {
     if (typeof refresh !== 'boolean') throw refused('core.updateStatus.refresh must be a boolean');
+    this.#core.policy.assert(refresh && this.#core.policy.update('server') === 'off', 'updates.server', 'the release check');
     if (this.#check) return this.#check;
     await this.#inspect();
     if (this.#check) return this.#check;
@@ -103,6 +106,7 @@ export class ServerUpdates {
   }
 
   install(version: string): ServerUpdateStatus {
+    this.#core.policy.assert(this.#core.policy.update('server') === 'off', 'updates.server');
     if (!this.#installation || !this.#offer || version !== this.#offer.version) throw refused('core.updateInstall.version must match the available server update');
     if (['downloading', 'waiting', 'installing'].includes(this.#state.phase)) return this.snapshot();
     if (this.#state.phase !== 'available' && this.#state.phase !== 'error') throw refused('Check for a server update before installing it');
@@ -218,9 +222,14 @@ export class ServerUpdates {
     this.#workerLaunched = false;
   }
   start(): void {
-    this.#first = setTimeout(() => {
+    // The admin policy is asked at every tick: a file that turns checks off stops the next one.
+    const tick = (): void => {
+      if (this.#core.policy.update('server') === 'off') return;
       void this.status(true).catch(error => this.#core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' }));
-      this.#interval = setInterval(() => { void this.status(true).catch(error => this.#core.log('warn', `server update check: ${messageOf(error)}`, { source: 'updates', event: 'server-update.check-failed' })); }, 6 * 60 * 60 * 1000);
+    };
+    this.#first = setTimeout(() => {
+      tick();
+      this.#interval = setInterval(tick, 6 * 60 * 60 * 1000);
       this.#interval.unref();
     }, 8000);
     this.#first.unref();
