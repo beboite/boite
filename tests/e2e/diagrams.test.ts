@@ -72,6 +72,42 @@ test('a theme change recolors a drawn diagram in place, at desktop and phone wid
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
 }, 90_000);
 
+test('a view block shows its page in the sandbox, as tall as the page, at desktop and phone widths', async () => {
+  const block = `document.querySelector('.md-view')`;
+  await page.waitFor(`document.querySelector('.md-view.md-drawn ${id('view-block-frame')}[data-ready]')`, 30_000);
+  const shown = () => page.evaluate<{ sandbox: string | null; code: boolean; frame: boolean; height: number; scheme: string; error: boolean }>(`(() => {
+    const b = ${block};
+    const frame = b.querySelector('${id('view-block-frame')}');
+    return { sandbox: frame.getAttribute('sandbox'), code: b.querySelector('pre').checkVisibility(), frame: frame.checkVisibility(),
+      height: frame.getBoundingClientRect().height, scheme: frame.style.colorScheme, error: b.querySelector('${id('diagram-error')}') !== null };
+  })()`);
+  const first = await shown();
+  expect(first).toMatchObject({ sandbox: 'allow-scripts', code: false, frame: true, error: false });
+  // The card's own height, not the default a page without one gets.
+  expect(first.height).toBeGreaterThan(60);
+  expect(first.height).toBeLessThan(300);
+  for (const [width, height, mobile] of [[1300, 1500, false], [390, 2300, true]] as const) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: mobile });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(`window.__boiteTest.setTheme('${theme}')`);
+      await page.waitFor(`${block}.querySelector('${id('view-block-frame')}').style.colorScheme === '${theme}'`);
+      await page.evaluate(`${block}.scrollIntoView({ block: 'center' })`);
+      await capture(`view-${width}-${theme}`);
+    }
+    expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 1500, deviceScaleFactor: 1, mobile: false });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+
+  // Its HTML and back; a page hidden behind its code keeps the height it showed at.
+  await page.evaluate(`${block}.querySelector('${id('diagram-toggle')}').click()`);
+  expect(await shown()).toMatchObject({ code: true, frame: false });
+  await page.evaluate(`${block}.querySelector('${id('diagram-toggle')}').click()`);
+  await page.waitFor(`${block}.querySelector('${id('view-block-frame')}').checkVisibility()`);
+  expect((await shown()).height).toBeGreaterThan(60);
+}, 90_000);
+
 test('a diagram switches to its code and back, and opens in the image viewer', async () => {
   const block = `document.querySelector('${id('diagram')}').closest('.md-mermaid')`;
   await page.evaluate(`${block}.querySelector('${id('diagram-toggle')}').click()`);

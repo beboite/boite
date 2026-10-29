@@ -212,6 +212,18 @@ export const fr: Translation = {
       failed: 'Ce diagramme n’a pas pu être dessiné : {reason}',
       unavailable: 'Le diagramme n’a pas pu être dessiné ici.'
     },
+    /** A ```view block of an answer, its HTML shown as a page (`lib/view-block.ts`). The reasons end `failed`. */
+    viewBlock: {
+      label: 'Vue',
+      showView: 'Vue',
+      failed: 'Cette vue n’a pas pu être affichée : {reason}',
+      unavailable: 'La vue n’a pas pu être affichée ici.',
+      timeout: 'elle ne s’est pas chargée à temps',
+      silent: 'sa page n’a pas démarré',
+      navigated: 'elle a quitté sa propre page'
+    },
+    /** What stands in for a diagram, a formula or a view an answer is still writing. */
+    drawingPending: 'Dessin en cours…',
     /** The tooltip of a formula Temml could not read, its source left as written. */
     formulaFailed: 'Cette formule n’a pas pu être lue : {reason}'
   }

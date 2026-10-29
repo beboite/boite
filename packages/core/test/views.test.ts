@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { AGENT_ENV, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
+import { AGENT_ENV, VIEW_BLOCK_MAX_BYTES, VIEW_CONTENT_POLICY, VIEW_HELP, VIEW_GUIDE_LINE, viewDocument, viewFrameHeight, viewTitleOf, readViewMessage, type MessagePart } from '@boite/contracts';
 import { agentGuide, CHAT_VISUALS } from '../src/agent-guide.ts';
 import { findChromium } from '../src/browser/chromium.ts';
 import { connect, type CoreClient } from '../src/client.ts';
@@ -57,15 +57,15 @@ async function cli(...args: string[]): Promise<{ code: number; output: string; e
   return { code, output, error };
 }
 
-test('the session guide sends a visual to the chat\'s own Mermaid and TeX first, and view help carries the page rules', async () => {
+test('the session guide sends a visual to the chat\'s own Mermaid, TeX and view blocks first, and view help carries the page rules', async () => {
   const guide = agentGuide(true);
-  // A diagram, a chart or a formula needs no command and no help to read: the guide names the blocks chat draws.
+  // A diagram, a chart, a formula or a small page needs no command and no help to read: the guide names the blocks chat draws.
   expect(guide).toContain(CHAT_VISUALS);
-  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta with "quoted" labels', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`']) expect(CHAT_VISUALS).toContain(header);
+  for (const header of ['```mermaid', 'flowchart', 'sequenceDiagram', 'xychart-beta with "quoted" labels', 'pie', 'gantt', 'timeline', 'quadrantChart', 'sankey-beta', 'mindmap', '`$$`', 'never single `$`', '```view fence of HTML, SVG, CSS and script', 'interactive or animated', 'no fixed color']) expect(CHAT_VISUALS).toContain(header);
   expect(CHAT_VISUALS).toMatch(/when asked for a visual or when a picture explains better than text/);
-  // Then the page, for what Mermaid cannot draw: its help is read before a page, not before every visual.
+  // Then the page a block does not suit: its help is read before a page, not before every visual.
   expect(guide.indexOf(CHAT_VISUALS)).toBeLessThan(guide.indexOf(VIEW_GUIDE_LINE));
-  expect(VIEW_GUIDE_LINE).toMatch(/^Only a simulator, an animation or a custom page needs `boite view/);
+  expect(VIEW_GUIDE_LINE).toMatch(/^A larger page, or one kept as a file, needs `boite view/);
   // The logs hint stands without a skill (one that could not be written), and only while agents may read logs.
   expect(agentGuide(true, true, [])).toContain('`boite logs problems`');
   expect(agentGuide(true, false, [])).not.toContain('boite logs');
@@ -74,8 +74,9 @@ test('the session guide sends a visual to the chat\'s own Mermaid and TeX first,
   expect(agentGuide(true, false, skills)).not.toContain('boite-report-issue');
   expect(agentGuide(true, false, skills)).toContain('boite-prove-it: d2\nFile: /p');
   expect(agentGuide(true, true, skills)).toContain('; skill boite-report-issue: /r');
-  // Two lines of the session prompt, which every turn of every thread pays for.
-  expect(CHAT_VISUALS.length + VIEW_GUIDE_LINE.length).toBeLessThan(420);
+  // Two lines of the session prompt, which every turn of every thread pays for: 419 before the ```view fence, whose 130
+  // spare a small page its command and its help (549 measured 2026-10-26).
+  expect(CHAT_VISUALS.length + VIEW_GUIDE_LINE.length).toBeLessThan(550);
   const help = await cli('view', 'help');
   expect(help.code).toBe(0);
   expect(help.output).toContain(VIEW_HELP);
@@ -287,6 +288,32 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   expect(await thrown(client.call('artifacts.read', { threadId, messageId: file.id, artifactId: plain.id, view: true }))).toThrow('published with boite view');
 });
 
+test('a view block opens as a page held in memory, under the view sandbox, and only downloads from the file route', async () => {
+  const html = '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg><script>document.title = "drawn"</script>';
+  const { url } = await client.call('artifacts.viewBlock', { html });
+  expect(url).toMatch(/^\/view\/[\w-]+$/);
+  // The same HTML keeps its address, so a block drawn again loads the same page.
+  expect((await client.call('artifacts.viewBlock', { html })).url).toBe(url);
+  const response = await fetch(new URL(url, harness.url));
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  expect(response.headers.get('content-security-policy')).toBe(`sandbox allow-scripts; ${VIEW_CONTENT_POLICY}`);
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('content-disposition')).toBeNull();
+  expect(await response.text()).toBe(viewDocument(html));
+  const download = await fetch(new URL(url.replace('/view/', '/file/'), harness.url));
+  expect(download.headers.get('content-disposition')).toContain('attachment');
+  expect(existsSync(join(harness.dataDir, 'artifacts')) ? readdirSync(join(harness.dataDir, 'artifacts')) : []).toEqual([]);
+
+  expect(await thrown(client.call('artifacts.viewBlock', { html: ' \n' }))).toThrow('html must be the HTML of a view block');
+  expect(await thrown(client.call('artifacts.viewBlock', { html: 'x'.repeat(VIEW_BLOCK_MAX_BYTES + 1) }))).toThrow('html must be at most 512 KB');
+  // An agent shows a page through its answer, not through a client's method.
+  expect(await thrown(agent.call('artifacts.viewBlock', { html }))).toThrow("artifacts.viewBlock is not one of the agent's methods");
+
+  // Only the last 64 pages are held: the ticket of an older one opens nothing.
+  for (let index = 0; index < 64; index++) await client.call('artifacts.viewBlock', { html: `<p>${index}</p>` });
+  expect((await fetch(new URL(url, harness.url))).status).toBe(404);
+});
 test('a page that is not ready is refused with what to fix, and nothing is stored or shown', async () => {
   write('broken.html', page('<script src="https://cdn.example.com/chart.js"></script>\n<img src="nowhere.png">'));
   const sent = await cli('view', 'broken.html');

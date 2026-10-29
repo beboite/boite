@@ -11,6 +11,8 @@
 export const VIEW_ROUTE = '/view';
 /** The page with its local files embedded. Above it the publish is refused. */
 export const VIEW_MAX_BYTES = 4 * 1024 * 1024;
+/** The HTML of one ```` ```view ```` block of an answer, as written. Above it the block is not shown. */
+export const VIEW_BLOCK_MAX_BYTES = 512 * 1024;
 /**
  * The widths a page's content is measured at when it is published: the answer
  * column on a desktop (`--content` less its 4 px rest), then on a 390 px phone.
@@ -291,7 +293,7 @@ export function viewTitleOf(html: string): string | null {
  * One line in the guide every agent reads when its session starts, after the
  * one sending diagrams, charts and formulas to the chat's own Mermaid and TeX.
  */
-export const VIEW_GUIDE_LINE = 'Only a simulator, an animation or a custom page needs `boite view <file.html>`: read `boite view help` first.';
+export const VIEW_GUIDE_LINE = 'A larger page, or one kept as a file, needs `boite view <file.html>`: read `boite view help` first.';
 
 /** `boite view help`: everything an agent needs to write a page that looks like part of the app. */
 export const VIEW_HELP = `boite view <file.html> [--title <text>]   publish a page to draw in your answer

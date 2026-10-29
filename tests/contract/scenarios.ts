@@ -14,6 +14,7 @@ import {
   GROUP_INVITE_PREFIX,
   PROJECT_NAME_MAX,
   RpcErrorCode,
+  VIEW_BLOCK_MAX_BYTES,
   type Account,
   type Project,
   type ProviderSummary,
@@ -158,6 +159,15 @@ export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
   ...COMPOSER_SCENARIOS,
   ...CONTACT_MAIL_SCENARIOS,
+  'artifacts.viewBlock reuses HTML and refuses empty or oversized UTF-8 input': async (env) => {
+    const html = '<p>Shared view</p>';
+    const { url } = await env.call('artifacts.viewBlock', { html });
+    check(typeof url === 'string' && url.length > 0, 'a view block has no address');
+    same((await env.call('artifacts.viewBlock', { html })).url, url, 'the same HTML keeps its address');
+    check((await env.call('artifacts.viewBlock', { html: '<p>Other view</p>' })).url !== url, 'different HTML shares an address');
+    await refusedWith(env.call('artifacts.viewBlock', { html: ' \n' }), RpcErrorCode.Refused);
+    await refusedWith(env.call('artifacts.viewBlock', { html: 'é'.repeat(VIEW_BLOCK_MAX_BYTES / 2 + 1) }), RpcErrorCode.Refused);
+  },
   'policy.get reports no restrictions when no admin policy file exists': async (env) => {
     const policy = await env.call('policy.get', {});
     same([policy.present, policy.values, policy.locked, policy.problems, policy.failedClosed],

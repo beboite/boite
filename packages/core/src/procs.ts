@@ -753,6 +753,12 @@ export class ProcRegistry {
     if ((this.#live.get(threadId)?.size ?? 0) === 0) {
       this.#lastLoad.delete(threadId); this.#lastPushed.delete(threadId);
       this.#resources.forget(threadId);
+      // The load tick skips a thread with nothing live, so its last sample would
+      // stand on every client: a thread whose warm session ended still counted
+      // as an agent at work in the task manager.
+      if (!this.#journal.isClosed() && this.#journal.getThread(threadId) !== null) {
+        this.#bus.emit('thread.load', { threadId, load: { processes: 0, cpuPercent: 0, memoryBytes: 0 } });
+      }
     }
     this.#forgetWhenIdle(threadId);
     this.platform.pidRemoved(threadId, pid, !this.#shown.has(threadId));
