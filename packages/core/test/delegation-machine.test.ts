@@ -312,7 +312,10 @@ test('a failed first turn keeps the remote child tracked and the same start answ
   pc.core.threads.startTurn = () => { starts++; throw new Error('first turn refused'); };
   const params = { threadId, machine, project: 'notes', task: 'Read the notes', requestId: 'failed-first' };
   const first = await owner.call('delegation.spawn', params).catch((error: unknown) => error);
-  pc.core.threads.startTurn = startTurn;
+  pc.core.threads.startTurn = (...args) => {
+    starts++;
+    return startTurn(...args);
+  };
   expect(first).toMatchObject({ thread: { status: 'error' } });
   const child = first as DelegatedAgent;
   expect(childrenOnPc().map(thread => thread.id)).toEqual([child.thread.id]);
@@ -325,6 +328,7 @@ test('a failed first turn keeps the remote child tracked and the same start answ
   expect(await thrown(owner.call('delegation.spawn', { ...params, task: 'Different task' }))).toThrow('requestId already used for different content');
   await owner.call('delegation.send', { threadId, toThreadId: child.thread.id, text: 'Try again', requestId: 'after-failed-first' });
   await waitFor(() => prompts.has(child.thread.id));
+  expect(starts).toBe(2);
   expect(childrenOnPc()).toHaveLength(1);
 });
 

@@ -124,18 +124,22 @@ export class PluginApps {
   clock: AppClock = realClock;
   /** Test seam: why the app cannot be shown here, or null. */
   desktop: () => string | null = () => desktopProblem();
-  private entries = new Map<string, Entry>();
+  #entries = new Map<string, Entry>();
   /** Per app, the last `control` or `forget` queued: the next one waits for it. */
-  private queues = new Map<string, Promise<void>>();
-  private closing = false;
+  #queues = new Map<string, Promise<void>>();
+  #closing = false;
 
-  constructor(private host: AppHost) {}
+  #host: AppHost;
 
-  private entry(id: string): Entry {
-    let entry = this.entries.get(id);
+  constructor(host: AppHost) {
+    this.#host = host;
+  }
+
+  #entry(id: string): Entry {
+    let entry = this.#entries.get(id);
     if (entry === undefined) {
       entry = { status: 'stopped', pid: null, exitCode: null, error: null, startedAt: null, running: null, crashes: [], relaunch: null };
-      this.entries.set(id, entry);
+      this.#entries.set(id, entry);
     }
     return entry;
   }
@@ -145,20 +149,20 @@ export class PluginApps {
     return readRunChoice(join(dir, APP_FILE)).enabled;
   }
 
-  private async setEnabled(dir: string, enabled: boolean): Promise<void> {
+  async #setEnabled(dir: string, enabled: boolean): Promise<void> {
     await writeRunChoice(join(dir, APP_FILE), { enabled });
   }
 
   /** `plugins.autostart`: whether the core starts the app when it starts. Running or not, the app stays as it is. */
   setAutostart(id: string, dir: string, autostart: boolean): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       await writeRunChoice(join(dir, APP_FILE), { autostart });
-      this.host.changed(id);
+      this.#host.changed(id);
     });
   }
 
   state(id: string, dir: string): PluginAppState {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     const problem = this.desktop();
     const { enabled, autostart } = readRunChoice(join(dir, APP_FILE));
     if (problem !== null && entry?.running == null) {
@@ -170,38 +174,38 @@ export class PluginApps {
 
   /** Starts the app unless it runs already, the core is closing or this machine has no desktop. */
   launch(id: string): void {
-    if (this.closing) return;
-    const entry = this.entry(id);
+    if (this.#closing) return;
+    const entry = this.#entry(id);
     if (entry.running !== null) return;
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
-    const installed = this.host.installed(id);
+    const installed = this.#host.installed(id);
     if (installed === null) {
       // The binary went while a relaunch waited: nothing will start, so say so.
       Object.assign(entry, { status: 'stopped', error: null });
-      this.host.changed(id);
+      this.#host.changed(id);
       return;
     }
     const problem = this.desktop();
     if (problem !== null) {
       entry.status = 'unavailable';
       entry.error = problem;
-      this.host.changed(id);
+      this.#host.changed(id);
       return;
     }
     const threadId = `plugin:${id}:app`;
     let spawned: SpawnedProcess;
     try {
-      spawned = this.host.procs.spawn(threadId, installed.binary, [], {
+      spawned = this.#host.procs.spawn(threadId, installed.binary, [], {
         cwd: installed.dir,
-        env: appEnv(process.env, { coreUrl: this.host.coreUrl(), token: this.host.ownerToken(), pluginId: id }),
+        env: appEnv(process.env, { coreUrl: this.#host.coreUrl(), token: this.#host.ownerToken(), pluginId: id }),
         showWindow: true,
       });
     } catch (error) {
       entry.status = 'crashed';
       entry.error = `${id} could not start: ${messageOf(error)}`;
-      this.host.log('warn', entry.error);
-      this.host.changed(id);
+      this.#host.log('warn', entry.error);
+      this.#host.changed(id);
       return;
     }
     void drain(spawned.proc.stdout);
@@ -209,19 +213,19 @@ export class PluginApps {
     const running: Running = { threadId, pid: spawned.record.pid, exited: spawned.exited };
     Object.assign(entry, { status: 'running', pid: running.pid, error: null, startedAt: this.clock.now(), running });
     void spawned.exited.then((code) => this.exited(id, running, code));
-    this.host.changed(id);
+    this.#host.changed(id);
   }
 
   private exited(id: string, running: Running, code: number): void {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     // A stop already said what happened; a process from before it is not this one.
     if (entry === undefined || entry.running !== running) return;
     Object.assign(entry, { running: null, pid: null, startedAt: null, exitCode: code });
-    if (this.closing) return;
+    if (this.#closing) return;
     if (code === 0) {
       // The user quit from the app: it stays closed until the next core start or an explicit start.
       Object.assign(entry, { status: 'stopped', error: null, crashes: [] });
-      this.host.changed(id);
+      this.#host.changed(id);
       return;
     }
     const now = this.clock.now();
@@ -230,29 +234,29 @@ export class PluginApps {
     if (delay === undefined) {
       entry.status = 'crashed';
       entry.error = `${id} exited with code ${code} ${entry.crashes.length} times in ${CRASH_WINDOW_MS / 60_000} minutes; start it again from Settings > Plugins.`;
-      this.host.log('warn', entry.error);
+      this.#host.log('warn', entry.error);
     } else {
       entry.status = 'starting';
       entry.error = `${id} exited with code ${code}; starting it again in ${delay / 1000} s.`;
-      this.host.log('info', entry.error);
+      this.#host.log('info', entry.error);
       entry.relaunch = this.clock.setTimeout(() => { entry.relaunch = null; this.launch(id); }, delay);
     }
-    this.host.changed(id);
+    this.#host.changed(id);
   }
 
   /** Kills the app and waits for it, leaving status `stopped`. */
   async kill(id: string): Promise<void> {
-    const entry = this.entries.get(id);
+    const entry = this.#entries.get(id);
     if (entry === undefined) return;
     this.clock.clearTimeout(entry.relaunch);
     entry.relaunch = null;
     const running = entry.running;
     Object.assign(entry, { running: null, pid: null, startedAt: null, status: 'stopped', error: null });
     if (running !== null) {
-      this.host.procs.killTree(running.threadId);
+      this.#host.procs.killTree(running.threadId);
       entry.exitCode = await running.exited;
     }
-    this.host.changed(id);
+    this.#host.changed(id);
   }
 
   /**
@@ -261,25 +265,25 @@ export class PluginApps {
    * two quick clicks cannot leave `enabled` from one and the process from the other.
    */
   control(id: string, dir: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       if (action === 'stop') {
-        await this.setEnabled(dir, false);
+        await this.#setEnabled(dir, false);
         await this.kill(id);
         return;
       }
-      await this.setEnabled(dir, true);
+      await this.#setEnabled(dir, true);
       if (action === 'restart') await this.kill(id);
-      this.entry(id).crashes = [];
+      this.#entry(id).crashes = [];
       this.launch(id);
     });
   }
 
   /** Runs `work` once every earlier `control` or `forget` of the app has settled. */
-  private serial(id: string, work: () => Promise<void>): Promise<void> {
-    const run = (this.queues.get(id) ?? Promise.resolve()).then(work);
+  #serial(id: string, work: () => Promise<void>): Promise<void> {
+    const run = (this.#queues.get(id) ?? Promise.resolve()).then(work);
     const settled = run.catch(() => undefined);
-    this.queues.set(id, settled);
-    void settled.then(() => { if (this.queues.get(id) === settled) this.queues.delete(id); });
+    this.#queues.set(id, settled);
+    void settled.then(() => { if (this.#queues.get(id) === settled) this.#queues.delete(id); });
     return run;
   }
 
@@ -291,7 +295,7 @@ export class PluginApps {
   resume(id: string, dir: string, atStart = false): void {
     const choice = readRunChoice(join(dir, APP_FILE));
     if (!(atStart ? choice.autostart : choice.enabled)) return;
-    const entry = this.entry(id);
+    const entry = this.#entry(id);
     if (entry.running !== null || entry.relaunch !== null) return;
     entry.crashes = [];
     this.launch(id);
@@ -299,14 +303,14 @@ export class PluginApps {
 
   /** Before an update replaces the binary (Windows locks a running exe) or an uninstall deletes it. */
   forget(id: string): Promise<void> {
-    return this.serial(id, async () => {
+    return this.#serial(id, async () => {
       await this.kill(id);
-      this.entries.delete(id);
+      this.#entries.delete(id);
     });
   }
 
   async close(): Promise<void> {
-    this.closing = true;
-    await Promise.all([...this.entries.keys()].map((id) => this.kill(id)));
+    this.#closing = true;
+    await Promise.all([...this.#entries.keys()].map((id) => this.kill(id)));
   }
 }
