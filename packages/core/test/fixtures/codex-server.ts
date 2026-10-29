@@ -18,6 +18,9 @@
  * ending the turn.
  * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
  * `CODEX_FAKE_SLOW_MODELS=<ms>` delays the answer to `model/list`.
+ * `CODEX_FAKE_SKILLS=<json>` is what `skills/list` lists for the folder, and
+ * each skill item of `turn/start` is logged as `skill <name> <path> text=<text>`.
+ * `CODEX_FAKE_SLOW_SKILLS=<ms>` delays that answer.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -598,6 +601,13 @@ function handle(method: string, raw: unknown): unknown {
       log(`account/rateLimitResetCredit/consume ${JSON.stringify(params)}`);
       if (process.env['CODEX_FAKE_RESET_ERROR']) throw new Error(process.env['CODEX_FAKE_RESET_ERROR']);
       return { outcome: 'reset' };
+    case 'skills/list':
+      log(`skills/list ${JSON.stringify(params)}`);
+    {
+      const listed = { data: [{ cwd: process.cwd(), errors: [], skills: JSON.parse(process.env['CODEX_FAKE_SKILLS'] ?? '[]') }] };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_SKILLS'] ?? '0');
+      return slow > 0 ? new Promise((resolve) => setTimeout(() => resolve(listed), slow)) : listed;
+    }
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.
@@ -716,6 +726,7 @@ function handle(method: string, raw: unknown): unknown {
       log(`turn/start model=${textOf(params['model'])} effort=${textOf(params['effort'])}`);
       log(JSON.stringify({ serviceTier: params['serviceTier'] }));
       for (const url of imageUrlsOf(params)) log(`image ${url}`);
+      for (const skill of Array.isArray(params['input']) ? params['input'] : []) if (skill['type'] === 'skill') log(`skill ${skill['name']} ${skill['path']} text=${promptOf(params)}`);
       // After the response is written, never before: a real server answers the
       // request and streams the turn afterwards.
       setTimeout(() => {
