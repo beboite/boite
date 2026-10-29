@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -43,15 +43,10 @@ test('tgz refuses a planted ancestor link before creating a directory outside th
   expect(existsSync(join(outside, 'bin'))).toBe(false);
 });
 
-test('tgz skips symbolic and hard links without creating them or replacing OpenCode 1', async () => {
-  const v1 = join(root, 'opencode.exe');
-  writeFileSync(v1, 'OpenCode 1');
-  await unpack(tarball([{ name: 'opencode.exe', type: '2' }, { name: 'hardlink', type: '1' }, { name: file, bytes }]));
-  checkSizes(install, release);
-  expect(readFileSync(join(release, file))).toEqual(Buffer.from(bytes));
-  expect(existsSync(join(release, 'opencode.exe'))).toBe(false);
-  expect(existsSync(join(release, 'hardlink'))).toBe(false);
-  expect(readFileSync(v1, 'utf8')).toBe('OpenCode 1');
+test.each(['1', '2'])('tgz skips link type %s at the expected executable path', async type => {
+  await unpack(tarball([{ name: file, type }]));
+  expect(existsSync(join(release, file))).toBe(false);
+  expect(() => checkSizes(install, release)).toThrow(`the archive does not hold ${file}`);
 });
 
 test('tgz refuses a non-octal member size even when its header checksum is valid', async () => {
