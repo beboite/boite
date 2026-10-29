@@ -50,7 +50,8 @@ export async function overlap(core: Core, threadId: string, a: string, b: string
 async function listsAny(core: Core, threadId: string, root: string, path: string): Promise<boolean> {
   const inner = relative(root, path);
   if (!inner) return true;
-  const listed = await git(core, threadId, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', inner.split(sep).join('/')], 5000);
+  const scope = core.procs.protection.policy(threadId) ? core.procs.protection.control(threadId) : threadId;
+  const listed = await git(core, scope, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', inner.split(sep).join('/')], 5000);
   // Same fallback as `snapshot`: without git, every folder but the skipped ones is walked.
   if (listed.code !== 0) return !inner.split(sep).some(part => SKIP.has(part));
   return listed.stdout.split('\0').some(name => name && !name.endsWith('/'));
@@ -144,7 +145,9 @@ async function plainFiles(root: string): Promise<string[]> {
  */
 export async function snapshot(core: Core, threadId: string, root: string, objects: string, previous?: SnapshotCache, shared?: string): Promise<FileSnapshot> {
   if (contains(root, core.dataDir)) throw new Error('workspace contains the core data directory');
-  const listed = await git(core, threadId, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], 5000);
+  // Fixed host bookkeeping belongs to provider control, never the model's tool sandbox.
+  const scope = core.procs.protection.policy(threadId) ? core.procs.protection.control(threadId) : threadId;
+  const listed = await git(core, scope, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], 5000);
   const names = listed.code === 0 ? [...new Set(listed.stdout.split('\0').filter(Boolean))] : await plainFiles(root);
   if (names.length > FILE_LIMIT) throw new Error('workspace exceeds the 20000 file checkpoint limit');
   await mkdir(objects, { recursive: true, mode: 0o700 });

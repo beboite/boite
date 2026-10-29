@@ -15,8 +15,10 @@ let libc: Libc | undefined;
 function load(os: 'linux' | 'macos'): Libc {
   // Loaded on first use, by the first lock taken: the data lock at startup or a server update's.
   const { dlopen, FFIType, read } = import.meta.require('bun:ffi') as typeof import('bun:ffi');
-  const errno = os === 'linux' ? '__errno_location' : '__error';
-  const { symbols } = dlopen(os === 'linux' ? 'libc.so.6' : '/usr/lib/libSystem.B.dylib', {
+  const android = process.platform === 'android';
+  const errno = android ? '__errno' : os === 'linux' ? '__errno_location' : '__error';
+  const library = android ? 'libc.so' : os === 'linux' ? 'libc.so.6' : '/usr/lib/libSystem.B.dylib';
+  const { symbols } = dlopen(library, {
     flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
     [errno]: { args: [], returns: FFIType.ptr },
   });

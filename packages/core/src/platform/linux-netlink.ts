@@ -12,7 +12,7 @@ export interface TcpDiagnostics {
 
 /** Created only under an active resource lease. Socket reads never block the core. */
 export function createTcpDiagnostics(): TcpDiagnostics {
-  const library = dlopen('libc.so.6', {
+  const library = dlopen(process.platform === 'android' ? 'libc.so' : 'libc.so.6', {
     socket: { args: [FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
     sendto: { args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i64 },
     recv: { args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i64 },
