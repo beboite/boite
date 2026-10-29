@@ -132,6 +132,9 @@ export async function withQuotaProbe<T>(core: Core, account: Account, name: stri
 export type QuotaReader = (account: Account) => Promise<QuotaWindow[] | QuotaReading>;
 
 export class QuotaStore {
+  #core: Core;
+  #read: QuotaReader;
+
   readonly resets: QuotaResetStore;
   /** The subscription gateway's own accounts, listed after this machine's. */
   readonly gateway: GatewayQuotas;
@@ -141,22 +144,24 @@ export class QuotaStore {
    * Backoff and freshness: when the next read may go out. Cleared by every invalidation.
    * `readAt` is the time of the full read a session's readings were merged into.
    */
-  private cache = new Map<string, { value: AccountQuota; retryAt: number; readAt?: number }>();
+  #cache = new Map<string, { value: AccountQuota; retryAt: number; readAt?: number }>();
   /**
    * The last successful reading of each account, kept through invalidations so
    * a failed read shows it as stale instead of nothing. Forgotten only when it
    * stops belonging to the account: removed, disabled or signed in as someone else.
    */
-  private lastGood = new Map<string, { value: AccountQuota; identity: string | null }>();
-  private pending = new Map<string, Promise<AccountQuota>>();
+  #lastGood = new Map<string, { value: AccountQuota; identity: string | null }>();
+  #pending = new Map<string, Promise<AccountQuota>>();
   /** Bumped by an invalidation of every account; `accountGenerations` by one of a single account. */
-  private generation = 0;
-  private accountGenerations = new Map<string, number>();
-  private observations = new Map<string, AccountQuota>();
+  #generation = 0;
+  #accountGenerations = new Map<string, number>();
+  #observations = new Map<string, AccountQuota>();
   /** Bumped when one account's reading is dropped, so a read already in flight cannot restore it. */
-  private epochs = new Map<string, number>();
-  constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account), consume?: QuotaResetConsumer) {
-    this.gateway = new GatewayQuotas(core, undefined, () => this.core.bus.emit('quotas.updated', this.known()));
+  #epochs = new Map<string, number>();
+  constructor(core: Core, read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account), consume?: QuotaResetConsumer) {
+    this.#core = core;
+    this.#read = read;
+    this.gateway = new GatewayQuotas(core, undefined, () => this.#core.bus.emit('quotas.updated', this.#known()));
     this.alerts = new QuotaAlertStore(core, () => this.watch());
     this.resets = new QuotaResetStore(core, consume ?? (async (account, requestId, selection) => {
       if (account.providerId === 'claude') return consumeClaudeReset(core, account, requestId, selection);
@@ -164,10 +169,10 @@ export class QuotaStore {
       return withQuotaProbe(core, account, 'codex reset', (ctx) => consumeCodexReset(ctx, requestId, selection), true);
     }), async (account) => {
       // A pre-reset read must settle before the new reading can replace it.
-      await this.pending.get(account.id);
-      this.cache.delete(account.id);
-      const quota = await this.one(account, true);
-      this.core.bus.emit('quotas.updated', this.known());
+      await this.#pending.get(account.id);
+      this.#cache.delete(account.id);
+      const quota = await this.#one(account, true);
+      this.#core.bus.emit('quotas.updated', this.#known());
       return quota;
     });
     core.bus.onAny((name, payload) => {
@@ -179,7 +184,7 @@ export class QuotaStore {
       if (name === 'subscriptionProxy.quotasUpdated') this.alerts.check(this.gateway.rows(payload as ReturnType<GatewayQuotas['state']>));
       if (name === 'accounts.updated') {
         const account = payload as Account;
-        const kept = this.lastGood.get(account.id);
+        const kept = this.#lastGood.get(account.id);
         if (kept && !sameLogin(kept.identity, account.identity)) {
           this.forget((id) => id === account.id);
           this.alerts.rearm(account.id);
@@ -192,36 +197,39 @@ export class QuotaStore {
   }
   /** The next list reads again; the last good readings stay as the fallback. */
   invalidate(accountId?: string): void {
-    if (!accountId) { this.generation++; this.cache.clear(); this.observations.clear(); return; }
+    if (!accountId) { this.#generation++; this.#cache.clear(); this.#observations.clear(); return; }
     // One account changed: the others keep their readings and their reads in flight.
-    this.accountGenerations.set(accountId, (this.accountGenerations.get(accountId) ?? 0) + 1);
-    this.cache.delete(accountId);
-    this.observations.delete(accountId);
+    this.#accountGenerations.set(accountId, (this.#accountGenerations.get(accountId) ?? 0) + 1);
+    this.#cache.delete(accountId);
+    this.#observations.delete(accountId);
   }
   /** Drops the readings of these accounts, for a login that now belongs to someone else. */
   forget(matches: (accountId: string) => boolean): void {
     // A read still in flight is dropped too: its account may be switched off before it lands.
-    for (const id of new Set([...this.cache.keys(), ...this.lastGood.keys(), ...this.observations.keys(), ...this.pending.keys()])) {
+    for (const id of new Set([...this.#cache.keys(), ...this.#lastGood.keys(), ...this.#observations.keys(), ...this.#pending.keys()])) {
       if (!matches(id)) continue;
-      this.cache.delete(id);
-      this.lastGood.delete(id);
-      this.observations.delete(id);
-      this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
+      this.#cache.delete(id);
+      this.#lastGood.delete(id);
+      this.#observations.delete(id);
+      this.#epochs.set(id, (this.#epochs.get(id) ?? 0) + 1);
     }
   }
-  private base(account: Account): AccountQuota {
-    const preferences = object(this.core.journal.getSetting('quota-accounts'));
-    const provider = this.core.providers.get(account.providerId);
-    const proxied = provider && activeSubscriptionProxy(this.core, provider);
+  #base(account: Account): AccountQuota {
+    const preferences = object(this.#core.journal.getSetting('quota-accounts'));
+    const provider = this.#core.providers.get(account.providerId);
+    const proxied = provider && activeSubscriptionProxy(this.#core, provider);
     // A provider turned off is never read: its accounts stand as they would with no reader.
-    const summary = this.core.providers.summary(account.providerId);
-    const supported = !proxied && summary?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || readsAntigravitySignIn(provider));
+    const summary = this.#core.providers.summary(account.providerId);
+    const supported = !proxied && summary?.enabled !== false && (this.#isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || readsAntigravitySignIn(provider));
     const stored = preferences[account.id];
     const enabled = typeof stored === 'boolean' ? stored : true;
-    return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
-      label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
+    // The admin policy stops every read that sends the account's token: the row says why.
+    const blocked = supported && enabled && this.#core.policy.quotaReadsOff();
+    return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.#core.providers.get(account.providerId)?.name ?? account.providerId,
+      label: account.label, enabled, status: !supported ? 'unsupported' : !enabled || blocked ? 'disabled' : 'unavailable', windows: [], checkedAt: null,
+      error: blocked ? this.#core.policy.refusal('quotaReads').message : null };
   }
-  private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }
+  #isMuse(account: Account): boolean { return this.#core.providers.get(account.providerId)?.protocol === 'muse'; }
   /**
    * Only running hosts contribute observations; listing never starts a Muse turn.
    * A running Codex session reports the limits a read would spawn an app-server
@@ -231,23 +239,23 @@ export class QuotaStore {
    * list reads again.
    */
   observe(accountId: string, reading: QuotaReading, observedAt: number): void {
-    const account = this.core.accounts.list().find((row) => row.id === accountId);
+    const account = this.#core.accounts.list().find((row) => row.id === accountId);
     if (!account) return;
-    if (account.providerId === 'codex' && !this.isMuse(account)) { this.observeRead(account, reading, observedAt); return; }
-    if (!this.isMuse(account) || !this.base(account).enabled || !reading.windows.length) return;
-    const previous = this.observations.get(accountId);
+    if (account.providerId === 'codex' && !this.#isMuse(account)) { this.#observeRead(account, reading, observedAt); return; }
+    if (!this.#isMuse(account) || this.#base(account).status !== 'unavailable' || !reading.windows.length) return;
+    const previous = this.#observations.get(accountId);
     if (previous && (previous.checkedAt ?? 0) > observedAt) return;
-    const value: AccountQuota = { ...this.base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
-    this.observations.set(accountId, value);
+    const value: AccountQuota = { ...this.#base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
+    this.#observations.set(accountId, value);
     this.alerts.check([value]);
-    this.core.bus.emit('quotas.updated', this.known());
+    this.#core.bus.emit('quotas.updated', this.#known());
   }
-  private observeRead(account: Account, reading: QuotaReading, observedAt: number): void {
-    const base = this.base(account);
+  #observeRead(account: Account, reading: QuotaReading, observedAt: number): void {
+    const base = this.#base(account);
     if (base.status !== 'unavailable' || !reading.windows.length) return;
     // Alerts hear every observed window, even one that cannot stand in for a full read below.
     this.alerts.check([{ ...base, windows: reading.windows, status: 'ready', checkedAt: observedAt }]);
-    const held = this.cache.get(account.id);
+    const held = this.#cache.get(account.id);
     const previous = held?.value;
     if (!previous || previous.status !== 'ready' || held.readAt === undefined || observedAt - held.readAt > OBSERVED_MS) return;
     if (previous.checkedAt != null && previous.checkedAt > observedAt) return;
@@ -255,35 +263,35 @@ export class QuotaStore {
     const windows = [...previous.windows.map((old) => reading.windows.find((row) => row.id === old.id) ?? old), ...reading.windows.filter((row) => !previous.windows.some((old) => old.id === row.id))];
     const value: AccountQuota = { ...previous, label: base.label, providerName: base.providerName, windows, ...(reading.credits ? { credits: reading.credits } : {}),
       status: 'ready', source: 'observation', checkedAt: observedAt, error: null };
-    this.cache.set(account.id, { value, retryAt: Date.now() + 10_000, readAt: held.readAt });
-    this.lastGood.set(account.id, { value, identity: account.identity });
+    this.#cache.set(account.id, { value, retryAt: Date.now() + 10_000, readAt: held.readAt });
+    this.#lastGood.set(account.id, { value, identity: account.identity });
     const same = previous?.status === 'ready' && JSON.stringify([previous.windows, previous.resetCredits, previous.credits]) === JSON.stringify([value.windows, value.resetCredits, value.credits]);
-    if (!same) this.core.bus.emit('quotas.updated', this.known());
+    if (!same) this.#core.bus.emit('quotas.updated', this.#known());
   }
-  private kept(account: Account): AccountQuota | undefined {
-    const kept = this.lastGood.get(account.id);
+  #kept(account: Account): AccountQuota | undefined {
+    const kept = this.#lastGood.get(account.id);
     return kept && sameLogin(kept.identity, account.identity) ? kept.value : undefined;
   }
   /** Every row as known now, the gateway's last answer included, for an update event. */
-  private known(): AccountQuota[] {
-    if (this.gatewayOwnsLimits()) return this.decorate(this.gateway.rows());
-    return this.decorate([...this.core.accounts.list().map((row) => this.snapshot(row)), ...this.gateway.rows()]);
+  #known(): AccountQuota[] {
+    if (this.#gatewayOwnsLimits()) return this.#decorate(this.gateway.rows());
+    return this.#decorate([...this.#core.accounts.list().map((row) => this.#snapshot(row)), ...this.gateway.rows()]);
   }
-  private decorate(rows: AccountQuota[]): AccountQuota[] { return rows.map((row) => this.alerts.decorate(row)); }
+  #decorate(rows: AccountQuota[]): AccountQuota[] { return rows.map((row) => this.alerts.decorate(row)); }
   /**
    * A Douane in use answers for the accounts that serve this machine's agents.
    * The machine's own logins would only be noise beside them, and reading them
    * would start their agents for nothing.
    */
-  private gatewayOwnsLimits(): boolean {
-    const proxy = this.core.settings.get().subscriptionProxy;
+  #gatewayOwnsLimits(): boolean {
+    const proxy = this.#core.settings.get().subscriptionProxy;
     return proxy?.enabled === true && proxy.kind === 'douane';
   }
   /** What is known without reading: the cached row, else the last good reading, else nothing yet. */
-  private snapshot(account: Account): AccountQuota {
-    const base = this.base(account);
+  #snapshot(account: Account): AccountQuota {
+    const base = this.#base(account);
     if (base.status !== 'unavailable') return base;
-    const known = this.observations.get(account.id) ?? this.cache.get(account.id)?.value ?? this.kept(account);
+    const known = this.#observations.get(account.id) ?? this.#cache.get(account.id)?.value ?? this.#kept(account);
     return known ? { ...known, label: base.label, providerName: base.providerName } : base;
   }
   /** `progress` hears each row as it lands, for the caller that passed `requestId` alone. */
@@ -293,12 +301,12 @@ export class QuotaStore {
     }
     // Providers run independently; at most two accounts per provider per list.
     // Concurrent lists still share the account's pending read and cache.
-    if (this.gatewayOwnsLimits()) {
-      const rows = this.decorate(this.gateway.rows(await this.gateway.read(refresh)));
+    if (this.#gatewayOwnsLimits()) {
+      const rows = this.#decorate(this.gateway.rows(await this.gateway.read(refresh)));
       if (requestId && progress) for (const quota of rows) progress(quota);
       return rows;
     }
-    const rows = this.core.accounts.list();
+    const rows = this.#core.accounts.list();
     const result = new Array<AccountQuota>(rows.length);
     const groups = new Map<string, { account: Account; index: number }[]>();
     rows.forEach((account, index) => {
@@ -308,7 +316,7 @@ export class QuotaStore {
     });
     // The gateway answers for its own accounts, alongside the providers.
     const gateway = this.gateway.read(refresh).then((state) => {
-      const rows = this.decorate(this.gateway.rows(state));
+      const rows = this.#decorate(this.gateway.rows(state));
       if (requestId && progress) for (const quota of rows) progress(quota);
       return rows;
     });
@@ -317,13 +325,14 @@ export class QuotaStore {
       await Promise.all(Array.from({ length: Math.min(2, group.length) }, async () => {
         while (next < group.length) {
           const { account, index } = group[next++]!;
-          const quota = this.alerts.decorate(await this.one(account, refresh));
+          const quota = this.alerts.decorate(await this.#one(account, refresh));
           result[index] = quota;
           if (requestId && progress) progress(quota);
         }
       }));
     }));
-    return [...result.map((row) => { const seen = this.observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
+    // An observation kept from before the row was turned off, by the user or the policy, does not stand in for it.
+    return [...result.map((row) => { const seen = row.status === 'disabled' || row.status === 'unsupported' ? undefined : this.#observations.get(row.accountId); return seen ? this.alerts.decorate(seen) : row; }), ...await gateway];
   }
   /**
    * One account's reading, through the same cache, backoff and shared read as
@@ -331,74 +340,81 @@ export class QuotaStore {
    * good reading, marked unavailable.
    */
   async readAccount(accountId: string, refresh = false): Promise<AccountQuota | null> {
-    const account = this.core.accounts.list().find((row) => row.id === accountId);
+    const account = this.#core.accounts.list().find((row) => row.id === accountId);
     if (account === undefined) return null;
-    return this.alerts.decorate(this.observations.get(accountId) ?? await this.one(account, refresh));
+    // `one` answers a Muse observation itself, and only while the row is on.
+    return this.alerts.decorate(await this.#one(account, refresh));
   }
-  private async one(account: Account, refresh: boolean): Promise<AccountQuota> {
-    const base = this.base(account);
+  async #one(account: Account, refresh: boolean): Promise<AccountQuota> {
+    const base = this.#base(account);
     if (base.status !== 'unavailable') return base;
-    if (this.isMuse(account)) return this.observations.get(account.id) ?? base;
-    const cached = this.cache.get(account.id);
+    if (this.#isMuse(account)) return this.#observations.get(account.id) ?? base;
+    const cached = this.#cache.get(account.id);
     // Refresh cannot bypass failure backoff or turn a hover into a request flood.
     if (cached && (Date.now() < cached.retryAt || (!refresh && Date.now() - (cached.value.checkedAt ?? 0) < CACHE_MS))) return cached.value;
-    const existing = this.pending.get(account.id);
-    if (existing) return existing;
-    const generation = this.generation;
-    const accountGeneration = this.accountGenerations.get(account.id) ?? 0;
-    const epoch = this.epochs.get(account.id) ?? 0;
+    const existing = this.#pending.get(account.id);
+    if (existing) return this.#settled(account, existing);
+    const generation = this.#generation;
+    const accountGeneration = this.#accountGenerations.get(account.id) ?? 0;
+    const epoch = this.#epochs.get(account.id) ?? 0;
     const running = (async () => {
       let value: AccountQuota;
       const startedAt = Date.now();
       try {
-        const raw = await this.read(account);
+        const raw = await this.#read(account);
         const reading = Array.isArray(raw) ? { windows: raw } : raw;
         if (!hasQuota(reading)) throw new Error('No subscription usage limits were returned. Retrying in five minutes.');
         value = { ...base, ...reading, status: 'ready', checkedAt: Date.now(), error: null };
-        if (epoch === (this.epochs.get(account.id) ?? 0)) {
-          this.lastGood.set(account.id, { value, identity: account.identity });
+        if (epoch === (this.#epochs.get(account.id) ?? 0)) {
+          this.#lastGood.set(account.id, { value, identity: account.identity });
           // Still switched on and still this login: the reading is the account's, taken when the read began.
-          if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && this.base(account).status === 'unavailable') {
+          if (generation === this.#generation && accountGeneration === (this.#accountGenerations.get(account.id) ?? 0) && this.#base(account).status === 'unavailable') {
             this.alerts.check([value], Date.now(), startedAt);
           }
         }
       } catch (error) {
-        const kept = epoch === (this.epochs.get(account.id) ?? 0) ? this.kept(account) : undefined;
+        const kept = epoch === (this.#epochs.get(account.id) ?? 0) ? this.#kept(account) : undefined;
         value = { ...(kept ?? base), label: base.label, providerName: base.providerName, status: 'unavailable', checkedAt: kept?.checkedAt ?? null,
           error: error instanceof Error ? error.message : 'Quota request failed.' };
       }
-      if (generation === this.generation && accountGeneration === (this.accountGenerations.get(account.id) ?? 0) && epoch === (this.epochs.get(account.id) ?? 0)) this.cache.set(account.id, value.status === 'ready' ? { value, retryAt: Date.now() + 10_000, readAt: value.checkedAt! } : { value, retryAt: Date.now() + RETRY_MS });
+      if (generation === this.#generation && accountGeneration === (this.#accountGenerations.get(account.id) ?? 0) && epoch === (this.#epochs.get(account.id) ?? 0)) this.#cache.set(account.id, value.status === 'ready' ? { value, retryAt: Date.now() + 10_000, readAt: value.checkedAt! } : { value, retryAt: Date.now() + RETRY_MS });
       return value;
     })();
-    this.pending.set(account.id, running);
-    try { return await running; } finally { this.pending.delete(account.id); }
+    this.#pending.set(account.id, running);
+    try { return await this.#settled(account, running); } finally { this.#pending.delete(account.id); }
+  }
+  /** A read still running when its row was turned off, by the user or the policy, answers the row as it is now. */
+  async #settled(account: Account, read: Promise<AccountQuota>): Promise<AccountQuota> {
+    const value = await read;
+    const now = this.#base(account);
+    return now.status === 'unavailable' ? value : now;
   }
   async configure(accountId: string, enabled: boolean): Promise<AccountQuota[]> {
-    this.core.accounts.require(accountId);
+    this.#core.accounts.require(accountId);
     if (typeof enabled !== 'boolean') throw invalidParams('quotas.configure enabled must be a boolean');
-    const next = { ...object(this.core.journal.getSetting('quota-accounts')), [accountId]: enabled };
-    this.core.journal.append({ type: 'quotas.configured', threadId: null, version: 1, payload: { accountId, enabled } }, () => this.core.journal.setSetting('quota-accounts', next));
+    const next = { ...object(this.#core.journal.getSetting('quota-accounts')), [accountId]: enabled };
+    this.#core.journal.append({ type: 'quotas.configured', threadId: null, version: 1, payload: { accountId, enabled } }, () => this.#core.journal.setSetting('quota-accounts', next));
     // Only this account changes: every other one keeps the reading it had.
-    if (enabled) { this.cache.delete(accountId); this.observations.delete(accountId); }
+    if (enabled) { this.#cache.delete(accountId); this.#observations.delete(accountId); }
     else this.forget((id) => id === accountId);
-    const result = this.known();
-    this.core.bus.emit('quotas.updated', result);
+    const result = this.#known();
+    this.#core.bus.emit('quotas.updated', result);
     return result;
   }
   /** Sets when one period of an account, or of a gateway entry, notifies. */
   alert(accountId: string, period: QuotaAlertPeriod, thresholds: unknown): AccountQuota[] {
     if (typeof accountId !== 'string' || !accountId) throw invalidParams('quotas.alert accountId must be a non-empty string', { field: 'accountId' });
-    const row = this.known().find((quota) => quota.accountId === accountId);
+    const row = this.#known().find((quota) => quota.accountId === accountId);
     // Turning one off always goes through: a row that left the list must not keep its alert, and the poll, alive.
     if (!row && !(Array.isArray(thresholds) && thresholds.length === 0 && this.alerts.all()[accountId])) {
       if (accountId.startsWith('proxy:')) throw invalidParams(`quotas.alert accountId ${accountId} is not an entry the gateway reports now`, { field: 'accountId', expected: 'an accountId quotas.list returns' });
-      this.core.accounts.require(accountId);
+      this.#core.accounts.require(accountId);
       // A Douane in use lists only its own entries: this machine's logins have no limits row to alert on.
       throw invalidParams(`quotas.alert accountId ${accountId} has no row in quotas.list now`, { field: 'accountId', expected: 'an accountId quotas.list returns' });
     }
     this.alerts.set(accountId, period, thresholds, row);
-    const result = this.known();
-    this.core.bus.emit('quotas.updated', result);
+    const result = this.#known();
+    this.#core.bus.emit('quotas.updated', result);
     return result;
   }
   /**
@@ -409,8 +425,8 @@ export class QuotaStore {
   private async watch(): Promise<void> {
     const watched = this.alerts.watched();
     if (watched.some((id) => id.startsWith('proxy:'))) await this.gateway.read(false);
-    if (this.gatewayOwnsLimits()) return;
-    const own = new Set(this.core.accounts.list().map((account) => account.id));
+    if (this.#gatewayOwnsLimits()) return;
+    const own = new Set(this.#core.accounts.list().map((account) => account.id));
     for (const id of watched) if (own.has(id)) await this.readAccount(id);
   }
 }

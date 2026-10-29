@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import type { TelemetryState } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -9,6 +11,8 @@
   let consent = $state<TelemetryState | null>(null);
   let error = $state('');
   let busy = $state(false);
+  /** The admin policy's ceiling: `off` locks both switches, `basic` the enhanced one. */
+  const ceiling = $derived(lockedBy(store.policy, 'analytics') ? store.policy?.values.analytics ?? null : null);
   $effect(() => {
     const client = store.client;
     if (!client || !store.owner || store.connection !== 'ready') return;
@@ -53,19 +57,19 @@
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
       {#if consent.configured}<p class="hint" data-testid="telemetry-choice-notice">{strings.telemetry.choiceNotice}</p>{/if}
       <label for="{uid}-basic" class="switch-row">
-        <span class="text ui-label-box"><span class="ui-label" id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
-        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} />{#if ceiling === 'off'}<PolicyLock {store} keys={['analytics']} />{/if}</span>
+        <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" data-testid="telemetry-basic" checked={consent.mode !== 'off'} disabled={busy || ceiling === 'off'}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
       <label for="{uid}-enhanced" class="switch-row">
-        <span class="text ui-label-box"><span class="ui-label" id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /></span>
-        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /><PolicyLock {store} keys={['analytics']} /></span>
+        <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" type="checkbox" role="switch" data-testid="telemetry-enhanced" checked={consent.mode === 'enhanced'} disabled={busy || ceiling !== null}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>
       {#if consent.pendingDeletion}<p class="hint">{strings.telemetry.pending}</p>{/if}
       <div class="actions">
         {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}><span class="ui-label">{strings.telemetry.export}</span></button>{/if}
-        {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}><span class="ui-label">{strings.telemetry.retry}</span></button>{/if}
+        {#if consent.pendingDeletion}<button disabled={busy || ceiling === 'off'} onclick={() => void dataAction('retryForget')}><span class="ui-label">{strings.telemetry.retry}</span></button>{/if}
       </div>
     {/if}
     {#if error}<p role="alert">{error}</p>{/if}

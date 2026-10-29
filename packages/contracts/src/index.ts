@@ -51,6 +51,7 @@ import type { TodosRpcEvents, TodosRpcMethods } from './todos';
 import type { TraceRpcEvents, TraceRpcMethods } from './trace';
 import type { TurnsRpcEvents, TurnsRpcMethods } from './turns';
 import type { UsageRpcMethods } from './usage';
+import type { PolicyRpcEvents, PolicyRpcMethods } from './policy';
 export * from './ids';
 export * from './providers';
 export * from './local-acp';
@@ -87,6 +88,7 @@ export * from './hooks';
 export * from './terminals';
 export * from './shared-projects';
 export * from './wire';
+export * from './policy';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -151,7 +153,8 @@ export interface RpcMethods extends
   BrainRpcMethods,
   HooksRpcMethods,
   SharedProjectsRpcMethods,
-  TerminalsRpcMethods {}
+  TerminalsRpcMethods,
+  PolicyRpcMethods {}
 
 export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
@@ -190,12 +193,13 @@ export interface RpcEvents extends
   BrainRpcEvents,
   HooksRpcEvents,
   SharedProjectsRpcEvents,
-  TerminalsRpcEvents {}
+  TerminalsRpcEvents,
+  PolicyRpcEvents {}
 
 export type RpcEventName = keyof RpcEvents;
 
 export { attachmentError, answerAttachmentError, decodedBytes } from './attachment-validation.ts';
-export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, CACHE_KEEPALIVE_HOURS, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type CacheKeepalive, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, AUTO_GOAL_MIN_CHARS, BROWSER_ORIGINS_MAX, CACHE_KEEPALIVE_HOURS, MODEL_FAVORITES_MAX, checkSettingsPatch, compareModelFavorites, keepLaterFavorites, type AutoCompact, type AutoCompactMoment, type CacheKeepalive, type SettingsPatchCheck } from './settings-validation.ts';
 export { checkRpcParams, type RpcParamsCheck } from './rpc-params.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel, newestModel } from './title-models.ts';
 export { GOAL_TRACKER_DEFAULTS, GOAL_CHECKLIST_MAX_ITEMS, GOAL_CHECKLIST_SOURCE_MAX, GOAL_CHECKLIST_TEXT_MAX, defaultTrackerModel, trackerEffort, type GoalTrackerRule } from './goal-tracker.ts';

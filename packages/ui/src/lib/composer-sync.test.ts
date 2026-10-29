@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RpcErrorCode, type ComposerRecord, type RpcMethodName, type Thread } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { FakeComposerState } from './fake-client/composer';
-import { setExperiment } from './experiments';
 import { Store } from './store.svelte';
+import { bytes } from './format';
+import { fill, strings } from './strings';
 import { takeFiles } from './composer-attachments';
 import { checkpoint, undoStep } from './composer-history';
 import { isLoading } from './draft-attachments';
@@ -484,6 +485,64 @@ test('a put the core keeps failing is tried again after a pause, not on every ti
   expect(putsOf(desk, 't-trace')).toHaveLength(2);
 }, 15_000);
 
+test('a box the core refuses as over its attachment limit says so and keeps every word and picture on the device', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  const text = 'a prompt that describes every problem at once. '.repeat(1300);
+  desk.store.editComposerText('t-trace', text);
+  // What cancelling a queued draft leaves: its queue merged into one box, past what one message may carry.
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', text + 'and the end');
+  await vi.waitFor(() => expect(desk.store.error).toBe(fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) })));
+  const box = desk.store.composerStates['t-trace']!;
+  expect(box.text).toBe(text + 'and the end');
+  expect(box.attachments).toHaveLength(ATTACHMENTS_PER_TURN + 1);
+  expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value ?? null).toBeNull();
+  // Once it fits again, it reaches the core and the warning it raised goes.
+  box.attachments = box.attachments.slice(0, ATTACHMENTS_PER_TURN);
+  desk.store.editComposerText('t-trace', text + 'and the end, trimmed');
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.attachments).toHaveLength(ATTACHMENTS_PER_TURN));
+  expect(desk.store.error).toBeNull();
+});
+
+test('a box over the limit, then emptied back to what the core holds, drops its warning with no put to make', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures');
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures.');
+  await vi.waitFor(() => expect(desk.store.error).toBe(fill(strings.errors.draftOverLimit, { count: String(ATTACHMENTS_PER_TURN), max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) })));
+  const puts = putsOf(desk, 't-trace').length;
+  // Cleared: the core never held this box, so the empty one matches it and nothing goes up.
+  desk.store.composerStates['t-trace']!.attachments = [];
+  desk.store.editComposerText('t-trace', '');
+  await vi.waitFor(() => expect(desk.store.error).toBeNull());
+  expect(putsOf(desk, 't-trace')).toHaveLength(puts);
+});
+
+test('a box trimmed while the core was refusing it as over the limit goes up without another edit', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let held = 0;
+  desk.calls.mockImplementation(async (method, params) => {
+    if (method === 'composer.put' && held++ === 0) await gate;
+    return desk.original(method, params);
+  });
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures');
+  desk.store.composerStates['t-trace']!.attachments = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) =>
+    ({ kind: 'image' as const, mimeType: 'image/png', name: `shot-${index}.png`, data: btoa(`picture ${index}`) }));
+  desk.store.editComposerText('t-trace', 'one prompt, too many pictures.');
+  await vi.waitFor(() => expect(held).toBe(1));
+  // The user takes a picture out while that put is still on its way: the edit's own flush finds the key busy.
+  const box = desk.store.composerStates['t-trace']!;
+  box.attachments = box.attachments.slice(0, ATTACHMENTS_PER_TURN);
+  desk.store.editComposerText('t-trace', 'one prompt, the right number of pictures.');
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  release();
+  await vi.waitFor(async () => expect((await recordOf(desk.client, 'inputs', 't-trace'))?.value?.input.attachments).toHaveLength(ATTACHMENTS_PER_TURN), { timeout: 4000 });
+});
+
 test('the open draft follows the worktree switch and model another device chose for it', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
@@ -724,17 +783,15 @@ test('words and file names that read like a local file id still reach the core, 
     text: 'Box "local:cache" note', attachments: [{ name: file.name }], queued: [{ text: 'Queued "local:cache" note' }] }));
 });
 
-test('a prompt queued offline runs with the experiments it was queued with, after a restart that turned them off', async () => {
+test('a /goal2 queued offline runs as a reviewed goal after a restart', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   let phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
-  setExperiment('goal2', true);
   phone.client.drop();
   await phone.client.settled();
   queue(phone.store, 't-trace', '/goal2 Ship the release');
   stores.splice(stores.indexOf(phone.store), 1);
   phone.store.detach();
   phone.client.close();
-  setExperiment('goal2', false);
   phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
   await vi.waitFor(() => expect(phone.store.composerStates['t-trace']?.queued).toMatchObject([{ text: '/goal2 Ship the release' }]));
   await phone.store.sendQueuedNow('t-trace');

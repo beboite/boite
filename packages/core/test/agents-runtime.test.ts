@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { AgentRoutine } from '@boite/contracts';
+import type { AgentRoutine, Turn } from '@boite/contracts';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
 import { notifiesOnFinish } from '@boite/contracts';
 import { AgentRuntime, EVENT_PROMPT_MAX, eventPrompt, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
+import { agentSpend, rootThread } from '../src/agents/spend.ts';
 import { agentGuide, BOT_GUIDE, OWN_SETTINGS } from '../src/agent-guide.ts';
 import { DELEGATION_WORDS } from '../src/delegation/guide.ts';
 import { agentContext } from '../src/agents/context.ts';
@@ -199,6 +200,62 @@ test('past its daily budget a wake is skipped with one line, and the user\'s mes
   await waitFor(() => turnsOf(h, threadId).length === before + 1 && settled(h, threadId));
   expect(turnsOf(h, threadId).at(-1)!.status).toBe('done');
   expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBe(1);
+});
+
+test('a Codex bot\'s budget prices turns that report no cost at the model\'s rates and counts its subagents\' turns', async () => {
+  const driver = scripted(() => ({ text: 'Done.' })); restore = driver.restore;
+  const { agent, threadId } = await makeAgent(h, client);
+  const runtime = await client.call('agents.runtime.get', { agentId: agent.id });
+  await client.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: h.core.workforce.records.get('profile', agent.id).revision, config: { ...runtime, dailyBudgetUsd: 1 } });
+  const bot = h.core.threads.require(threadId);
+  const child = { ...bot, id: 'thr_budget_child', title: 'Subagent', parentThreadId: bot.id, agentSessionId: undefined };
+  h.core.journal.putThread(child);
+  // Codex reports tokens and no cost. At gpt-6.1-sol rates: 150k uncached
+  // input $0.30, 100k cache reads $0.01, 29k output $0.29.
+  const now = Date.now();
+  const spend = (id: string, thread: typeof bot): Turn => {
+    const turn: Turn = { id, threadId: thread.id, status: 'done', queuedAt: now - 2000, startedAt: now - 1900, finishedAt: now - 1000, error: null,
+      usage: { inputTokens: 150_000, outputTokens: 29_000, cacheReadTokens: 100_000, cacheWriteTokens: 0, costUsdEquivalent: null, buckets: 1 },
+      execution: { providerId: 'codex', accountId: thread.accountId, model: 'gpt-6.1-sol', effort: null, speed: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } };
+    h.core.journal.putTurn(turn);
+    return turn;
+  };
+  spend('trn_budget_own', bot);
+  spend('trn_budget_child', child);
+  h.core.bus.emit('thread.updated', bot);
+  const saved = await routine(agent.id);
+  due(saved.id);
+  await waitFor(() => read(saved.id).lastOutcome !== undefined && read(saved.id).lastOutcome !== null);
+  expect(read(saved.id).lastOutcome).toBe('skipped');
+  expect(lines(threadId).filter(text => text.startsWith('Skipped Routine') && text.includes("today's turns cost $1.20, past the daily budget of $1.00"))).toHaveLength(1);
+  expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.2, 6);
+  // A subagent's finished turn tells clients the bot's status changed, with the new total.
+  // The skip's throttled agents.changed goes out first, so the subagent's turn emits at once and alone.
+  const throttle = h.core.workforce as unknown as { timer: unknown; last: number };
+  await waitFor(() => throttle.timer === null && Date.now() >= throttle.last + 1_000, 3000);
+  let changes = 0;
+  const off = h.core.bus.onAny(name => { if (name === 'agents.changed') changes += 1; });
+  h.core.bus.emit('turn.finished', spend('trn_budget_child_2', child));
+  off();
+  expect(changes).toBe(1);
+  expect((await client.call('agents.snapshot', {})).status[0]!.today.costUsd).toBeCloseTo(1.8, 6);
+});
+
+test('a bot\'s spend reaches a grandchild, falls back to the reported cost off the price list, and leaves out other threads and earlier turns', async () => {
+  const { threadId } = await makeAgent(h, client);
+  const bot = h.core.threads.require(threadId);
+  const child = { ...bot, id: 'thr_spend_child', parentThreadId: bot.id, agentSessionId: undefined };
+  const grandchild = { ...child, id: 'thr_spend_grandchild', parentThreadId: child.id };
+  const stranger = { ...child, id: 'thr_spend_stranger', parentThreadId: undefined };
+  for (const thread of [child, grandchild, stranger]) h.core.journal.putThread(thread);
+  // After the introduction turn.
+  const since = Date.now() + 1;
+  const spend = (id: string, threadId: string, costUsd: number, queuedAt = since + 1000) => h.core.journal.putTurn({ id, threadId, status: 'done', queuedAt, startedAt: queuedAt + 1, finishedAt: queuedAt + 2, error: null, usage: costing(costUsd) });
+  spend('trn_spend_grandchild', grandchild.id, 0.25);
+  spend('trn_spend_stranger', stranger.id, 4);
+  spend('trn_spend_earlier', child.id, 8, since - 1000);
+  expect(agentSpend(h.core, bot.id, since)).toEqual({ costUsd: 0.25, unpriced: 0 });
+  expect(rootThread(h.core, grandchild.id)).toBe(bot.id);
 });
 
 test('a turn the core starts by itself meets the pause and the budget: held with one line, then run; the user\'s messages and a resume are not held', async () => {

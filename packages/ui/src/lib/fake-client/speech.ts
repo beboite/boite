@@ -2,6 +2,7 @@ import { secureId } from '../secure-id';
 /** Voice input: its configuration, the local models, their downloads and a transcription. */
 import { RpcErrorCode, SPEECH_CATALOGUE, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechModel, type SpeechStatus } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { policyRefusal } from './policy';
 import type { FakeContext, FakeMethods } from './context';
 
 /** The catalogue as the fake core first holds it, with the default model installed. */
@@ -63,6 +64,10 @@ export function speechMethods(ctx: FakeContext) {
     'speech.status': async () => snapshot(ctx),
     'speech.configure': async (params) => {
       const p = params;
+      // As the core: the admin policy's dictation refuses every engine, or the cloud ones.
+      const dictation = ctx.policy.present ? ctx.policy.values.dictation : undefined;
+      if (dictation === 'off') throw policyRefusal(ctx, 'dictation');
+      if (dictation === 'local' && p.engine === 'api') throw policyRefusal(ctx, 'dictation', 'cloud engines; only local is allowed');
       const model = p.model ?? ctx.speech.model;
       if (!isSpeechModelId(model)) throw invalid(`speech.model must be one of ${SPEECH_CATALOGUE.map(model => model.id).join(', ')} or custom-<12 hex>`);
       if (model !== ctx.speech.model && !ctx.speechStatus.models.some(entry => entry.id === model)) throw invalid(`speech.model: ${model} is not a model on this core; add it from a link first`);
@@ -169,7 +174,10 @@ export function speechMethods(ctx: FakeContext) {
     },
     'speech.transcribe': async (params) => {
       const p = params;
+      const dictation = ctx.policy.present ? ctx.policy.values.dictation : undefined;
+      if (dictation === 'off') throw policyRefusal(ctx, 'dictation');
       if (!ctx.speechStatus.ready) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Configure Voice first' });
+      if (dictation === 'local' && ctx.speech.engine === 'api') throw policyRefusal(ctx, 'dictation', `the ${ctx.speech.apiProvider} cloud engine; only local is allowed`);
       if (p.revision !== ctx.speechStatus.revision) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Voice settings changed during recording; record again with the selected engine' });
       if (ctx.speechRequests.size) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Another transcription is running; try again shortly' });
       const request = Symbol(p.requestId);

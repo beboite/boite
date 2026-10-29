@@ -1,15 +1,19 @@
 import { untrack } from 'svelte';
-import { APP_LANGUAGES, EXPERIMENT_IDS, previewReferencesError, type Attachment, type PreviewReference, type SentFrom } from '@boite/contracts';
+import { APP_LANGUAGES, ATTACHMENTS_TOTAL_MAX_BYTES, EXPERIMENT_IDS, previewReferencesError, type Attachment, type PreviewReference, type SentFrom } from '@boite/contracts';
 import type { Choice, Draft } from '../store.svelte';
 import type { Composer, OutboxRequest } from './composer.svelte';
+import { DRAFT_STASH_KEY } from '../prefs';
 import type { StoreContext } from './context';
-import { strings } from '../strings';
+import { fill, strings } from '../strings';
+import { bytes } from '../format';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
 import { followRead, isLoading, loadedFrom, readyAttachments, unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 import { keepSource } from '../attachments';
 import { settleIn } from '../composer-images';
 import { replaceInHistory } from '../composer-history';
 import { secureId } from '../secure-id';
+import { fitHeld } from '../turn-fit';
+import { attachedBytes } from '../attachments';
 
 export type Input = Composer['composerStates'][string];
 /**
@@ -347,6 +351,8 @@ export class Drafts {
    * after what it holds, so nothing typed is lost. A start already on its way,
    * or asked once (`start`), is not taken back: sent again under a new id, the
    * same words could make a second conversation beside one the core made.
+   * Their pictures together can pass the turn's byte total: they are fitted
+   * to it (`lib/turn-fit.ts`).
    */
   unqueue(id: string): void {
     const s = this.ctx.store;
@@ -359,6 +365,12 @@ export class Drafts {
     if (references.length) input.previewReferences = references;
     input.paused = false;
     this.persist();
+    if (attachedBytes(input.attachments) <= ATTACHMENTS_TOTAL_MAX_BYTES) return;
+    // Past the floor, or failed, the box says so like a paste does (`lib/composer-editing.ts`); either way it is saved.
+    void fitHeld(input).catch(() => false).then((fits) => {
+      this.persist();
+      if (!fits) s.error = fill(strings.composer.attachTotalOver, { max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+    });
   }
 
   /**
@@ -493,7 +505,8 @@ export class Drafts {
     if (!this.#key) return;
     try {
       // Nothing typed into an incognito conversation or its draft reaches the device's storage.
-      const input = source && hasContent(source.input) && !this.#incognito(source) ? savedInput(source.input, this.#assetId) : null;
+      const kept = source && !this.#incognito(source) ? withInFlight(source.input, this.#inFlight(source)) : null;
+      const input = kept && hasContent(kept) ? savedInput(kept, this.#assetId) : null;
       const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input, parked: source.parked ?? 0, choice: source.choice ? $state.snapshot(source.choice) : null } : input : null;
       const stored = this.#storedAssetIds;
       // Until a strict durable write succeeds, keep inline bytes in the atomic
@@ -513,9 +526,16 @@ export class Drafts {
         if (!source || !this.#incognito(source)) this.ctx.sync.touched(entry.section, entry.id, value === null);
         // Each atomic entry includes its own revision; null is a deletion tombstone.
         // The old complete v1 backup remains available throughout migration.
-        try { localStorage.setItem(`${this.#key}:entry:${key}`, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
-        // Without a journal, or while a late one is still opening, the backup is the only copy.
-        catch { if (typeof indexedDB === 'undefined' || (this.#hydrated && !this.#durableReady)) this.ctx.store.error = strings.errors.draftStorage; }
+        const line = `${this.#key}:entry:${key}`;
+        try { localStorage.setItem(line, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
+        catch {
+          // Pictures past the quota wait for the journal as bare IDs, but the
+          // words go in at once: a crash before the journal lands keeps them,
+          // and each picture comes back as one the journal must still give.
+          try { localStorage.setItem(line, `{"updatedAt":${updatedAt},"value":${JSON.stringify(value, withoutBytes)}}`); } catch { /* The older line stays. */ }
+          // Without a journal, or while a late one is still opening, the backup is the only copy.
+          if (typeof indexedDB === 'undefined' || (this.#hydrated && !this.#durableReady)) this.ctx.store.error = strings.errors.draftStorage;
+        }
         this.#changed = true;
         if (!this.#collecting) this.#checkpoint();
       });
@@ -578,6 +598,13 @@ export class Drafts {
     if (this.#pending) this.#schedule();
   }
 
+  /** The prompt that left this composer's box and is still on its way to the core (`Composer.inFlight`). */
+  #inFlight(source: Source): ReturnType<Composer['inFlight']> {
+    if (source.section === 'inputs') return this.ctx.composer.inFlight(source.id);
+    const open = this.ctx.store.draft;
+    return open && draftKey(open) === source.id ? this.ctx.composer.inFlight(DRAFT_STASH_KEY) : null;
+  }
+
   #incognito(source: Source): boolean {
     if (source.section === 'drafts') return source.draft?.incognito === true;
     const s = this.ctx.store;
@@ -622,6 +649,21 @@ export class Drafts {
       } finally { this.#writingAssets.clear(); this.#pruneAssets(); }
     }
   }
+}
+
+/**
+ * What the journal keeps of a composer whose prompt is on its way: an outbox
+ * prompt at the head of its queue; one with no request to ask again under in
+ * the empty box, still the edit it was, else held at the head of the queue,
+ * as a refused prompt comes back (`returnPrompt`).
+ */
+function withInFlight(input: Input, held: ReturnType<Composer['inFlight']>): Input {
+  if (!held) return input;
+  const { editing, ...prompt } = held;
+  if (!prompt.request && !hasContent({ ...input, queued: [] })) {
+    return { ...input, text: prompt.text, attachments: prompt.attachments, previewReferences: prompt.previewReferences ?? [], editing: editing ?? null };
+  }
+  return { ...input, queued: [prompt, ...input.queued.filter(item => item.id !== prompt.id)] };
 }
 
 /** A draft's saved choice, or null for a default or a value that is not one. */
@@ -701,6 +743,11 @@ function attachments(value: unknown, assets: Map<string, string>): Attachment[] 
       ...(data === undefined ? { pendingDraftAsset: item.assetId } : {}) };
     return [attachment];
   });
+}
+
+/** A JSON replacer that keeps each saved file's asset ID and drops its bytes. */
+function withoutBytes(this: { assetId?: unknown }, field: string, value: unknown): unknown {
+  return field === 'data' && typeof this.assetId === 'string' ? undefined : value;
 }
 
 const pendingFiles = (input: Input) => [...input.attachments, ...input.queued.flatMap(item => item.attachments)].filter(file => unresolvedAssetId(file) !== undefined);

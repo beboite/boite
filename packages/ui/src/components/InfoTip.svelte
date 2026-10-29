@@ -8,7 +8,8 @@
   import { floating } from '../lib/floating';
   import { fill, strings } from '../lib/strings';
 
-  let { text, topic, testid }: { text: string; topic: string; testid?: string } = $props();
+  /** `icon` replaces the "i" where the mark itself says more, as the lock of a control the policy holds. */
+  let { text, topic, testid, icon: Icon = Info }: { text: string; topic: string; testid?: string; icon?: typeof Info } = $props();
 
   const tip = new Closing();
   const id = `info-${Math.random().toString(36).slice(2, 10)}`;
@@ -76,7 +77,7 @@
   onfocus={(event) => { if (event.currentTarget.matches(':focus-visible')) tip.show(); }}
   onblur={() => { if (!pinned) tip.hide(); }}
 >
-  <Info size={14} strokeWidth={1.75} />
+  <Icon size={14} strokeWidth={1.75} />
 </button>
 {#if tip.shown}
   <span

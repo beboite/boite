@@ -329,7 +329,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi']);
+    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'hermes', 'muse', 'opencode', 'opencode-v2', 'pi']);
     // OpenCode 2 is the one experimental descriptor: listed, and off until it is turned on.
     expect(loaded.filter((provider) => provider.experimental === true).map((provider) => provider.id)).toEqual(['opencode-v2']);
     expect(loaded.filter((provider) => provider.enabled === false).map((provider) => provider.id)).toEqual(['opencode-v2']);

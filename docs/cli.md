@@ -454,6 +454,7 @@ boite secret run <ref> --as <VAR> -- <cmd> [args ...]
 boite secret pipe <ref> -- <cmd> [args ...]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
+boite goal track
 boite threads inbox
 boite threads find <words>
 boite threads read <thread> [--last <n>] [--before <ms>]
@@ -673,6 +674,12 @@ every thread of the project: an agent adds one or claims one, which marks it
 finished and awaiting the user's confirmation; `done` and removal are the user's
 in the Tasks surface and on the project board ([board.md](board.md)). An agent's add is refused once the project holds 200 open
 or claimed cards, with the count in the refusal; the user's adds have no limit.
+
+`goal track` starts a reviewed goal on the agent's own thread whose objective is
+the user's last prompt (a steer included), verbatim, and, on a project thread that is not incognito, a linked card on the project board. It is
+refused unless the desktop app has the Automatic goals experiment on, while a
+goal or a loop is under way, and when that prompt already started a goal
+([automatic goals](goals.md#automatic-goals)).
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.

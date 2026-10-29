@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../../lib/policy';
   import { onDestroy, tick, untrack } from 'svelte';
   import { Check, Copy, ExternalLink, Globe, Link2, Share2, TriangleAlert } from '@lucide/svelte';
   import { inviteShare, readInvite } from '../../lib/contact-link';
@@ -6,6 +7,7 @@
   import { clockTime } from '../../lib/format';
   import { fill, strings } from '../../lib/strings';
   import InfoTip from '../InfoTip.svelte';
+  import PolicyLock from '../PolicyLock.svelte';
   import FingerprintWords from './FingerprintWords.svelte';
 
   /**
@@ -22,6 +24,8 @@
    * offers the share to accept by hand.
    */
   let { view }: { view: ContactsView } = $props();
+  /** The admin policy turns contacts off: no invitation and no joining from this machine. */
+  const locked = $derived(lockedBy(view.store.policy, 'network.contacts') !== null);
   const labels = $derived(strings.contacts);
   const ADMIN = 'https://login.tailscale.com/admin/machines';
 
@@ -67,7 +71,7 @@
 
 <div class="switch-row invite-row">
   <span class="text">
-    <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /></span>
+    <span class="ui-label-box"><span class="ui-label">{labels.invite.title}</span><InfoTip topic={labels.invite.title} text={labels.invite.tip} /><PolicyLock store={view.store} keys={['network.contacts']} /></span>
     <span class="hint">{labels.invite.pick}</span>
     {#if selfHosted}<span class="hint" data-testid="contact-invite-self-hosted">{labels.invite.selfHosted}</span>{/if}
     {#if (view.state?.invitations ?? 0) > 0}
@@ -79,15 +83,15 @@
     {/if}
   </span>
   <span class="invite-actions">
-    <button type="button" disabled={view.isBusy('invite')} title={labels.invite.tailnetTip} onclick={() => void invite('tailnet')} data-testid="contact-invite-tailnet">
+    <button type="button" disabled={view.isBusy('invite') || locked} title={labels.invite.tailnetTip} onclick={() => void invite('tailnet')} data-testid="contact-invite-tailnet">
       <Link2 size={14} /><span class="ui-label">{labels.invite.tailnet}</span>
     </button>
-    <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.createTip} onclick={() => void invite('share')} data-testid="contact-invite-create">
+    <button type="button" disabled={view.isBusy('invite') || selfHosted || locked} title={labels.invite.createTip} onclick={() => void invite('share')} data-testid="contact-invite-create">
       <Share2 size={14} /><span class="ui-label">{labels.invite.create}</span>
     </button>
     <!-- An older core reads only `share` and would share the machine instead. -->
     {#if view.state?.internet === true}
-      <button type="button" disabled={view.isBusy('invite') || selfHosted} title={labels.invite.internetTip} onclick={() => void invite('internet')} data-testid="contact-invite-internet">
+      <button type="button" disabled={view.isBusy('invite') || selfHosted || locked} title={labels.invite.internetTip} onclick={() => void invite('internet')} data-testid="contact-invite-internet">
         <Globe size={14} /><span class="ui-label">{labels.invite.internet}</span>
       </button>
     {/if}
@@ -143,13 +147,13 @@
 
 <div class="switch-row join-row">
   <span class="text">
-    <span class="ui-label">{labels.join.title}</span>
+    <span class="ui-label-box"><span class="ui-label">{labels.join.title}</span><PolicyLock store={view.store} keys={['network.contacts']} /></span>
     <span class="hint">{labels.join.tip}</span>
   </span>
   {#if !view.joined}
     <form class="join" onsubmit={event => { event.preventDefault(); void join(); }}>
       <input class="mono" bind:value={pasted} placeholder={labels.join.placeholder} aria-label={labels.join.label} spellcheck="false" autocomplete="off" data-testid="contact-join-link" />
-      <button type="submit" class="primary" disabled={!pasted.trim() || view.isBusy('join')} data-testid="contact-join">
+      <button type="submit" class="primary" disabled={!pasted.trim() || view.isBusy('join') || locked} data-testid="contact-join">
         <span class="ui-label">{view.isBusy('join') ? labels.join.joining : labels.join.submit}</span>
       </button>
     </form>

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { onDestroy, tick, untrack } from 'svelte';
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
   import { ArrowUpRight, RefreshCw, Trash2, ScanLine } from '@lucide/svelte';
   import { listedName, machineHealth, machineName, workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
@@ -208,15 +210,15 @@
           </div>
           {#if groupThreadsShown(machine, owner, coreId)}
             <label class="group-threads" for="{uid}-threads-{machine.id}" data-testid="machine-group-threads">
-              <span class="ui-label-box"><span class="ui-label" id="{uid}-threads-{machine.id}-name">{strings.machines.groupThreads}</span><InfoTip topic={strings.machines.groupThreads} text={strings.machines.groupThreadsHint} /></span>
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-threads-{machine.id}-name">{strings.machines.groupThreads}</span><InfoTip topic={strings.machines.groupThreads} text={strings.machines.groupThreadsHint} /><PolicyLock store={machine.store} keys={['network.groups']} /></span>
               <input id="{uid}-threads-{machine.id}" aria-labelledby="{uid}-threads-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-threads-switch"
-                checked={machine.store.settings?.groupThreads === true}
+                checked={machine.store.settings?.groupThreads === true} disabled={lockedBy(machine.store.policy, 'network.groups') !== null}
                 onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupThreads: input.checked }))) input.checked = machine.store.settings?.groupThreads === true; }} />
             </label>
             <label class="group-threads" for="{uid}-bots-{machine.id}" data-testid="machine-group-bots">
-              <span class="ui-label-box"><span class="ui-label" id="{uid}-bots-{machine.id}-name">{strings.machines.groupBots}</span><InfoTip topic={strings.machines.groupBots} text={strings.machines.groupBotsHint} /></span>
+              <span class="ui-label-box"><span class="ui-label" id="{uid}-bots-{machine.id}-name">{strings.machines.groupBots}</span><InfoTip topic={strings.machines.groupBots} text={strings.machines.groupBotsHint} /><PolicyLock store={machine.store} keys={['network.groups']} /></span>
               <input id="{uid}-bots-{machine.id}" aria-labelledby="{uid}-bots-{machine.id}-name" type="checkbox" role="switch" data-testid="machine-group-bots-switch"
-                checked={machine.store.settings?.groupBots === true}
+                checked={machine.store.settings?.groupBots === true} disabled={lockedBy(machine.store.policy, 'network.groups') !== null}
                 onchange={async (event) => { const input = event.currentTarget; if (!(await machine.store.saveSettings({ groupBots: input.checked }))) input.checked = machine.store.settings?.groupBots === true; }} />
             </label>
           {/if}

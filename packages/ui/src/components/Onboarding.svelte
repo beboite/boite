@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { lockedBy } from '../lib/policy';
   import { onMount, tick, untrack } from 'svelte';
   import { AppWindow, ArrowLeftRight, Bell, Check, FileDiff, Languages, MessageCircle, Mic, Minimize2, Palette, SquareTerminal, VolumeX, X } from '@lucide/svelte';
   import type { SpeechStatus } from '@boite/contracts';
@@ -159,7 +160,7 @@
                   <label>{strings.onboarding.demo.installingVoice}<progress max={speech.totalBytes || 1} value={speech.downloadedBytes}></progress></label>
                   <button disabled={speechBusy} onclick={() => void setupVoice(true)}><span class="ui-label">{strings.onboarding.demo.cancelVoice}</span></button>
                 {:else if speech?.canInstallRuntime}
-                  <span class="ui-label">{strings.onboarding.demo.downloadVoice}</span><button data-testid="onboarding-voice-install" disabled={speechBusy} onclick={() => void setupVoice()}><span class="ui-label">{strings.onboarding.demo.installVoice}</span></button>
+                  <span class="ui-label">{strings.onboarding.demo.downloadVoice}</span><button data-testid="onboarding-voice-install" disabled={speechBusy || (lockedBy(store.policy, 'dictation') !== null && store.policy?.values.dictation === 'off')} onclick={() => void setupVoice()}><span class="ui-label">{strings.onboarding.demo.installVoice}</span></button>
                 {:else}<p>{speech ? strings.onboarding.changeLater : strings.onboarding.voice.reading}</p>{/if}
                 {#if speechError || speechPollError || speech?.error}<p role="alert">{speechError || speechPollError || speech?.error}</p>{/if}
               </div>

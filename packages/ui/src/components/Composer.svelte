@@ -6,13 +6,13 @@
   import { agentSlashItems, boiteSlashItems, skillSlashItems, slashCompletion, listKey, mentionQueryOf, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { AgentsView, agentOfThread } from '../lib/agents.svelte';
   import { composerPlaceholder } from '../lib/composer-placeholder';
-  import { receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
+  import { readyToSend, receiveDroppedFiles, takeFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { editWhole } from '../lib/reading-window';
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, sameSend, sendShape, touchesImageReference, trackImageSend, type SendShape } from '../lib/composer-images';
   import { checkpoint, editKind, recordEdit, resetHistory, settled } from '../lib/composer-history';
-  import { boxSelection, copySelection, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
+  import { boxSelection, closeDraftUndo, copySelection, offerDraftUndo, pasteImages, travel, type EditingHost } from '../lib/composer-editing';
   import { ComposerMentions } from '../lib/composer-mentions.svelte';
   import { isLoading, unresolvedAssetId } from '../lib/draft-attachments';
   import { focusInitial, focusWithin } from '../lib/focus';
@@ -46,6 +46,7 @@
   const side = new ComposerSide();
   $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(target?.key ?? store.openThread?.id ?? DRAFT_STASH_KEY);
+  $effect(() => { const left = key; if (left === DRAFT_STASH_KEY) void store.draft?.id; return () => closeDraftUndo(left); }); // A phone's Undo toast ends as the box moves to another draft, new conversations included.
   /** The thread this box sends to: none when it speaks to an agent, whatever thread is open behind it. */
   let thread = $derived(target ? null : store.openThread);
   let composer = $derived(store.composerStates[key]);
@@ -290,16 +291,16 @@
     }
     // A host whose undo could not be cancelled already rewrote the box: the old path keeps its references.
     const nativeUndo = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
-    const state = stateForInput(); noteTyping(store, key);
+    const state = stateForInput(); noteTyping(store, key); closeDraftUndo();
+    const prior = { text: state.text, attachments: state.attachments.length };
     // Still writing: a send pressed while files were loading waits for the next Send.
     sendWhenLoaded = null;
     // The state still holds the text before this edit: that is the step undo returns to.
-    if (!nativeUndo) {
-      const kind = touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
-      recordEdit(state, kind, before, input.data ?? null);
-    }
+    const kind = nativeUndo ? null : touchesImageReference(state.text, state.attachments, pendingEdit) ? 'big' : editKind(input.inputType, pendingEdit);
+    if (kind) recordEdit(state, kind, before, input.data ?? null);
     const whole = editComposerInput(store, key, element, nativeUndo, pendingEdit);
     settled(state);
+    if (kind === 'big' && !state.text && !state.attachments.length) offerDraftUndo(editing(), prior, strings.composer.draftCleared);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
@@ -331,7 +332,7 @@
   /** What the composer's own edits write to (`lib/composer-editing.ts`). An answer's files reach the agent as paths, so it takes images whatever the provider reads. */
   function editing(): EditingHost {
     return { store, key, box, state: stateForInput(), provider: reply ? null : provider,
-      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); } };
+      moved: (at) => { caret = at; recall = null; if (!sizesItself) grow(); else syncInput(); }, shown: () => key };
   }
 
   /**
@@ -358,9 +359,6 @@
   async function submit(nextDraft = false) {
     if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     if (loadingFiles) { if (sendable) sendWhenLoaded = { store, key, state: stateForInput(), shape: sendShape(text, attachments), nextDraft }; return; }
-    const prompt = text;
-    const images = attachments;
-    const references = previewReferences;
     if (reply) {
       const answeredKey = key;
       if (canSend && await sendAnswer(store, reply)) {
@@ -370,6 +368,8 @@
       }
       return;
     }
+    const ready = readyToSend(store, stateForInput(), stateForInput, () => [text, previewReferences, choice]); if (!(typeof ready === 'boolean' ? ready : await ready)) return; // Pictures being fitted go once they fit, in the same box (`lib/composer-attachments.ts`); an answer waits in `sendAnswer`.
+    const prompt = text, images = attachments, references = previewReferences;
     if (target) {
       if (canSend && await sendToTarget(target, stateForInput(), prompt, images)) recall = null;
       requestAnimationFrame(grow);
@@ -467,11 +467,11 @@
   function removeAttachment(at: number) {
     const state = stateForInput();
     checkpoint(state);
-    // The keyboard's remove button goes with its chip, so the focus comes back to
-    // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
+    // The keyboard's remove button goes with its chip, so focus returns to the box; a tap leaves it, which would open a phone's keyboard.
     const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
+    if (!state.text.trim() && !state.attachments.length) offerDraftUndo(editing(), { text: '', attachments: 1 }, strings.composer.draftCleared);
     if (refocus) focusInitial(box, box?.closest<HTMLElement>('[data-testid=composer]'));
   }
 
@@ -847,7 +847,8 @@
     transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  .input-wrap { position: relative; }
+  /* The bottom gap sits under the box: a textarea scrolls its text through its own padding, up to the bar. */
+  .input-wrap { position: relative; margin-bottom: var(--composer-input-gap, 6px); }
 
   .input-highlight {
     position: absolute;
@@ -869,9 +870,9 @@
   textarea, .input-paint {
     /* A textarea's own text-rendering: auto drops kerning on Android, and the caret drifted from the painted letters. */
     text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: normal; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; width: 100%;
-    min-height: var(--composer-input-height, 44px);
+    min-height: calc(var(--composer-input-height, 44px) - var(--composer-input-gap, 6px));
     max-height: 200px;
-    padding: var(--composer-input-padding, 12px 14px 6px);
+    padding: var(--composer-input-padding, 12px 14px 0);
     border: none;
     background: transparent;
     font-size: var(--text-reading);

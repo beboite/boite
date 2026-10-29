@@ -156,12 +156,18 @@ describe('gatherAttachments', () => {
     let held = start;
     return {
       get list() { return held; },
-      holder: { held: () => held, add: (one: Attachment) => { held = [...held, one]; }, noImages, codec: imageCodec }
+      holder: {
+        held: () => held,
+        add: (one: Attachment) => { held = [...held, one]; },
+        replace: (lighter: Map<Attachment, Attachment>) => { held = held.map((one) => lighter.get(one) ?? one); },
+        noImages,
+        codec: imageCodec
+      }
     };
   }
 
-  test('twenty reduced screenshots go in one turn, the twenty-first is refused by name', async () => {
-    const fake = codec({ width: 1179, height: 2556 }, { 'image/jpeg': 400_000, 'image/png': 1_500_000 });
+  test('a full turn of reduced screenshots goes in, the next one is refused by name', async () => {
+    const fake = codec({ width: 1179, height: 2556 }, { 'image/jpeg': 150_000, 'image/png': 1_500_000 });
     const shots = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, at) => file(`IMG_${at}.PNG`, 'image/png', 3_000_000));
     const target = holder([], null, fake.codec);
     const refused = await gatherAttachments(shots, target.holder);
@@ -205,7 +211,7 @@ describe('gatherAttachments', () => {
 describe('receiveFiles', () => {
   test('a file refused once read leaves its slot to the next one past the cap, from this intake or a later one', async () => {
     const store = { error: null } as unknown as Store;
-    const box = { input: {}, attachments: [] as Attachment[], placed() {}, settle(placeholder: Attachment, ready: Attachment | null) {
+    const box = { input: {}, attachments: [] as Attachment[], placed() {}, replace() {}, settle(placeholder: Attachment, ready: Attachment | null) {
       box.attachments = ready ? box.attachments.map(item => item === placeholder ? ready : item) : box.attachments.filter(item => item !== placeholder);
     } };
     const notes = Array.from({ length: ATTACHMENTS_PER_TURN }, (_, at) => file(`note-${at}.txt`, 'text/plain', 10));

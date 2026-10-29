@@ -27,7 +27,7 @@ const verdicts = () => page.evaluate<string[]>(`Array.from(document.querySelecto
 beforeAll(async () => {
   const port = await freePort();
   server = await startDevUi(port);
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, experiments: ['goal2'] });
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);

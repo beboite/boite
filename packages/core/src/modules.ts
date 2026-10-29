@@ -17,6 +17,7 @@ import { registerSessionMethods } from './sessions.ts';
 import { registerTailscaleMethods } from './tailscale.ts';
 import { registerFirewallMethods } from './firewall.ts';
 import { registerSettingsMethods } from './settings.ts';
+import { registerPolicy } from './policy-gate.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
 import { registerGatewayMove } from './gateway-move.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
@@ -38,6 +39,7 @@ import { updateEverything } from './update-everything.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerPolicy(core);
   registerSharedComputeMethods(core);
   registerJournalInspection(core);
   core.router.register('core.logs', async params => {
@@ -73,6 +75,7 @@ export function registerModules(core: Core): void {
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
+  core.router.register('threads.goal.track', (params) => core.activity.track(params.threadId));
   // Progress is for the window that asked: every other client would drop it on its requestId.
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));

@@ -7,6 +7,8 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { desktopSettings } from '../lib/settings-tabs';
   import InfoTip from './InfoTip.svelte';
+  import PolicyLock from './PolicyLock.svelte';
+  import { gatewayBlocked } from '../lib/policy';
   import GatewayMoveDialog from './GatewayMoveDialog.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
 
@@ -21,6 +23,9 @@
   let result = $state('');
   let failed = $state(false);
   let moving = $state(false);
+  /** Every gateway off by the admin policy, or the one typed outside the addresses it allows: the core refuses the save either way. */
+  const gatewayOff = $derived(gatewayBlocked(store.policy) === 'gateway');
+  const blocked = $derived(gatewayOff || (config.enabled && gatewayBlocked(store.policy, config.baseUrl) !== null));
   /** A saved Douane, on a core that can move logins into it. */
   const movable = $derived(store.settings?.subscriptionProxy?.kind === 'douane' && !!store.settings.subscriptionProxy.baseUrl && store.core?.features?.gatewayMove === true);
   $effect(() => {
@@ -70,7 +75,7 @@
 
   async function save() {
     const client = store.client;
-    if (!client || !store.owner || busy) return;
+    if (!client || !store.owner || busy || blocked) return;
     busy = true; result = ''; failed = false;
     try {
       const checked = checkSettingsPatch({ subscriptionProxy: { ...config } });
@@ -87,8 +92,8 @@
 </script>
 
 <section class="card proxy-settings" data-testid="subscription-proxy-settings">
-  <h2 class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.heading}</span><InfoTip topic={strings.subscriptionProxy.heading} text={strings.subscriptionProxy.hint} /></h2>
-  <label class="switch-row"><span class="text ui-label">{strings.subscriptionProxy.enable}</span><input type="checkbox" role="switch" bind:checked={config.enabled} data-testid="subscription-proxy-enabled" /></label>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.heading}</span><InfoTip topic={strings.subscriptionProxy.heading} text={strings.subscriptionProxy.hint} /><PolicyLock {store} keys={['gateway', 'gateway.allowedBaseUrls']} /></h2>
+  <label class="switch-row"><span class="text ui-label">{strings.subscriptionProxy.enable}</span><input type="checkbox" role="switch" bind:checked={config.enabled} disabled={gatewayOff} data-testid="subscription-proxy-enabled" /></label>
   <p class="hint" data-testid="subscription-proxy-enabled-hint">{strings.subscriptionProxy.enabledHint}</p>
   <div class="mode">
     <span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.where}</span><InfoTip topic={strings.subscriptionProxy.local} text={strings.subscriptionProxy.localHint} /></span>
@@ -111,7 +116,7 @@
       </div>
     {/if}
     <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-      <div class="actions"><button type="submit" class="primary small" disabled={busy || !store.owner} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
+      <div class="actions"><button type="submit" class="primary small" disabled={busy || !store.owner || blocked} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
       {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
     </form>
   {:else}
@@ -124,13 +129,13 @@
     <label><span class="ui-label">{strings.subscriptionProxy.dashboardUrl}</span><input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
     <label><span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.key}</span><InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /></span><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
     <label class="clear-key"><input type="checkbox" bind:checked={clearKey} /><span class="ui-label">{strings.subscriptionProxy.clearKey}</span></label>
-    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
+    <div class="actions"><button type="submit" class="primary small" disabled={busy || blocked} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button><GatewayOpenButton {store} /></div>
     {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
   </form>
   {/if}
   {#if movable}
     <div class="move">
-      <button type="button" class="ghost small" onclick={() => moving = true} data-testid="gateway-move-open"><span class="ui-label">{strings.subscriptionProxy.move.open}</span></button>
+      <button type="button" class="ghost small" disabled={gatewayOff} onclick={() => moving = true} data-testid="gateway-move-open"><span class="ui-label">{strings.subscriptionProxy.move.open}</span></button>
       <InfoTip topic={strings.subscriptionProxy.move.open} text={strings.subscriptionProxy.move.openHint} />
     </div>
     <GatewayMoveDialog {store} open={moving} onclose={() => moving = false} />

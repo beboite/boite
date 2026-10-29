@@ -118,6 +118,17 @@ export class SessionControls {
    */
   private ownModel: string | null = null;
   /**
+   * The same for an agent that lists its models in the session answer: the
+   * `currentModelId` of a `session/new`, or the account's probed default. A
+   * loaded session reports the model it was left on, which is not the agent's own.
+   */
+  private ownListedModel: string | null = null;
+  /**
+   * Whether `ownListedModel` was read at all: null once read is an agent that
+   * lists no models, null before is a question a throwaway session answers.
+   */
+  private ownListedModelRead = false;
+  /**
    * The options came from this session's own answers, not from another
    * session's seed: only then does a current value say what this one is on.
    */
@@ -137,6 +148,28 @@ export class SessionControls {
     this.noteOwnModel(options);
   }
 
+  /**
+   * What a fresh `session/new` of the account said the agent's own model is,
+   * for a process whose first session is a load; `undefined` when nothing read it.
+   */
+  seedOwnListedModel(modelId: string | null | undefined): void {
+    if (this.ownListedModelRead || modelId === undefined) return;
+    this.ownListedModel = modelId;
+    this.ownListedModelRead = true;
+  }
+
+  /**
+   * The models a throwaway session listed, for a loaded session that listed
+   * none: which one the loaded session is on stays unknown.
+   */
+  seedListedModels(listed: AgentModels | null): void {
+    if (this.agentModels === null && listed !== null) this.agentModels = { currentModelId: null, available: listed.available };
+  }
+
+  knowsOwnListedModel(): boolean {
+    return this.ownListedModelRead;
+  }
+
   /** The model option's value in a `session/new` answer, the first one kept. */
   noteOwnModel(options: SessionConfigOption[] | null): void {
     if (this.ownModel !== null) return;
@@ -151,6 +184,16 @@ export class SessionControls {
 
   hasOptions(): boolean {
     return this.configOptions.length > 0;
+  }
+
+  /** An agent that takes its model as a config option, which `applyConfig` sets. */
+  hasModelOption(): boolean {
+    return categoryOption(this.configOptions, 'model') !== null;
+  }
+
+  /** The session answers listed models, which is where an agent with no model option takes them. */
+  hasModels(): boolean {
+    return this.agentModels !== null;
   }
 
   /**
@@ -183,6 +226,7 @@ export class SessionControls {
     modes: SessionModeState | null | undefined,
     options: SessionConfigOption[] | null,
     answer: unknown,
+    fresh: boolean,
   ): void {
     this.noteModes(modes);
     if (options !== null && options.length > 0) {
@@ -191,29 +235,45 @@ export class SessionControls {
     }
     const listed = agentModelsOf(answer);
     if (listed !== null) this.agentModels = listed;
+    if (fresh) {
+      this.ownListedModel = listed?.currentModelId ?? null;
+      this.ownListedModelRead = true;
+    }
   }
 
   /**
-   * The thread's model and reasoning effort as one `session/set_model`, for the
-   * agents that take them there rather than through `session/set_config_option`
-   * (Grok, today). It runs at the start of every turn and sends nothing when
-   * the pair has not moved since the last one, so a warm session follows a
+   * The thread's model as one `session/set_model`, for the agents that take it
+   * there rather than through `session/set_config_option`: Grok, with its
+   * reasoning effort in `_meta`, and any agent whose session answer lists
+   * `models` but no `model` config option (Hermes Agent), which takes the model
+   * alone. It runs at the start of every turn and sends nothing when the
+   * model has not moved since the last one, so a warm session follows a
    * change instead of being dropped for it. A thread on the agent's own model
-   * with no effort set says nothing, and neither does one the session answer
-   * already reports as current. A refused model fails the turn before its
-   * prompt; a refused effort alone is one warning.
+   * with no effort set says nothing, unless an earlier turn moved the session
+   * off it, and neither does one the session answer already reports as
+   * current. A refused model fails the turn before its prompt; a refused
+   * effort alone is one warning.
    */
   async applyModel(ctx: SessionContext): Promise<void> {
-    if (!isGrok(ctx.provider)) return;
+    const grok = isGrok(ctx.provider);
+    // An agent with a `model` option takes it in `applyConfig`, and one that
+    // lists no models has nothing to match the thread's model against. A load
+    // may omit the list: a known own model still says the agent has one.
+    if (!grok && ((this.agentModels === null && this.ownListedModel === null) || categoryOption(this.configOptions, 'model') !== null)) return;
     const { agent, sessionId } = this.target();
     if (agent === null || sessionId === null) return;
 
     const wanted = ctx.thread.model === AGENT_OWN_MODEL ? null : ctx.thread.model;
-    const effort = ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
-    if (wanted === null && effort === null) return;
+    // Only Grok's `set_model` carries an effort; the others have no field for it.
+    const effort = grok && ctx.thread.effort !== null && ctx.thread.effort.length > 0 ? ctx.thread.effort : null;
+    // Back to the agent's own model on a session moved off it, by this process
+    // or by the one that left a loaded session: it has to be asked for. A
+    // session already on it sends nothing below.
+    const restore = !grok && wanted === null ? this.ownListedModel : null;
+    if (wanted === null && effort === null && restore === null) return;
 
     const listed = this.agentModels;
-    const modelId = wanted ?? listed?.currentModelId ?? null;
+    const modelId = wanted ?? restore ?? listed?.currentModelId ?? null;
     if (modelId === null) return;
     if (this.appliedModel === modelId && this.appliedEffort === effort) return;
 
@@ -244,17 +304,18 @@ export class SessionControls {
     } catch (error) {
       refusal = error;
     }
-    if (wanted !== null && !running && effort !== null) {
+    const selected = wanted !== null || restore !== null;
+    if (selected && !running && effort !== null) {
       // The pair was refused: the model alone tells which half the agent rejects.
       try {
         await set(null);
         this.appliedModel = modelId;
         this.appliedEffort = null;
       } catch (error) {
-        throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(error)}`);
+        throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${modelId}: ${messageOf(error)}`);
       }
-    } else if (wanted !== null && !running) {
-      throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${wanted}: ${messageOf(refusal)}`);
+    } else if (selected && !running) {
+      throw new ModelRefused(`thread.model: ${ctx.provider.name} refused the model ${modelId}: ${messageOf(refusal)}`);
     }
     ctx.log('warn', `acp: the agent refused the effort ${effort} on ${modelId}: ${messageOf(refusal)}`);
   }
@@ -366,7 +427,10 @@ export class SessionControls {
     if (this.configOptions.length === 0 && !ctx.protectedExecution) return;
     const model = ctx.thread.model;
     const effort = ctx.thread.effort;
-    if (model !== this.appliedModel || ctx.protectedExecution) {
+    // An agent that lists models without a `model` option took it in
+    // `applyModel`, which records the model id it asked for.
+    const takenByListing = (this.agentModels !== null || this.ownListedModel !== null) && !this.hasModelOption();
+    if ((model !== this.appliedModel && !takenByListing) || ctx.protectedExecution) {
       // Back to the agent's own model on a session moved off it: that model
       // has to be asked for, or the session stays on the last one.
       const wanted = model === AGENT_OWN_MODEL && this.appliedModel !== undefined && this.ownModel !== null ? this.ownModel : model;

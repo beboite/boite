@@ -656,10 +656,21 @@ Monday and Friday at 6:00 PM" (`schedule.ts`).
 
 A bot has no run cap: a wake runs as long as any turn, and the thread's own
 auto-compaction (the user's compaction size setting) applies. `dailyBudgetUsd`
-in its runtime config (null by default) caps what its thread's turns spend
-from local midnight, read from each turn's `costUsdEquivalent`. Past it, wakes
-are skipped with one system line a day in its thread and `lastOutcome:
-'skipped'` on the routine; the user's own messages always run.
+in its runtime config (null by default) caps what the bot spends from local
+midnight: the turns started on its thread and on every thread below it, its
+subagents at any depth (`parent_thread_id`), the steps of workflow runs rooted
+there and its memory pass. `agentSpend` in `packages/core/src/agents/spend.ts`
+is the only reader of that sum, for the budget and for the status's
+`today.costUsd`. It prices each turn with the usage page's rule
+([the API estimate](usage.md#the-api-estimate)): the model's public rates
+first, else the cost the agent reported, so a Codex bot, whose turns report
+no cost, spends what its tokens cost. A turn on a model the price list does
+not know that reported no cost adds nothing, so a bot that only runs such
+turns never reaches its budget. Past the budget, wakes are skipped with one
+system line a day in its thread and `lastOutcome: 'skipped'` on the routine;
+the user's own messages always run. The budget counts the subagents' turns
+but never holds them: a subagent spawned during the user's message, a
+workflow step or a memory pass still starts.
 `agents.limits.set { paused }` holds every wake on the core. Configs saved with
 `maxRunMinutes` or `compactAfterTurns` still load, without them.
 

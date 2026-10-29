@@ -7,7 +7,7 @@ import { checkRemoteContact } from './coordination-lookup.ts';
 import { CoordinationLookups } from './coordination-directory.ts';
 import { PeerDesk } from './coordination-peer.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
-import { dropGroupRead, groupPeers } from './coordination-group.ts';
+import { dropGroupRead, policedRoutes, policyAllowsLetter } from './coordination-group.ts';
 import { address, coordinationGuide, coordinationUrl, LETTER_TTL_MS, letterPrompt, RESIDENT_LETTER_TTL_MS, same, text } from './coordination-letter.ts';
 import { projectName, senderContext, withProjects, withRelations } from './coordination-relation.ts';
 import { firstAnswer, PeerGone, PeerRefusal, post, settle, type Answer, type Envelope, type Operation } from './coordination-wire.ts';
@@ -21,7 +21,7 @@ import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './er
 import { isAgentHeld } from './agents/runtime.ts';
 import { ContactMailboxes } from './contacts/mailboxes.ts';
 import { forwardCoordination } from './coordination-rpc.ts';
-import { trustCoordination } from './coordination-trust.ts';
+import { trustCoordination, trustedCoordinationPeers } from './coordination-trust.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -133,16 +133,7 @@ export class Coordination {
   signature(input: Buffer): Buffer { this.identityKey(); return sign(null, input, this.key!); }
   /** The links the owner made by hand, each with its own permissions. A group's members are trusted too, and listed by the group. */
   peers(): CoordinationPeer[] { return (this.core.journal.getSetting('coordination:peers') as CoordinationPeer[] | undefined) ?? []; }
-  /**
-   * Every machine a letter may cross to: the hand-made links first, so the
-   * permissions the owner set on one win, then the members of this core's
-   * group, then contacts, whose reach is decided per project (`contacts/store.ts`).
-   */
-  trusted(): CoordinationPeer[] {
-    const manual = this.peers();
-    const own = [...manual, ...groupPeers(this.core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
-    return [...own, ...(this.core.contacts?.peers() ?? []).filter(peer => !own.some(known => known.coreId === peer.coreId))];
-  }
+  trusted(): CoordinationPeer[] { return trustedCoordinationPeers(this.core); }
   async check(coreId: string): Promise<{ ok: true }> {
     const peer = this.trusted().find(p => p.coreId === coreId);
     if (!peer) throw refused('machine is not trusted for coordination');
@@ -610,6 +601,7 @@ export class Coordination {
     return from !== null && to !== null && from.projectId === to.projectId;
   }
   private mayReceive(letter: AgentLetter): boolean {
+    if (!policyAllowsLetter(this.core, letter)) return false;
     const thread = this.core.journal.getThread(letter.to.threadId);
     if (!thread || thread.archived) return false;
     const resident = this.core.workforce.projects.mayReceive(letter, letter.from.coreId === this.self('').coreId);
@@ -807,6 +799,7 @@ export class Coordination {
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
+    const routes = policedRoutes(this.core, peer, operation);
     // A contact another member of the group holds is asked through that member.
     if (this.core.contacts.isRelayPeer(peer)) {
       const via = this.core.contacts.members.via(peer.coreId);
@@ -815,11 +808,11 @@ export class Coordination {
     }
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
-    const routes = this.core.group.routes(peer.coreId);
     // A contact this core hosts is reached only down the link its core keeps open.
     const contact = routes === null && this.core.contacts.has(peer.coreId);
     if (contact && !this.core.contacts.linked(peer.coreId)) throw unavailable(`${peer.name} is not linked right now; its core dials this one again by itself`);
     const attempt = async (url: string | null): Promise<Answer> => {
+      policedRoutes(this.core, peer, operation);
       const nonce = randomUUID();
       const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
       const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
@@ -833,6 +826,7 @@ export class Coordination {
       if (url !== null) {
         // A contact's name is checked again at each request: its DNS answer may have left the tailnet since the join.
         if (contact) await checkTailnetName(url, 'contact.url');
+        policedRoutes(this.core, peer, operation);
         return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
       }
       const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body: wire, signature });
@@ -847,6 +841,7 @@ export class Coordination {
         else throw error instanceof AggregateError ? error.errors[0] ?? new Error('peer unreachable') : error;
       }
     }
+    policedRoutes(this.core, peer, operation);
     if (answer.url !== null) this.core.group.reached(peer.coreId, answer.url);
     if (answer.gone) throw new PeerGone('removed from the group');
     if (answer.refusal !== undefined) throw new PeerRefusal(answer.refusal);

@@ -51,6 +51,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'speech.cancel',
   // Loads the owner's configured model a dictation is about to use: nothing a device could transcribe anyway.
   'speech.warm',
+  // The admin policy draws a phone's locked controls as on the desktop; only the machine's policy file changes it.
+  'policy.get',
   // Paired phones stream their microphone to the owner's configured local engine.
   'speech.streamStart',
   'speech.streamChunk',
@@ -240,6 +242,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'quotas.updated', 'quotas.progress', 'subscriptionProxy.quotasUpdated', // What quotas.list and subscriptionProxy.quotas answer.
   'quotas.alerted', // One window of a row quotas.list already answers the device.
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  'policy.changed', // What policy.get answers the device.
   // Experiment ids of the desktop app, as client.preferences already answers the device.
   'client.desktopExperiments',
   'group.updated', // Invalidation only; group.get applies the device read policy.
@@ -377,6 +380,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['todos.list', 'the project cards, shared with the other threads of the project'],
   ['todos.add', 'what surfaced during the work and belongs to the project, not to this turn'],
   ['todos.update', 'claiming a card it finished, which is a request for confirmation, never the confirmation'],
+  ['threads.goal.track', "a reviewed goal on its own thread whose objective is the user's last prompt verbatim, when that prompt holds several requests; refused unless the user turned Automatic goals on"],
   ['git.status', 'what it changed in the working directory, without spawning a git of its own'],
   ['git.diff', 'both sides of one file, for the same reason'],
   ['files.list', 'one directory of the working directory it already runs in'],

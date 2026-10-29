@@ -31,19 +31,19 @@ import { Concierge } from './concierge.ts';
 import { ContactFunnel } from './funnel.ts';
 import { ContactMembers, type LinkedContacts } from './members.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
-import { checkTailnetName, type ContactCard } from './invite.ts';
+import type { ContactCard } from './invite.ts';
 import { createInvite, INVITES, liveInvites, tailnetOrigin } from './invitations.ts';
 import { CONTACT_JOIN_ROUTE, joinContact, joinRequest } from './join.ts';
 import { TailscaleClient } from './tailscale.ts';
 import { ContactReach } from './reach.ts';
 import { checkTier } from './tier.ts';
 import { fingerprintWords } from './words.ts';
-import { TextSocket } from '../ws-client.ts';
-import { contactHello, HELLO_INPUT, type ContactSocketData } from './link-hello.ts';
+import type { TextSocket } from '../ws-client.ts';
+import { contactHello, CONTACT_LINK_ROUTE, dialContact, HELLO_INPUT, type ContactSocketData } from './link-hello.ts';
 import { checkedContactOffers, contactOffers } from './offers.ts';
 
 export { CONTACT_JOIN_ROUTE } from './join.ts';
-export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
+export { CONTACT_LINK_ROUTE } from './link-hello.ts';
 
 const CONTACTS = 'contacts';
 const SETTINGS = 'contacts:settings';
@@ -54,8 +54,6 @@ const MAX_PENDING = 32;
 const DECIDED_KEPT = 50;
 const SKEW_MS = 60_000;
 const TICK_MS = 1000;
-/** How long the upgrade to a host may take before the link counts as failed. */
-const LINK_DIAL_MS = 8000;
 /** Every this many ticks, what waits to be told to a contact is offered again. */
 const FLUSH_TICKS = 30;
 const TAILSCALE_CACHE_MS = 60_000;
@@ -118,7 +116,7 @@ export class ContactStore implements LinkedContacts {
   private closed = false;
 
   constructor(private readonly core: Core) {
-    this.tailscale = new TailscaleClient(core.dataDir);
+    this.tailscale = new TailscaleClient(core.dataDir, core.policy.fetchUnless(() => core.policy.networkOff('contacts'), 'network.contacts', 'the Tailscale API'));
     this.concierge = new Concierge(core);
     this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
     this.funnel.changed = () => this.changed();
@@ -734,7 +732,7 @@ export class ContactStore implements LinkedContacts {
   /** The guest's socket is open: it becomes the bridge route for that contact, replacing an older one. */
   attach(data: ContactSocketData['contact'], socket: LinkSocket): void {
     const contact = this.find(data.coreId);
-    if (this.closed || !contact || contact.role !== 'host') { socket.close(1008, 'not a contact'); return; }
+    if (this.closed || this.core.policy.networkOff('contacts') || !contact || contact.role !== 'host') { socket.close(1008, 'not a contact'); return; }
     const previous = this.hosted.get(data.coreId);
     if (previous) {
       this.core.coordination.bridge.disconnect(previous.routeId);
@@ -744,6 +742,7 @@ export class ContactStore implements LinkedContacts {
     const route: BridgeRoute = {
       id: data.routeId,
       sendEvent: (_name, payload: RpcEvents['collaboration.bridge.request']) => {
+        this.core.policy.assert(this.core.policy.networkOff('contacts'), 'network.contacts');
         socket.send(JSON.stringify({ t: 'req', id: payload.requestId, body: payload.body, signature: payload.signature } satisfies Frame));
       },
     };
@@ -757,7 +756,7 @@ export class ContactStore implements LinkedContacts {
   frame(data: ContactSocketData['contact'], raw: string | Buffer): void {
     let frame: Partial<Extract<Frame, { t: 'res' }>>;
     try { frame = JSON.parse(typeof raw === 'string' ? raw : raw.toString('utf8')) as typeof frame; } catch { return; }
-    if (frame?.t !== 'res' || typeof frame.id !== 'string' || typeof frame.status !== 'number' || typeof frame.body !== 'string' || typeof frame.signature !== 'string') return;
+    if (this.core.policy.networkOff('contacts') || frame?.t !== 'res' || typeof frame.id !== 'string' || typeof frame.status !== 'number' || typeof frame.body !== 'string' || typeof frame.signature !== 'string') return;
     try { this.core.coordination.bridge.reply(frame.id, { status: frame.status, body: frame.body, signature: frame.signature }, { id: data.routeId }); } catch { /* A late or unknown answer. */ }
   }
 
@@ -771,7 +770,7 @@ export class ContactStore implements LinkedContacts {
   // -- The link: the guest's side.
 
   dial(contact: StoredContact): void {
-    if (this.closed || !this.started || contact.role !== 'guest' || contact.url === undefined || this.dialed.has(contact.coreId)) return;
+    if (this.closed || !this.started || contact.role !== 'guest' || contact.url === undefined || this.dialed.has(contact.coreId) || this.core.policy.networkOff('contacts')) return;
     const self = this.core.coordination.card();
     const hello = JSON.stringify({ v: 1, from: self.coreId, to: contact.coreId, at: Date.now(), nonce: randomUUID() });
     const headers = {
@@ -789,11 +788,11 @@ export class ContactStore implements LinkedContacts {
       this.backoff.failed(coreId, 'link', this.backoff.mark());
       if (!this.closed) { this.changed(); if (link.state === 'connected') this.members.mark(this.members.holdersOf(coreId)); }
     };
-    // The hello rides in the upgrade's headers, before any frame. The name is checked
-    // again at each dial: its DNS answer may have left the tailnet since the join.
+    // The hello rides in the upgrade's headers. The name is checked again at each dial (its DNS answer may have left
+    // the tailnet since the join), and the policy once the link opens: contacts turned off drop it, to be dialed later.
     const url = contact.url;
-    checkTailnetName(url, 'contact.url').then(() => TextSocket.connect(`${url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers })).then(socket => {
-      if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
+    dialContact(this.core, url, headers).then(socket => {
+      if (this.closed || this.dialed.get(coreId) !== link || (this.core.policy.networkOff('contacts') && this.dialed.delete(coreId))) { socket.close(1000); return; }
       link.socket = socket;
       link.state = 'connected';
       this.backoff.heard(coreId);
@@ -836,7 +835,7 @@ export class ContactStore implements LinkedContacts {
     if (this.closed) return;
     this.started = true;
     this.listening = this.wantsTailnet();
-    this.funnel.start(this.listening);
+    this.funnel.start(this.listening && !this.core.policy.networkOff('contacts'));
     if (this.list().length > 0 || this.liveInvites().length > 0 || this.members.behind()) this.arm();
     this.members.push();
   }

@@ -11,7 +11,7 @@ import type { PluginArtifact, PluginManifest, PluginPlatform, PluginRejected, Pr
 import { RETIRED_PROVIDERS } from '../providers/retired.ts';
 
 /** The shipped providers an account pool may name. `echo` is the tests' fake agent. */
-export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'claude', 'codex', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi'];
+export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'claude', 'codex', 'grok', 'hermes', 'muse', 'opencode', 'opencode-v2', 'pi'];
 /** A manifest is a few hundred bytes; anything past this is not one. */
 export const MANIFEST_MAX_BYTES = 64 * 1024;
 

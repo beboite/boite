@@ -101,6 +101,10 @@ Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a 
 
 ### The app's look
 
+An [experimental opt-in kit](view-kit.md) demonstrates reusable choices,
+steps, image comparisons, shared media controls and state driving cards/SVG.
+It uses the existing file route; it is not automatically loaded into views.
+
 A page looks like the app without the agent styling it. The bootstrap stored
 with each page carries a kit (`baseCss` in `packages/contracts/src/view.ts`)
 drawn from the app's own stylesheet:

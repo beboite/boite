@@ -41,7 +41,8 @@ export async function rewindComposerEdit(
 /**
  * The last turn again from its own prompt: the answer leaves the screen and
  * the prompt shows as sent at once, then the core rewinds and the prompt goes
- * out. A send that fails after the rewind leaves the prompt in the box.
+ * out. A send that fails after the rewind leaves the prompt in the box, or,
+ * behind words typed meanwhile, held at the head of the queue.
  */
 export async function retryTurn(store: Store, threadId: string, prompt: Message): Promise<void> {
   const again = sentPrompt(prompt);
@@ -50,5 +51,8 @@ export async function retryTurn(store: Store, threadId: string, prompt: Message)
   const sent = rewound ? await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences) : false;
   if (sent) return;
   if (local) store.unstageSend(local);
-  if (rewound) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
+  if (!rewound) return;
+  const state = store.composerStates[threadId];
+  if (state?.text || state?.attachments.length || state?.previewReferences?.length) returnPrompt(state, rewound.prompt, rewound.attachments, rewound.previewReferences);
+  else store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
 }

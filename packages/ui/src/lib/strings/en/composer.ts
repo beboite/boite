@@ -4,6 +4,8 @@ export const strings = {
     /** Above the box while a sent message is being edited. */
     editing: 'Editing a sent message: sending replaces it and everything after it',
     editingQueued: 'Send or remove the queued messages before replacing a sent message.',
+    draftCleared: 'Draft cleared',
+    draftReplaced: 'Draft replaced',
     editUnavailable: "This thread's provider is unavailable. Reconnect it before editing a sent message.",
     filesUnavailable: 'The messages were rewound, but this edit has no complete file backup. The code could not be restored.',
     filesBusy: 'The messages were rewound. Another agent is still working in this folder, so the files were left as they are.',
@@ -107,6 +109,7 @@ export const strings = {
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
     attachTooMany: 'A turn carries at most {max} files, so {name} was left out.',
+    attachTotalOver: 'These files still weigh over {max} together, even with the pictures at their smallest: remove some before sending.',
     attachTotalTooLarge: 'The files of one turn weigh {max} at most together, so {name} was left out.',
     attachNoImages: '{provider} takes no images: send the prompt without them.'
   }
