@@ -68,7 +68,7 @@ test('a symlink diff is the link text', async () => {
   const dir = outside('boite-link-diff-');
   writeFileSync(join(dir, 'target.txt'), 'secret bytes\n');
   symlinkSync('target.txt', join(dir, 'link.txt'));
-  const side = await readTreeSide(join(dir, 'link.txt'));
+  const side = await readTreeSide(join(dir, 'link.txt'), 'link.txt');
   expect(Buffer.from(side.data ?? []).toString()).toBe('target.txt');
   expect(side.tooBig).toBe(false);
 });

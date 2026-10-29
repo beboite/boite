@@ -11,7 +11,10 @@
  * its profile at the moment of the call.
  *
  * Its desk is the threads it follows: those it started, wrote to, answered
- * for, was entrusted or put there itself. A follow stays while the thread is
+ * for, was entrusted or put there itself. Facts about the threads it started,
+ * was entrusted or watches wake it at once; those about a thread it only
+ * wrote to or answered for (`touched`) wake it only with `eventWakes` on, and
+ * wait for its next routine otherwise. A follow stays while the thread is
  * open and leaves a day after it is done or archived. A follow the agent made
  * through a project it looks after holds only while that project is still
  * entrusted to it: when the owner takes the project back it leaves the desk
@@ -217,9 +220,10 @@ export class AgentProjects {
   }
 
   /**
-   * The agent follows a thread: it started it, wrote to it, answered for it,
-   * was entrusted it or put it on its desk. Every turn it ends comes back to
-   * the agent as a fact. The first origin stays. Past `WATCHES_MAX` open
+   * The agent follows a thread: it started it, wrote to it, answered for it
+   * (`touched`), was entrusted it or put it on its desk. Every turn it ends
+   * comes back to the agent as a fact. The first origin stays, except that a
+   * watch turns a `touched` follow into `followed`. Past `WATCHES_MAX` open
    * threads the oldest open follow leaves; settled ones leave a day after.
    */
   follow(agentId: string, threadId: ThreadId, origin: AgentWatch['origin'] = 'followed', owner = false): void {
@@ -241,7 +245,7 @@ export class AgentProjects {
     const lent = !owner && (previous?.lent === true || (origin === 'entrusted' && previous !== undefined && previous.owner !== true));
     const { lent: _lent, ...before } = previous ?? {};
     // The owner watching a thread entrusted to the bot grants it on its own: a `followed` watch the entrustment's end leaves.
-    const from = owner && previous?.origin === 'entrusted' ? 'followed' : previous?.origin ?? origin;
+    const from = (owner && previous?.origin === 'entrusted') || (previous?.origin === 'touched' && origin === 'followed') ? 'followed' : previous?.origin ?? origin;
     this.write(agentId, { ...follows, [threadId]: { ...before, ...pr, at: now, origin: from, ...granted, ...(lent ? { lent: true as const } : {}) } });
   }
   /**
@@ -280,6 +284,17 @@ export class AgentProjects {
     if (!follow) return false;
     const thread = this.core.journal.getThread(threadId);
     return holding(thread, Date.now()) && this.allowed(agentId, follow, thread);
+  }
+  /**
+   * Whether a fact about the thread wakes the agent whatever `eventWakes`
+   * says: it is on its desk as started, entrusted or watched, not only
+   * written to or answered for, or the owner put it there.
+   */
+  urgent(agentId: string, threadId: ThreadId): boolean {
+    // `<core-id>/<project-id>/<thread-id>`: a thread of another machine of the group.
+    if (threadId.split('/').length === 3) return this.store.group.urgent(agentId, threadId);
+    const follow = this.saved(agentId)[threadId];
+    return follow !== undefined && (follow.origin !== 'touched' || follow.owner === true) && this.follows(agentId, threadId);
   }
   /**
    * The owner's grant, or a thread of a project still entrusted to the agent:
@@ -524,7 +539,7 @@ export class AgentProjects {
 
   /** A bot of this machine as `perform` and `answerAs` take it. */
   private steward(agent: AgentProfile, projectIds: readonly ProjectId[]): Steward {
-    return { agentId: agent.id, name: agent.name, projectIds, by: target => this.by(agent, projectIds, target), log: { residentAgentId: agent.id }, follow: threadId => this.follow(agent.id, threadId) };
+    return { agentId: agent.id, name: agent.name, projectIds, by: target => this.by(agent, projectIds, target), log: { residentAgentId: agent.id }, follow: threadId => this.follow(agent.id, threadId, 'touched') };
   }
 
   /**
@@ -617,10 +632,15 @@ export class AgentProjects {
 
   // -- facts ------------------------------------------------------------------
 
-  /** A fact for the agent's next event turn (`AgentRuntime.fact`), about the threads it names: `threadIds`, else the ids in its text. */
+  /**
+   * A fact for the agent's next event turn (`AgentRuntime.fact`), about the
+   * threads it names: `threadIds`, else the ids in its text. It is urgent when
+   * one of them is on the desk as started, entrusted or watched.
+   */
   notify(agent: AgentProfile, key: string, text: string, delay = NOTICE_BATCH_MS, threadIds?: ThreadId[]): boolean {
     if (this.closed) return false;
-    return this.core.agentRuntime.fact(agent.id, { key, text: trimmed(text, NOTICE_TEXT + 500), delay, threadIds });
+    const urgent = this.core.agentRuntime.factThreads({ text, threadIds }).some(id => this.urgent(agent.id, id));
+    return this.core.agentRuntime.fact(agent.id, { key, text: trimmed(text, NOTICE_TEXT + 500), delay, threadIds, urgent });
   }
 
   /**

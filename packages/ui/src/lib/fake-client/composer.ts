@@ -249,6 +249,13 @@ export function composerMethods(ctx: FakeContext, methods: () => FakeMethods): P
           queued.sentFrom = previous?.sentFrom !== undefined ? previous.sentFrom : null;
         }
         for (const file of [...value.input.attachments, ...value.input.queued.flatMap(entry => entry.attachments)]) if (!state.assets.has(file.assetId)) throw refusal(`assetId ${file.assetId}: expected an uploaded composer attachment`);
+        // The core's `validateAssets`: each prompt, box or queued, within what one message may carry.
+        for (const input of [value.input, ...value.input.queued]) {
+          if (input.attachments.length > ATTACHMENTS_PER_TURN) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_PER_TURN} attachments per input` });
+          if (input.attachments.reduce((sum, file) => sum + decodedBytes(state.assets.get(file.assetId)!.data), 0) > ATTACHMENTS_TOTAL_MAX_BYTES) {
+            throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `composer.attachments: expected at most ${ATTACHMENTS_TOTAL_MAX_BYTES} bytes per input` });
+          }
+        }
       }
       const record = state.write(params.section, params.id, value);
       if (params.section === 'inputs' && params.sendNow && value?.input.queued.length) state.sendNow(params.id);

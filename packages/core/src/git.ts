@@ -1,8 +1,7 @@
 import type { GitStatus, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { refused } from './errors.ts';
 import { gitDiff } from './git/diff.ts';
-import { notARepository, OUTSIDE_A_REPOSITORY } from './git/errors.ts';
+import { gitFailed } from './git/errors.ts';
 import { parseNumstat, parseStatus } from './git/porcelain.ts';
 import { git } from './git/read.ts';
 import { assertDeviceFile, assertDeviceReadable, threadCwd } from './workdir.ts';
@@ -24,10 +23,7 @@ export async function gitStatus(core: Core, threadId: ThreadId): Promise<GitStat
   // Left unread when the status refuses: its rejection must not go unhandled.
   counting.catch(() => {});
   const status = await reading;
-  if (status.code === OUTSIDE_A_REPOSITORY) notARepository(threadId, status.stderr);
-  if (status.code !== 0) {
-    throw refused(`git status failed on thread ${threadId}: ${status.stderr.trim() || `exit ${status.code}`}`, { threadId });
-  }
+  if (status.code !== 0) gitFailed(threadId, ['status'], status);
   const parsed = parseStatus(status.stdout);
   const numstat = await counting;
   const numbers = numstat.code === 0 ? parseNumstat(numstat.stdout) : new Map<string, { additions: number | null; deletions: number | null }>();

@@ -28,6 +28,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The agent's own thread, created again if it was lost: a thread the phone then opens like any other.
   'agents.open',
   'agents.runtime.get', 'agents.brain.get', // Read the same identity settings and memory shown on its host.
+  'agents.event', // A paired script wakes a bot with an outside event, quoted as data; pair one device per service to revoke it alone.
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   // Bounded child results and event-driven waits expose the same family read scope as delegation.get.
   'delegation.get', 'delegation.result', 'delegation.wait', 'delegation.send', 'delegation.stop',

@@ -3,7 +3,7 @@ import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { hasNul, resolveInside, threadCwd, writeLandsInside } from '../workdir.ts';
-import { notARepository, OUTSIDE_A_REPOSITORY } from './errors.ts';
+import { gitFailed } from './errors.ts';
 import { parseStatus } from './porcelain.ts';
 import { git, readRefSide, readTreeSide, SIDE_CEILING_BYTES } from './read.ts';
 
@@ -35,7 +35,7 @@ export async function gitDiff(core: Core, params: RpcParams<'git.diff'>): Promis
   if (!writeLandsInside(cwd, found.absolute)) {
     throw refused(`git.diff path leaves the thread's working directory: ${params.path}`, { path: params.path });
   }
-  const newSide = await readTreeSide(found.absolute);
+  const newSide = await readTreeSide(found.absolute, params.path);
   if (oldSide.tooBig || newSide.tooBig) {
     throw refused(
       `git.diff will not read ${params.path}: it is over ${SIDE_CEILING_BYTES / (1024 * 1024)} MB on one side`,
@@ -65,7 +65,7 @@ async function changeOf(core: Core, params: RpcParams<'git.diff'>, cwd: string, 
   }
   // Read the whole status so a rename retains its origin.
   const status = await git(core, params.threadId, cwd, ['status', '--porcelain=v1', '-z']);
-  if (status.code === OUTSIDE_A_REPOSITORY) notARepository(params.threadId, status.stderr);
+  if (status.code !== 0) gitFailed(params.threadId, ['status'], status);
   return parseStatus(status.stdout).changes.find((entry) => entry.path === relative) ?? null;
 }
 

@@ -401,7 +401,7 @@ export class ThreadStore {
   /** Turning off the project filter reveals its automatic hides without dismissing the PR. */
   showMergedPrThreads(projectId: ProjectId): void {
     for (const thread of this.core.journal.listThreads(projectId)) {
-      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id)) continue;
+      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id) || this.core.worktrees.reservations.holder(thread.cwd) !== null) continue;
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });

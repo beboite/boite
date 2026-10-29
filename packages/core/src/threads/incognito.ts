@@ -5,6 +5,7 @@ import type { Core } from '../core.ts';
 import { removeDir } from '../fs-retry.ts';
 import { messageOf, refused } from '../errors.ts';
 import { removeTranscripts, threadSessions } from './transcript-purge.ts';
+import { withVacantCheckout } from '../checkout-removal.ts';
 
 /** True when `threads.create` asked for an incognito thread it may make: in the drafts, in a folder of the core's choosing. */
 export function checkIncognito(params: RpcParams<'threads.create'>, project: Project, placed: boolean): boolean {
@@ -25,10 +26,16 @@ export function checkIncognito(params: RpcParams<'threads.create'>, project: Pro
  */
 export async function eraseIncognito(core: Core, root: ThreadSummary, ids: ThreadId[]): Promise<void> {
   const sessions = threadSessions(core.journal.db, ids);
-  core.journal.deleteThreads(ids);
-  for (const id of ids) core.bus.emit('thread.removed', { threadId: id, undoable: false });
-  await removeTranscripts(core, sessions);
-  await eraseIncognitoFolder(core.dataDir, root.cwd, message => core.log('warn', message));
+  const project = (root.projectId ? core.journal.getProject(root.projectId) : null) ?? core.projects.drafts();
+  await withVacantCheckout(core, project, root.cwd, async () => {
+    // The archived incognito rows keep ownership recoverable until its folder is gone.
+    if (!await eraseIncognitoFolder(core.dataDir, root.cwd, message => core.log('warn', message))) {
+      throw refused(`the incognito folder could not be removed: ${root.cwd}`, { path: root.cwd });
+    }
+    core.journal.deleteThreads(ids);
+    for (const id of ids) core.bus.emit('thread.removed', { threadId: id, undoable: false });
+    await removeTranscripts(core, sessions);
+  });
   if (root.projectId !== null && core.journal.getProject(root.projectId)) core.projects.announce(root.projectId);
 }
 
@@ -58,8 +65,8 @@ function insideRoot(dataDir: string, path: string): boolean {
 }
 
 /** One conversation's folder, after its processes stopped. A path outside the root is left alone. */
-export async function eraseIncognitoFolder(dataDir: string, path: string, log: (message: string) => void): Promise<void> {
-  if (insideRoot(dataDir, path)) await removeDir(path, log);
+export async function eraseIncognitoFolder(dataDir: string, path: string, log: (message: string) => void): Promise<boolean> {
+  return !insideRoot(dataDir, path) || await removeDir(path, log);
 }
 
 /**

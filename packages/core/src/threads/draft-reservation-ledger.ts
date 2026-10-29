@@ -2,6 +2,7 @@ import type { Project, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { removeDir } from '../fs-retry.ts';
 import { logMessageOf } from '../log-errors.ts';
+import { withVacantCheckout } from '../checkout-removal.ts';
 
 const SETTING = 'draftReservationOwnership';
 export const DRAFT_CLEANUP_TIMEOUT_MS = 10_000;
@@ -37,6 +38,14 @@ export class DraftReservationLedger {
 
   /** Publication wins, including a crash after journal commit but before intent removal. */
   async cleanup(ownership: DraftOwnership): Promise<boolean> {
+    try {
+      // A stop request can leave the agent alive during its native termination grace.
+      // Keep both its folder and durable ownership until its actual exit is recorded.
+      await this.core.procs.waitForExit(ownership.threadId);
+    } catch (error) {
+      this.core.log('warn', `draft cleanup retained for ${ownership.path}: ${logMessageOf(error)}`);
+      return false;
+    }
     if (this.core.journal.getThread(ownership.threadId)) {
       this.forget(ownership.threadId);
       return true;
@@ -46,7 +55,8 @@ export class DraftReservationLedger {
     try {
       const removed = ownership.kind === 'worktree' && ownership.branch
         ? await this.core.worktrees.remove(ownership.threadId, ownership.project, { path: ownership.path, branch: ownership.branch }, DRAFT_CLEANUP_TIMEOUT_MS)
-        : await removeDir(ownership.path, message => this.core.log('warn', message));
+        : await withVacantCheckout(this.core, ownership.project, ownership.path,
+          () => removeDir(ownership.path, message => this.core.log('warn', message)));
       if (removed) this.forget(ownership.threadId);
       return removed;
     } catch (error) {
