@@ -110,11 +110,11 @@ export class RelayHub implements RelaySink {
   readonly #core: Core;
   readonly #authenticate: RelayAuthenticator;
   readonly #bounds: RelayBounds;
-
   constructor(core: Core, authenticate: RelayAuthenticator, bounds: RelayBounds) {
     this.#core = core;
     this.#authenticate = authenticate;
-    this.#bounds = bounds;}
+    this.#bounds = bounds;
+  }
 
   /**
    * The addresses this machine reaches `coreId` at for a client, the one that
@@ -244,7 +244,6 @@ export class RelayPipe {
   readonly #hub: RelayHub;
   readonly #authenticate: RelayAuthenticator;
   readonly #bounds: RelayBounds;
-
   constructor(
     core: Core,
     hub: RelayHub,
@@ -258,7 +257,8 @@ export class RelayPipe {
     this.#core = core;
     this.#hub = hub;
     this.#authenticate = authenticate;
-    this.#bounds = bounds;}
+    this.#bounds = bounds;
+  }
 
   attach(socket: ServerWebSocket<RelaySocketData>): void {
     this.#socket = socket;
@@ -277,7 +277,7 @@ export class RelayPipe {
     const text = typeof raw === 'string' ? raw : raw.toString();
     if (!this.#helloSeen) {
       this.#helloSeen = true;
-      void this.open(text);
+      void this.#open(text);
       return;
     }
     if (this.#upstream !== null && this.#upstream.open) {
@@ -293,7 +293,7 @@ export class RelayPipe {
   }
 
   /** The client's hello: its key for this machine is checked and taken out, the rest goes to the other member. */
-  private async open(text: string): Promise<void> {
+  async #open(text: string): Promise<void> {
     let frame: { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: Record<string, unknown> };
     try {
       frame = JSON.parse(text) as typeof frame;

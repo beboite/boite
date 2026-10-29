@@ -26,10 +26,10 @@ export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model
 export class ResidentAgents {
   readonly #core: Core;
   readonly #records: AgentsRepository;
-
   constructor(core: Core, records: AgentsRepository) {
     this.#core = core;
-    this.#records = records;}
+    this.#records = records;
+  }
   config(agentId: string): AgentRuntimeConfig {
     const agent = this.#records.get('profile',agentId);
     // Configurations saved by older cores also hold `compactAfterTurns` and `maxRunMinutes`: nothing reads them.

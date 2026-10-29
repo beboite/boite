@@ -584,7 +584,17 @@ steers it after. The caller's Communication settings decide as for a project
 of its own machine, except that another machine is always "elsewhere": a thread
 restricted to its own project cannot use it. The started thread obeys its own
 machine's rule: it starts nothing until the user writes in it. A bot's thread
-starts threads on its own machine only.
+takes another path: it starts threads on another machine only in a project
+there entrusted to it, named `<machine>/<project>` as `threads` lists it, or
+by its name there with `--machine`. That machine starts it while its
+`groupBots` switch is on, and the thread goes
+on the bot's desk, where its first answer arrives as an event; `machine:` in
+the output names the machine and `thread send <machine>/<id>` steers it
+([bots](bots.md#projects-of-the-other-machines-of-the-group)). A project of
+that machine not entrusted to the bot is refused with the ones it may use
+there. Without explicit model, effort or speed, this path does not require
+`groupThreads`; choosing them reads the destination's model list, which
+requires `groupThreads` too.
 
 The machine that would hold the thread decides whether it accepts them: its
 **Threads from the other machines** switch (`groupThreads`), on its row of the

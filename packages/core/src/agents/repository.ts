@@ -32,7 +32,7 @@ export class AgentsRepository {
   writes = 0;
   constructor(readonly journal: Journal) {}
 
-  private rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
+  #rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
     return (this.journal.db.query(sql).all(...params) as Row[]).map(row => JSON.parse(row.data) as AgentEntities[K]);
   }
 
@@ -59,12 +59,12 @@ export class AgentsRepository {
   /** Every record of a kind: a few profiles, their sessions and routines. */
   list<K extends AgentEntityKind>(kind: K): AgentEntities[K][] {
     checkKind(kind);
-    return this.rows<K>('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid', kind);
+    return this.#rows<K>('SELECT data FROM agent_entities WHERE kind = ? ORDER BY created_at, rowid', kind);
   }
 
   /** The session whose thread this is, through `agent_session_thread`. */
   sessionOfThread(threadId: string): AgentSession | null {
-    return this.rows<'session'>("SELECT data FROM agent_entities INDEXED BY agent_session_thread WHERE kind = 'session' AND json_extract(data, '$.threadId') = ?", threadId)[0] ?? null;
+    return this.#rows<'session'>("SELECT data FROM agent_entities INDEXED BY agent_session_thread WHERE kind = 'session' AND json_extract(data, '$.threadId') = ?", threadId)[0] ?? null;
   }
 
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {

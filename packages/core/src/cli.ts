@@ -32,7 +32,7 @@ import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
 import { contextRequest, parse, requiredText, Usage, type Parsed } from './cli-args.ts';
 import { issueCommand, logsCommand } from './logs-cli.ts';
-import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
+import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, spawnedLines, type Caller } from './control-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -58,7 +58,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
                                  <provider/model>, --effort <level>, --speed
                                  <tier> from boite delegate models, with the
                                  same --machine for that machine's; refused
-                                 when it lacks them, never another model)
+                                 when it lacks them, never another model);
+                                 a bot names an entrusted remote project
+                                 as <machine>/<project>
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -573,18 +575,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ...(parsed.model === undefined ? {} : { model: parsed.model }), ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
-        // A bot hears of it through events on its desk, not as a message.
-        const persistent = parsed.machine === undefined && await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
-        print([
-          `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`,
-          ...(parsed.machine === undefined ? [] : [`machine: ${parsed.machine}`]), `cwd: ${spawned.thread.cwd}`,
-          ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
-          `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
-          `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
-          persistent
-            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${spawned.thread.id} <text> steers it.`
-            : 'Its first answer comes back to you as a message; do not poll. boite threads send <address> <text> steers it.',
-        ], spawned);
+        // A bot hears of it through events on its desk, not as a message, on this machine or another.
+        const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
+        const machine = spawned.machine ?? parsed.machine;
+        print(spawnedLines(spawned, machine, persistent), spawned);
         return;
       }
       if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);

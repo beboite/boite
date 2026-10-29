@@ -64,14 +64,13 @@ interface OpenMessage {
 export class StreamBuffer {
   readonly #deltas = new Map<string, PendingDelta>();
   #deltaTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly open = new Map<string, OpenMessage>();
+  readonly #open = new Map<string, OpenMessage>();
   #persistTimer: ReturnType<typeof setTimeout> | null = null;
   #persistDelay = PERSIST_MS;
 
   readonly #db: Database;
   readonly #journal: Pick<Journal, 'isClosed' | 'markNativeAgents'>;
   readonly #onError: (message: string) => void;
-
   constructor(
     db: Database,
     journal: Pick<Journal, 'isClosed' | 'markNativeAgents'>,
@@ -79,7 +78,8 @@ export class StreamBuffer {
   ) {
     this.#db = db;
     this.#journal = journal;
-    this.#onError = onError;}
+    this.#onError = onError;
+  }
 
   appendDelta(threadId: string, messageId: string, partIndex: number, text: string): void {
     const key = `${messageId}|${partIndex}`;
@@ -99,7 +99,7 @@ export class StreamBuffer {
     this.#deltas.clear();
     const stored: PendingDelta[] = [];
     for (const item of items) {
-      if (this.open.has(item.messageId)) this.#appendToPart(item.messageId, item.partIndex, item.text);
+      if (this.#open.has(item.messageId)) this.#appendToPart(item.messageId, item.partIndex, item.text);
       else stored.push(item);
     }
     if (stored.length === 0) return;
@@ -119,7 +119,7 @@ export class StreamBuffer {
       this.#persistTimer = null;
     }
     if (this.#journal.isClosed()) return;
-    const dirty = [...this.open.values()].filter((entry) => entry.dirty);
+    const dirty = [...this.#open.values()].filter((entry) => entry.dirty);
     if (dirty.length === 0) return;
     // Under a caller's transaction the write below is only a savepoint, which
     // that caller can still roll back: the parts are written but stay dirty,
@@ -161,12 +161,12 @@ export class StreamBuffer {
 
   releaseTurn(turnId: string): void {
     this.flushDeltas();
-    for (const [id, entry] of this.open) {
+    for (const [id, entry] of this.#open) {
       if (entry.message.turnId !== turnId) continue;
       // Written whatever the flag says: it can be clean after a write a caller's
       // transaction rolled back, and the memory copy is dropped right after.
       this.#writeParts(entry);
-      this.open.delete(id);
+      this.#open.delete(id);
     }
   }
 
@@ -178,8 +178,8 @@ export class StreamBuffer {
   track(message: Message): string {
     this.#db.query('DELETE FROM streaming_parts WHERE message_id = ?').run(message.id);
     const json = storeParts(this.#db, message);
-    if (message.state === 'streaming') this.open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false, json, side: false, rowAt: Date.now() });
-    else this.open.delete(message.id);
+    if (message.state === 'streaming') this.#open.set(message.id, { message: { ...message, parts: [...message.parts] }, dirty: false, json, side: false, rowAt: Date.now() });
+    else this.#open.delete(message.id);
     return `[${json.join(',')}]`;
   }
 
@@ -188,7 +188,7 @@ export class StreamBuffer {
    * behind, or of every held message without `threadIds`; they stay held.
    */
   writeRows(threadIds?: Set<string>): void {
-    for (const entry of this.open.values()) {
+    for (const entry of this.#open.values()) {
       if (threadIds !== undefined && !threadIds.has(entry.message.threadId)) continue;
       if (entry.dirty || entry.side) this.#writeParts(entry);
     }
@@ -196,27 +196,27 @@ export class StreamBuffer {
 
   /** A copy of a message still streaming, or undefined once it is not held. */
   openCopy(messageId: string): Message | undefined {
-    const open = this.open.get(messageId);
+    const open = this.#open.get(messageId);
     if (open !== undefined) return { ...open.message, parts: [...open.message.parts] };
     return undefined;
   }
 
   /** True while any message is streaming. */
   hasOpen(): boolean {
-    return this.open.size > 0;
+    return this.#open.size > 0;
   }
 
   /** Lets go of every held message of these threads, without writing them. */
   forgetThreads(removed: Set<string>): void {
-    for (const [id, entry] of this.open) if (removed.has(entry.message.threadId)) this.open.delete(id);
+    for (const [id, entry] of this.#open) if (removed.has(entry.message.threadId)) this.#open.delete(id);
   }
 
   clear(): void {
-    this.open.clear();
+    this.#open.clear();
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
-    const open = this.open.get(messageId);
+    const open = this.#open.get(messageId);
     if (open !== undefined) {
       // A provider that sends the same part again changes nothing to write.
       const current = open.message.parts[partIndex];
@@ -235,16 +235,16 @@ export class StreamBuffer {
   }
 
   setMessageState(messageId: string, state: Message['state']): void {
-    const open = this.open.get(messageId);
+    const open = this.#open.get(messageId);
     // Written whatever the flag says when the memory copy goes: a clean flag can
     // follow a write that a caller's transaction rolled back.
     if (open !== undefined && (open.dirty || state !== 'streaming')) this.#writeParts(open);
-    if (state !== 'streaming') this.open.delete(messageId);
+    if (state !== 'streaming') this.#open.delete(messageId);
     this.#db.query('UPDATE messages SET state = ? WHERE id = ?').run(state, messageId);
   }
 
   #appendToPart(messageId: string, partIndex: number, text: string): void {
-    const open = this.open.get(messageId);
+    const open = this.#open.get(messageId);
     if (open !== undefined) {
       padInPlace(open.message.parts, partIndex);
       appendText(open.message.parts, partIndex, text);
@@ -299,7 +299,7 @@ export class StreamBuffer {
       } catch (error) {
         // A quiet stream must retry too; failed writes retain their dirty parts.
         this.#onError(`journal message write: ${messageOfError(error)}`);
-        if ([...this.open.values()].some((entry) => entry.dirty)) {
+        if ([...this.#open.values()].some((entry) => entry.dirty)) {
           this.#persistDelay = Math.min(PERSIST_MAX_MS, this.#persistDelay * 2);
           this.#armPersistTimer();
         }

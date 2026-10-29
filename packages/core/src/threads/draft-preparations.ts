@@ -36,16 +36,17 @@ export class DraftPreparations {
   readonly #receipts = new Map<string, { id: string; key: string; threadId: string; expiresAt: number }>();
   readonly #backlog = new Set<Reservation>();
   /** Discarded drafts whose processes were told to stop and may not have exited yet. */
-  private readonly stopping = new Map<string, ThreadSummary>();
+  readonly #stopping = new Map<string, ThreadSummary>();
   readonly #ledger: DraftReservationLedger;
   #readiness: Promise<void> | null = null;
   readonly #pending = new Map<string, Set<{ cancelled: boolean }>>();
   #closed = false;
 
   readonly #core: Core;
-
   constructor(core: Core) {
-    this.#core = core; this.#ledger = new DraftReservationLedger(core); }
+    this.#core = core;
+    this.#ledger = new DraftReservationLedger(core);
+  }
 
   /** Folders a draft reserved or is cleaning up: the worktree cleanup leaves them alone. */
   reservedPaths(): string[] {
@@ -60,7 +61,7 @@ export class DraftPreparations {
   threads(): ThreadSummary[] {
     this.#forgetStopped();
     const pending = [...this.#entries.values(), ...this.#backlog].flatMap(entry => entry.thread && !entry.adopted ? [entry.thread] : []);
-    return [...new Map([...pending, ...this.stopping.values()].map(thread => [thread.id, thread])).values()];
+    return [...new Map([...pending, ...this.#stopping.values()].map(thread => [thread.id, thread])).values()];
   }
 
   /** Startup and speculative admission share one reconciliation barrier. */
@@ -171,7 +172,7 @@ export class DraftPreparations {
     clearTimeout(entry.timer);
     if (entry.thread) this.#stop(entry.thread);
     else if (entry.traceId) this.#core.procs.killTree(entry.traceId);
-    const cleanup = entry.planned.then(() => this.cleanup(entry), () => this.cleanup(entry));
+    const cleanup = entry.planned.then(() => this.#cleanup(entry), () => this.#cleanup(entry));
     this.#cleanups.add(cleanup);
     try { await cleanup; } finally { this.#cleanups.delete(cleanup); }
   }
@@ -274,14 +275,14 @@ export class DraftPreparations {
     this.#core.procs.killTree(thread.id);
     this.#core.agents.forget(thread.id);
     this.#forgetStopped();
-    this.stopping.set(thread.id, thread);
+    this.#stopping.set(thread.id, thread);
   }
 
   #forgetStopped(): void {
-    for (const id of this.stopping.keys()) if (this.#core.procs.liveCount(id as ThreadId) === 0) this.stopping.delete(id);
+    for (const id of this.#stopping.keys()) if (this.#core.procs.liveCount(id as ThreadId) === 0) this.#stopping.delete(id);
   }
 
-  private async cleanup(entry: Reservation): Promise<void> {
+  async #cleanup(entry: Reservation): Promise<void> {
     if (entry.adopted) return;
     if (entry.thread) this.#stop(entry.thread);
     if (!entry.ownership || await this.#ledger.cleanup(entry.ownership)) this.#backlog.delete(entry);

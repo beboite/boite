@@ -93,7 +93,7 @@ export class ProcRegistry {
   readonly #lastPushed = new Map<ThreadId, ThreadLoad>();
   readonly #loadPace: LoadPace;
   /** Threads between `turn.started` and `turn.finished`: the tick stays fast for them. */
-  private readonly running = new Set<ThreadId>();
+  readonly #running = new Set<ThreadId>();
   /** The previous tick saw a thread above `BUSY_CPU_PERCENT` or a process count change. */
   #loadBusy = false;
   /** When exited pids were last dropped from `known`. */
@@ -103,9 +103,9 @@ export class ProcRegistry {
   /** Group stops still inside their grace off Windows, and taskkill fallbacks on it: what `killAll` waits for. */
   readonly #stops = new Set<Promise<void>>();
   readonly #childStops = new WeakMap<SpawnedChild, ManagedStop>();
-  private reapOrphans = true;
-  private readonly orphanGraceMs: number;
-  private readonly forgetDelayMs: number;
+  #reapOrphans = true;
+  readonly #orphanGraceMs: number;
+  readonly #forgetDelayMs: number;
   readonly #stopListening: () => void;
   #closing: Promise<void> | null = null;
   #accepting = true;
@@ -123,7 +123,6 @@ export class ProcRegistry {
   readonly #journal: Journal;
   readonly #bus: Bus;
   readonly #options: ProcRegistryOptions;
-
   constructor(
     journal: Journal,
     bus: Bus,
@@ -136,25 +135,29 @@ export class ProcRegistry {
     this.protection = new ExecutionProtections(platform.protectedExecution, protectionRunner(this), id => this.stopAndWait(id), id => (platform.hasProcesses?.(id) ? 1 : 0) + this.liveCount(id));
     this.memory = new MemoryGuard(bus, platform);
     this.#resources = new ResourceCollection(platform);
-    this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
-    this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
+    this.#orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
+    this.#forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.#stopListening = this.#bus.onAny((name, payload) => {
       if (name === 'turn.started') {
         const { threadId } = payload as Turn;
         this.#cancelSweep(threadId);
         this.platform.warm();
-        this.running.add(threadId);
+        this.#running.add(threadId);
         this.#loadPace.hurry();
       }
       else if (name === 'turn.finished') {
         const { threadId } = payload as Turn;
-        this.running.delete(threadId);
+        this.#running.delete(threadId);
         this.#scheduleSweep(threadId);
       }
     });
     this.platform.retain({
-      started: (threadId, pid, info) => this.#onJobStarted(threadId, pid, info),
-      exited: (threadId, pid, exit) => this.onJobExited(threadId, pid, exit),
+      started: (threadId, pid, info) => {
+        this.#onJobStarted(threadId, pid, info);
+      },
+      exited: (threadId, pid, exit) => {
+        this.onJobExited(threadId, pid, exit);
+      },
       note: (threadId, message) => {
         this.#bus.emit('core.log', { level: 'warn', message: 'the process platform reported a warning', source: 'process', event: 'platform.warning', threadId, at: Date.now() });
         try { options.diagnostic?.(`Process platform: ${message}`, { event: 'platform.warning.detail', threadId }); } catch { /* Observability must not break the platform's callback. */ }
@@ -191,7 +194,7 @@ export class ProcRegistry {
       },
     });
     // Fast while a turn runs, a task-manager view leases the numbers, memory is under pressure, a startup is boosted or a process was busy.
-    this.#loadPace = new LoadPace(() => this.sampleLoad(), () => this.running.size > 0 || this.#resources.active
+    this.#loadPace = new LoadPace(() => this.sampleLoad(), () => this.#running.size > 0 || this.#resources.active
       || this.memory.state !== 'ok' || this.#startups.size > 0 || this.#loadBusy,
     options.loadIntervalMs ?? LOAD_INTERVAL_MS, options.idleLoadIntervalMs ?? IDLE_LOAD_INTERVAL_MS);
   }
@@ -217,8 +220,8 @@ export class ProcRegistry {
   applySettings(settings: Settings): void {
     this.memory.applySettings(settings);
     this.platform.applySettings(settings);
-    this.reapOrphans = settings.reapOrphans !== false;
-    if (!this.reapOrphans) for (const threadId of [...this.#sweepTimers.keys()]) this.#cancelSweep(threadId);
+    this.#reapOrphans = settings.reapOrphans !== false;
+    if (!this.#reapOrphans) for (const threadId of [...this.#sweepTimers.keys()]) this.#cancelSweep(threadId);
   }
 
   /** What the guard Worker is doing, focus and audio. Read by the tests, not by a client. */
@@ -237,7 +240,7 @@ export class ProcRegistry {
     for (const timer of this.#sweepTimers.values()) clearTimeout(timer);
     this.#sweepTimers.clear();
     this.#loadPace.close();
-    this.running.clear();
+    this.#running.clear();
     this.#resources.close();
     for (const timer of this.exitTimers.values()) clearTimeout(timer);
     this.exitTimers.clear();
@@ -678,7 +681,7 @@ export class ProcRegistry {
   sweepOrphans(threadId: ThreadId, now: number = Date.now()): number[] {
     const byPid = this.#live.get(threadId);
     if (byPid === undefined || this.#journal.isClosed()) return [];
-    const stopping = orphansOf(byPid, now, this.orphanGraceMs, pid => this.platform.runningSince(pid));
+    const stopping = orphansOf(byPid, now, this.#orphanGraceMs, pid => this.platform.runningSince(pid));
     if (stopping.size === 0) return [];
     const stopped: number[] = [];
     for (const { record, identity } of stopping.values()) {
@@ -707,13 +710,13 @@ export class ProcRegistry {
 
   #scheduleSweep(threadId: ThreadId): void {
     this.#cancelSweep(threadId);
-    if (!this.reapOrphans || !this.#live.has(threadId)) return;
+    if (!this.#reapOrphans || !this.#live.has(threadId)) return;
     const timer = setTimeout(() => {
       this.#sweepTimers.delete(threadId);
       this.sweepOrphans(threadId);
       // A finished turn bounds the thread's trace too (journal/processes.ts).
       if (!this.#journal.isClosed()) traceWrite(this.#bus, threadId, () => this.#journal.pruneProcesses(threadId));
-    }, this.orphanGraceMs);
+    }, this.#orphanGraceMs);
     timer.unref();
     this.#sweepTimers.set(threadId, timer);
   }
@@ -808,7 +811,7 @@ export class ProcRegistry {
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
       if (!this.#journal.isClosed()) traceWrite(this.#bus, threadId, () => { this.#journal.forgetProcessesWithoutThread(threadId); this.#journal.pruneProcesses(threadId); });
-    }, this.forgetDelayMs);
+    }, this.#forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);
   }
@@ -822,7 +825,7 @@ export class ProcRegistry {
     const known = this.known.get(threadId);
     if (known === undefined) return;
     for (const [pid, process] of known) {
-      if (process.exitedAt !== undefined && now - process.exitedAt >= this.forgetDelayMs && !byPid.has(pid)) known.delete(pid);
+      if (process.exitedAt !== undefined && now - process.exitedAt >= this.#forgetDelayMs && !byPid.has(pid)) known.delete(pid);
     }
   }
 
@@ -844,7 +847,7 @@ export class ProcRegistry {
     const now = Date.now();
     this.#resources.sampledAt = now;
     const processes: MemoryProcess[] = [];
-    const sweepKnown = now - this.#knownSweptAt >= this.forgetDelayMs;
+    const sweepKnown = now - this.#knownSweptAt >= this.#forgetDelayMs;
     if (sweepKnown) this.#knownSweptAt = now;
     let busy = false;
     let live = false;

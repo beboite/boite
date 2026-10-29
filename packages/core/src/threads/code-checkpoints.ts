@@ -56,17 +56,16 @@ export class CodeCheckpoints {
   #closed = false;
 
   readonly #core: Core;
-
   constructor(core: Core) {
     this.#core = core;
     this.#pruned = this.#prune().catch(error => this.#core.log('warn', `file checkpoint cleanup failed: ${messageOf(error)}`));
     void this.#pruned.then(() => this.collect());
     this.#arm(STORE_FIRST_MS);
   }
-  private root(): string { return join(this.#core.dataDir, 'checkpoints'); }
-  #folder(threadId: string): string { return join(this.root(), threadId); }
-  private objects(threadId: string): string { return join(this.#folder(threadId), 'objects'); }
-  #shared(): string { return join(this.root(), SHARED); }
+  #root(): string { return join(this.#core.dataDir, 'checkpoints'); }
+  #folder(threadId: string): string { return join(this.#root(), threadId); }
+  #objects(threadId: string): string { return join(this.#folder(threadId), 'objects'); }
+  #shared(): string { return join(this.#root(), SHARED); }
 
   /**
    * Blobs live once in the shared store, so threads on the same root reuse
@@ -84,12 +83,12 @@ export class CodeCheckpoints {
       this.#previous.delete(key);
     }
     this.writing += 1;
-    try { return await snapshot(this.#core, threadId, root, this.objects(threadId), files, this.#shared()); }
+    try { return await snapshot(this.#core, threadId, root, this.#objects(threadId), files, this.#shared()); }
     finally { this.writing -= 1; }
   }
 
   /** Cached metadata that names a folder whose blobs were removed is forgotten. */
-  private forget(objects: string): void {
+  #forget(objects: string): void {
     for (const files of this.#previous.values()) for (const [name, cached] of files) if (cached.objects === objects) files.delete(name);
   }
 
@@ -187,7 +186,7 @@ export class CodeCheckpoints {
       const { files, changes } = await this.#restore(thread, root, turnIds, messageId);
       try { return cut(files); }
       catch (error) {
-        await restoreFiles(root, this.objects(thread.id), changes.map(change => ({ name: change.name, before: change.after, after: change.before })));
+        await restoreFiles(root, this.#objects(thread.id), changes.map(change => ({ name: change.name, before: change.after, after: change.before })));
         throw error;
       }
     }
@@ -221,7 +220,7 @@ export class CodeCheckpoints {
     const modified = [...changes.values()].filter(change => !same(change.before, change.after));
     const unbacked = modified.find(change => change.before?.unbacked || change.after?.unbacked);
     if (unbacked) return unavailable(`${unbacked.name} had a version over the 16 MiB checkpoint limit, which has no backup`);
-    await restoreFiles(root, this.objects(thread.id), modified);
+    await restoreFiles(root, this.#objects(thread.id), modified);
     return { files: { status: modified.length ? 'restored' : 'unchanged', count: modified.length }, changes: modified };
   }
 
@@ -252,7 +251,7 @@ export class CodeCheckpoints {
   /** Deletions kept undoable in a session are purged by the journal on restart. */
   async #prune(): Promise<void> {
     let entries;
-    try { entries = await readdir(this.root(), { withFileTypes: true }); }
+    try { entries = await readdir(this.#root(), { withFileTypes: true }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
     if (!this.#core.journal.isClosed()) await this.discard(entries.filter(entry => entry.isDirectory() && !this.#core.journal.getThread(entry.name)).map(entry => entry.name));
   }
@@ -288,7 +287,7 @@ export class CodeCheckpoints {
       const since = thread.archived ? thread.doneAt ?? thread.archivedAt ?? thread.updatedAt : null;
       if (since != null && now - since > IDLE_THREAD_MS) {
         await rm(this.#folder(threadId), { recursive: true, force: true });
-        this.forget(this.objects(threadId));
+        this.#forget(this.#objects(threadId));
         return;
       }
       const names = (await readdir(this.#folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => name.slice(0, -'.json'.length));
@@ -296,7 +295,7 @@ export class CodeCheckpoints {
       const order = new Map(this.#core.journal.listTurns(threadId).map((turn, index) => [turn.id, index]));
       names.sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1));
       const removed = await trimFolder(this.#folder(threadId), new Set(names.slice(-KEEP_TURNS)));
-      if (removed.blobs) this.forget(this.objects(threadId));
+      if (removed.blobs) this.#forget(this.#objects(threadId));
     });
   }
 
@@ -342,7 +341,7 @@ export class CodeCheckpoints {
     if (cursor === true) return true;
     if (!this.#walk) {
       const after = typeof cursor === 'string' ? cursor : '';
-      const entries = await readdir(this.root(), { withFileTypes: true }).catch(() => []);
+      const entries = await readdir(this.#root(), { withFileTypes: true }).catch(() => []);
       this.#walk = { folders: entries.filter(entry => entry.isDirectory() && entry.name !== SHARED && entry.name > after).map(entry => entry.name).sort(), index: 0, next: 0 };
     }
     const walk = this.#walk;
@@ -352,7 +351,7 @@ export class CodeCheckpoints {
     while (walk.index < walk.folders.length) {
       const threadId = walk.folders[walk.index]!;
       if (!walk.paths) {
-        const objects = (await readdir(this.objects(threadId)).catch(() => [] as string[])).map(name => join(this.objects(threadId), name));
+        const objects = (await readdir(this.#objects(threadId)).catch(() => [] as string[])).map(name => join(this.#objects(threadId), name));
         const manifests = (await readdir(this.#folder(threadId)).catch(() => [] as string[])).filter(name => name.endsWith('.json')).map(name => join(this.#folder(threadId), name));
         walk.paths = [...objects, ...manifests];
       }
@@ -376,7 +375,7 @@ export class CodeCheckpoints {
   }
 
   async #retainAll(now: number): Promise<void> {
-    const entries = await readdir(this.root(), { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(this.#root(), { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (this.#closed) return;
       if (entry.isDirectory() && entry.name !== SHARED) await this.retainThread(entry.name, now);

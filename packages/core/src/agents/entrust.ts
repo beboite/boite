@@ -22,7 +22,6 @@ export class AgentEntrustments {
 
   readonly #core: Core;
   readonly #store: AgentStore;
-
   constructor(core: Core, store: AgentStore) {
     this.#core = core;
     this.#store = store;
@@ -67,7 +66,7 @@ export class AgentEntrustments {
     // Entrusted to another bot: the one before loses the grant, as on a take-back.
     const before = this.of(threadId);
     this.#write([...this.list().filter(other => other.threadId !== threadId), entry]);
-    if (before && before.agentId !== agentId) this.release(before);
+    if (before && before.agentId !== agentId) this.#release(before);
     this.#store.projects.follow(agentId, threadId, 'entrusted');
     this.#core.agentRuntime.line(agentId, `The user entrusted "${thread.title}" (${threadId}) to you: ${objective}`);
     this.#store.changed();
@@ -79,7 +78,7 @@ export class AgentEntrustments {
     const entry = this.of(threadId);
     if (!entry) return null;
     this.#write(this.list().filter(other => other.threadId !== threadId));
-    this.release(entry);
+    this.#release(entry);
     if (this.#core.journal.getThread(threadId) && this.#core.activity.get(threadId).goal) {
       try { this.#core.activity.control({ threadId, kind: 'goal', action: 'remove' }); } catch { /* The goal ended meanwhile. */ }
     }
@@ -91,7 +90,7 @@ export class AgentEntrustments {
     const entry = this.of(threadId);
     if (!entry) return;
     this.#write(this.list().filter(other => other.threadId !== threadId));
-    this.release(entry);
+    this.#release(entry);
     this.#store.changed();
   }
 
@@ -105,7 +104,7 @@ export class AgentEntrustments {
     if (!entry) return;
     const thread = this.#core.journal.getThread(event.threadId);
     const over = event.outcome === 'complete';
-    if (over) { this.#write(this.list().filter(other => other.threadId !== entry.threadId)); this.release(entry); }
+    if (over) { this.#write(this.list().filter(other => other.threadId !== entry.threadId)); this.#release(entry); }
     const what = `Entrusted thread ${entry.threadId}, titled ${quoted(thread?.title ?? '')}: goal ${EVENTS[event.outcome]}.`;
     if (event.outcome === 'stopped') this.#core.agentRuntime.line(entry.agentId, what);
     // The news of a met goal is the entrustment's last word: it reaches the bot though the grant ended with it.
@@ -114,7 +113,7 @@ export class AgentEntrustments {
   }
 
   /** The bot's follow loses the owner's grant; it stays only where the bot reaches the thread another way. */
-  private release(entry: AgentEntrustment): void {
+  #release(entry: AgentEntrustment): void {
     const agent = this.#profile(entry.agentId);
     if (agent) this.#store.projects.release(agent, entry.threadId);
   }

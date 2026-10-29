@@ -109,8 +109,9 @@ export class AgentProjects {
 
   readonly #core: Core;
   readonly #store: AgentStore;
-
-  constructor(core: Core, store: AgentStore) { this.#core = core;  this.#store = store;
+  constructor(core: Core, store: AgentStore) {
+    this.#core = core;
+    this.#store = store;
     for (const row of core.journal.db.query("SELECT key, value FROM settings WHERE key LIKE 'agents:stall:%'").all() as { key: string; value: string }[]) {
       try { this.#stalls.set(row.key.slice(STALL.length), JSON.parse(row.value) as Stall); } catch { /* A stall record that does not parse is no stall. */ }
     }

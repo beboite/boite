@@ -117,7 +117,6 @@ export class MemoryKeeper {
 
   readonly #core: Core;
   readonly #store: AgentStore;
-
   constructor(core: Core, store: AgentStore) {
     this.#core = core;
     this.#store = store;
@@ -146,11 +145,11 @@ export class MemoryKeeper {
   lastPass(agentId: string): Pass | null {
     return (this.#core.journal.getSetting(`${LAST_PASS}${agentId}`) as Pass | undefined) ?? null;
   }
-  private record(agentId: string, pass: Pass): void {
+  #record(agentId: string, pass: Pass): void {
     this.#core.journal.setSetting(`${LAST_PASS}${agentId}`, pass);
     this.#store.changed();
   }
-  private running(agentId: string): boolean {
+  #running(agentId: string): boolean {
     for (const keeper of this.#keepers.values()) if (keeper.agentId === agentId) return true;
     return false;
   }
@@ -190,11 +189,11 @@ export class MemoryKeeper {
     const exchange = this.#exchange(turn);
     if (!exchange.answered.trim()) return;
     // Every exchange that ends while a pass runs joins the next one, oldest first.
-    if (this.running(agent.id)) { this.#waiting.set(agent.id, joined(this.#waiting.get(agent.id), exchange)); return; }
-    this.begin(agent, exchange);
+    if (this.#running(agent.id)) { this.#waiting.set(agent.id, joined(this.#waiting.get(agent.id), exchange)); return; }
+    this.#begin(agent, exchange);
   }
 
-  private begin(agent: AgentProfile, exchange: Exchange): void {
+  #begin(agent: AgentProfile, exchange: Exchange): void {
     const threadId = this.#store.sessionOf(agent.id)?.threadId;
     const parent = threadId ? this.#core.journal.getThread(threadId) : null;
     if (!parent || parent.archived) return;
@@ -211,7 +210,7 @@ export class MemoryKeeper {
         this.#core.journal.setSetting(`${KEEPER}${id}`, keeper);
         this.#core.agents.seal(id);
       }, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: CONTEXT_TRIMMABLE_PROTOCOLS.includes(provider.protocol) ? 'dontAsk' : 'plan' });
-      this.record(agent.id, { threadId: child, status: 'running', summary: null, at: keeper.startedAt });
+      this.#record(agent.id, { threadId: child, status: 'running', summary: null, at: keeper.startedAt });
       const today = new Date().toISOString().slice(0, 10);
       this.#core.threads.startTurn(child, { prompt: memoryPrompt(agent, brain.memory.slice(0, 64_000), cut(exchange.asked, ASKED_MAX, exchange.joined), cut(exchange.answered, ANSWERED_MAX, exchange.joined), today), display: `Update ${agent.name}'s memory` }, { kind: 'delegation' });
     } catch (error) {
@@ -280,7 +279,7 @@ export class MemoryKeeper {
       this.#core.journal.putThread(archived);
       this.#core.bus.emit('thread.updated', archived);
     }
-    this.record(keeper.agentId, { threadId, status, summary: status === 'unchanged' ? null : summary, at: Date.now() });
+    this.#record(keeper.agentId, { threadId, status, summary: status === 'unchanged' ? null : summary, at: Date.now() });
     if (status === 'error') this.#core.log('warn', `memory pass ${threadId} for agent ${keeper.agentId}: ${summary}`);
     else this.#core.log('info', `memory pass ${threadId} for agent ${keeper.agentId}: ${status === 'done' ? summary : 'no change'}`);
     // The exchange that ended while this pass ran goes next.
@@ -288,7 +287,7 @@ export class MemoryKeeper {
     if (next && !this.#closed && !this.#core.stopping) {
       this.#waiting.delete(keeper.agentId);
       const agent = this.#store.records.find('profile', keeper.agentId);
-      if (agent && agent.status !== 'archived') this.begin(agent, next);
+      if (agent && agent.status !== 'archived') this.#begin(agent, next);
     }
   }
 

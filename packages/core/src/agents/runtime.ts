@@ -136,12 +136,11 @@ export class AgentRuntime {
   /** Autonomous turns held by `admit`, by thread and source, each started again once the agent is admitted. */
   readonly #waiting = new Map<string, Map<string, () => void>>();
   /** The holds already said in an agent's thread, so a retried turn leaves one line. */
-  private readonly told = new Set<string>();
+  readonly #told = new Set<string>();
   /** Fact times per agent in the last hour, and the drops said in its thread. Reset by a restart. */
   readonly #sent = new Map<string, { at: number[]; told: number[] }>();
 
   readonly #core: Core;
-
   constructor(core: Core) {
     this.#core = core;
     for (const row of core.journal.db.query("SELECT key, value FROM settings WHERE key LIKE 'agents:pending:%'").all() as { key: string; value: string }[]) {
@@ -151,7 +150,7 @@ export class AgentRuntime {
     this.#off = core.bus.onAny((name, payload) => {
       if (this.#closed || core.journal.isClosed()) return;
       try {
-        if (name === 'turn.finished') this.finished(payload as Turn);
+        if (name === 'turn.finished') this.#finished(payload as Turn);
         else if (name === 'turn.started' && this.#store.agentOfThread((payload as Turn).threadId)) this.#store.changed();
       } catch (error) { core.log('warn', `agent runtime after ${name}: ${messageOf(error)}`); }
     });
@@ -185,7 +184,7 @@ export class AgentRuntime {
     catch (error) { this.#core.log('warn', `agent ${agent.id}: no thread to wake: ${messageOf(error)}`); return { held: 'failed' }; }
     if (this.#atWork(thread)) return { held: 'busy' };
     if (this.#overBudget(agent, thread, wake.label)) return { held: 'budget' };
-    try { return { turn: this.begin(thread, wake) }; }
+    try { return { turn: this.#begin(thread, wake) }; }
     catch (error) {
       this.#core.log('warn', `agent ${agent.id}: ${wake.label} could not start: ${messageOf(error)}`);
       return { held: 'failed' };
@@ -204,7 +203,7 @@ export class AgentRuntime {
   }
 
   /** What the agent's thread and the threads below it spent today against its budget, or null when it has room. */
-  private spent(agent: AgentProfile, threadId: string): { spent: number; budget: number } | null {
+  #spent(agent: AgentProfile, threadId: string): { spent: number; budget: number } | null {
     const budget = this.#store.resident.config(agent.id).dailyBudgetUsd ?? null;
     if (budget === null) return null;
     const spent = this.spentToday(threadId);
@@ -224,17 +223,17 @@ export class AgentRuntime {
     const agent = this.#store.agentOfThread(thread.id);
     if (!agent) return;
     const held = this.#refusal(agent);
-    const over = held === null ? this.spent(agent, thread.id) : null;
+    const over = held === null ? this.#spent(agent, thread.id) : null;
     const key = `${agent.id}:${source}`;
-    if (held === null && over === null) { this.told.delete(key); return; }
+    if (held === null && over === null) { this.#told.delete(key); return; }
     const why = held === 'inactive' ? `${agent.name} is archived`
       : held === 'paused' ? (agent.status === 'paused' ? `${agent.name} is paused` : 'bots are paused')
         : `today's turns cost $${over!.spent.toFixed(2)}, past the daily budget of $${over!.budget.toFixed(2)}`;
     const after = source === 'resume' ? 'It was dropped.' : held === 'inactive' ? 'It will not run.' : over ? 'It runs tomorrow, or once the budget is raised.'
       : agent.status === 'paused' ? `It runs once ${agent.name} resumes.` : 'It runs once bots resume.';
     const text = `Held ${SOURCE_TEXT[source]}: ${why}. ${after}`;
-    if (!this.told.has(key)) {
-      this.told.add(key);
+    if (!this.#told.has(key)) {
+      this.#told.add(key);
       // After the caller's transaction, which this refusal rolls back.
       queueMicrotask(() => { if (!this.#closed && !this.#core.journal.isClosed()) this.line(agent.id, text); });
     }
@@ -254,7 +253,7 @@ export class AgentRuntime {
       const agent = this.#store.agentOfThread(threadId);
       const thread = this.#core.journal.getThread(threadId);
       if (!agent || !thread || thread.archived) { this.#waiting.delete(threadId); continue; }
-      if (this.#refusal(agent) !== null || this.spent(agent, threadId) !== null || this.#atWork(thread)) continue;
+      if (this.#refusal(agent) !== null || this.#spent(agent, threadId) !== null || this.#atWork(thread)) continue;
       const [key, retry] = held.entries().next().value!;
       held.delete(key);
       if (held.size === 0) this.#waiting.delete(threadId);
@@ -266,12 +265,12 @@ export class AgentRuntime {
   start(agent: AgentProfile, wake: AgentWake): Turn {
     const thread = this.#core.threads.require(this.#store.open(agent.id).threadId);
     if (this.#atWork(thread)) throw refused(`${agent.name} is at work; run it again once its turn ends`, { threadId: thread.id, field: 'routineId' });
-    return this.begin(thread, wake);
+    return this.#begin(thread, wake);
   }
 
   /** An event that waits for the thread to be free, replacing one held under the same key. */
   queue(agentId: string, key: string, event: Omit<AgentWake, 'kind' | 'requestId'>): void {
-    const pending = this.held(agentId);
+    const pending = this.#held(agentId);
     pending.events = [...pending.events.filter(e => e.key !== key), { key, label: event.label, prompt: event.prompt, at: Date.now() }];
     this.#save(agentId, pending);
   }
@@ -285,7 +284,7 @@ export class AgentRuntime {
   fact(agentId: string, fact: AgentFact): boolean {
     if (this.#closed) return false;
     const now = Date.now();
-    const pending = this.held(agentId);
+    const pending = this.#held(agentId);
     const previous = pending.facts.find(f => f.key === fact.key);
     if (previous && !fact.replace) return false;
     const wakes = fact.urgent || this.#store.resident.config(agentId).eventWakes === true;
@@ -352,7 +351,7 @@ export class AgentRuntime {
     this.#core.journal.deleteSetting(`${PENDING}${agentId}`);
   }
 
-  private held(agentId: string): Pending {
+  #held(agentId: string): Pending {
     const held = this.pending.get(agentId) ?? { facts: [], events: [] };
     return { facts: [...held.facts], events: [...held.events] };
   }
@@ -372,12 +371,12 @@ export class AgentRuntime {
     return this.#core.threads.isBusy(thread.id);
   }
 
-  private begin(thread: ThreadSummary, wake: AgentWake): Turn {
+  #begin(thread: ThreadSummary, wake: AgentWake): Turn {
     // A routine retried after restart already owns its original prompt and facts.
     const prior = wake.kind === 'routine' && wake.requestId ? this.#core.journal.turnRequest(thread.id, wake.requestId) : null;
     if (prior) return this.#core.journal.getTurn(prior.turn_id)!;
     const agent = this.#store.agentOfThread(thread.id);
-    const pending = agent && wake.kind === 'routine' && this.#store.resident.config(agent.id).eventWakes !== true ? this.held(agent.id) : null;
+    const pending = agent && wake.kind === 'routine' && this.#store.resident.config(agent.id).eventWakes !== true ? this.#held(agent.id) : null;
     if (!pending?.facts.length) return this.#core.threads.startTurn(thread.id, { prompt: wake.prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId });
     const facts = pending?.facts.filter(f => this.factThreads(f).every(id => this.#store.projects.mayHear(agent!, id))) ?? [];
     const prompt = facts.length ? `${wake.prompt}\n\n${this.#eventPrompt(facts)}` : wake.prompt;
@@ -385,7 +384,7 @@ export class AgentRuntime {
     // Acceptance journals the facts with the routine and consumes the durable queue
     // in the same transaction. Failed admission leaves the queue intact.
     return this.#core.threads.startTurn(thread.id, { prompt, display: wake.label }, { kind: wake.kind, requestId: wake.requestId }, { persistAdmission: () => {
-      const held = this.held(agent!.id);
+      const held = this.#held(agent!.id);
       const next = { ...held, facts: held.facts.filter(f => !keys.has(f.key)) };
       const empty = next.facts.length === 0 && next.events.length === 0;
       if (empty) this.#core.journal.deleteSetting(`${PENDING}${agent!.id}`);
@@ -405,7 +404,7 @@ export class AgentRuntime {
 
   /** Past its daily budget a wake is skipped; the first skip of the day says so in its thread. */
   #overBudget(agent: AgentProfile, thread: ThreadSummary, label: string): boolean {
-    const over = this.spent(agent, thread.id);
+    const over = this.#spent(agent, thread.id);
     if (over === null) return false;
     const { spent, budget } = over;
     const day = new Date(midnight()).toISOString().slice(0, 10);
@@ -445,7 +444,7 @@ export class AgentRuntime {
       if (event) {
         const attempt = this.attempt(agent, { kind: 'event', label: event.label, prompt: event.prompt, requestId: `event-${agentId.slice(-40)}-${event.at}` });
         if (attempt.held === 'busy' || attempt.held === 'paused') continue;
-        this.#save(agentId, { ...this.held(agentId), events: this.held(agentId).events.filter(e => e !== event && e.key !== event.key) });
+        this.#save(agentId, { ...this.#held(agentId), events: this.#held(agentId).events.filter(e => e !== event && e.key !== event.key) });
         continue;
       }
       // With event wakes off only urgent facts wake the agent; the others wait for its next routine.
@@ -456,7 +455,7 @@ export class AgentRuntime {
       const heard = pending.facts.filter(fact => this.factThreads(fact).every(id => this.#store.projects.mayHear(agent, id)));
       if (heard.length < pending.facts.length) {
         this.#core.log('info', `agent ${agentId}: ${pending.facts.length - heard.length} events about threads it may no longer see were dropped`);
-        this.#save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => heard.some(kept => kept.key === f.key)) });
+        this.#save(agentId, { ...this.#held(agentId), facts: this.#held(agentId).facts.filter(f => heard.some(kept => kept.key === f.key)) });
       }
       const facts = heard.filter(f => eventWakes || f.urgent);
       if (facts.length === 0) continue;
@@ -477,12 +476,12 @@ export class AgentRuntime {
       if (attempt.held === 'busy' || attempt.held === 'paused') continue;
       // Started, skipped for the budget or failed: these facts are spent. Those that arrived meanwhile stay.
       const keys = new Set(batch.map(f => f.key));
-      this.#save(agentId, { ...this.held(agentId), facts: this.held(agentId).facts.filter(f => !keys.has(f.key)) });
+      this.#save(agentId, { ...this.#held(agentId), facts: this.#held(agentId).facts.filter(f => !keys.has(f.key)) });
     }
   }
 
   /** A turn of an agent's thread ended: its routine's outcome, the memory pass, the status. */
-  private finished(turn: Turn): void {
+  #finished(turn: Turn): void {
     const agent = this.#store.agentOfThread(turn.threadId);
     if (!agent) return;
     this.#store.routines.finished(turn);

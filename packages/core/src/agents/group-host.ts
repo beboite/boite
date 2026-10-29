@@ -10,18 +10,20 @@
  * What the bot may do here is what a bot of this machine does on a project
  * entrusted to it (`projects.ts`): list, read, steer with letters marked as
  * its own, answer questions, archive, mark done, stop, rename, move between
- * its projects. Deleting threads, tool permissions and settings are never
+ * its projects, start a thread in one of them (`bot.start`, on the bot's desk
+ * here at once). Deleting threads, tool permissions and settings are never
  * asked of this machine: there is no operation for them.
  *
  * Events go back by themselves: a turn of a thread it follows, any failed
  * turn, any question, a permission a followed thread waits on. They wait in a
  * bounded outbox per machine while it is away and leave once it answers.
  */
-import type { AgentLetter, CoordinationPeer, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
+import type { AgentLetter, AgentSpawn, CoordinationPeer, PermissionRequest, ProjectId, ProjectThreadRow, QuestionRequest, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { RESIDENT_LETTER_TTL_MS } from '../coordination-letter.ts';
 import { MAX_BODY, PeerRefusal, type BotOperation } from '../coordination-wire.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
+import { checkStartFields } from '../threads/group-spawn.ts';
 import type { Steward } from './projects.ts';
 
 /** What this machine answers while its owner has not let the bots of the group look after its projects. */
@@ -43,6 +45,15 @@ export interface BotLease {
   projectIds: ProjectId[];
   /** The threads here on its desk: every turn they end goes back. */
   watched: ThreadId[];
+  /**
+   * Threads `bot.start` made here that the bot's core has not listed among its
+   * own yet, kept only here: a lost answer or a restart of either side must not
+   * leave one off the desk, so the leases the bot sends keep them watched and
+   * a sync's answer gives them back, until a lease of the bot lists them.
+   */
+  started?: ThreadId[];
+  /** Threads the bot's owner or the bot took off its desk: a start of them this machine still holds is let go. */
+  dropped?: ThreadId[];
   v: number;
 }
 
@@ -53,6 +64,8 @@ export interface BotEvent {
   /** Unique per event: a retry never wakes the bot twice. */
   key: string;
   row: ProjectThreadRow;
+  /** The bot started that thread and its core has not listed it yet: it goes on the desk there. */
+  started?: true;
   status?: Turn['status'];
   answer?: string | null;
   question?: { id: string; text: string; options: { id: string; label: string }[] };
@@ -97,6 +110,8 @@ export function checkLease(value: unknown, field = 'lease'): BotLease {
     name: textOf(raw.name, `${field}.name`, 100),
     projectIds: list(raw.projectIds, 'projectIds', 50),
     watched: list(raw.watched, 'watched', 200),
+    // A bot's core older than this field sends none.
+    ...(raw.dropped === undefined ? {} : { dropped: list(raw.dropped, 'dropped', 200) }),
     v: raw.v,
   };
 }
@@ -110,7 +125,6 @@ export class GroupBotHost {
   #startup: ReturnType<typeof setTimeout> | null;
 
   readonly #core: Core;
-
   constructor(core: Core) {
     this.#core = core;
     // Other machines hear only what committed.
@@ -208,11 +222,18 @@ export class GroupBotHost {
     const leases = this.leases(peer.coreId);
     const saved = leases[lease.agentId];
     if (saved !== undefined && saved.v > lease.v) return saved;
-    if (saved === undefined || saved.v < lease.v) this.#saveLeases(peer.coreId, { ...leases, [lease.agentId]: lease });
-    return lease;
+    const next = this.#kept(saved, lease);
+    if (saved === undefined || saved.v < lease.v) this.#saveLeases(peer.coreId, { ...leases, [lease.agentId]: next });
+    return next;
   }
 
-  private target(peer: CoordinationPeer, lease: BotLease, value: unknown, method: string): ThreadSummary {
+  /** A lease the bot's core sent, still watching the threads it started here that the bot does not list yet. */
+  #kept(saved: BotLease | undefined, sent: BotLease): BotLease {
+    const started = (saved?.started ?? []).filter(id => !sent.watched.includes(id) && !(sent.dropped ?? []).includes(id) && this.#core.journal.getThread(id) !== null);
+    return started.length === 0 ? sent : { ...sent, watched: [...sent.watched, ...started].slice(-200), started };
+  }
+
+  #target(peer: CoordinationPeer, lease: BotLease, value: unknown, method: string): ThreadSummary {
     const id = textOf(value, `${method}.target`, 128);
     const thread = this.#core.journal.getThread(id);
     if (thread === null || !this.#inScope(lease, thread)) {
@@ -230,12 +251,15 @@ export class GroupBotHost {
     };
   }
 
-  /** A thread the bot wrote to or answered for goes on its desk here as on its own machine. */
-  #watch(coreId: string, agentId: string, threadId: ThreadId): void {
+  /** A thread the bot wrote to, answered for or `started` goes on its desk here as on its own machine. */
+  #watch(coreId: string, agentId: string, threadId: ThreadId, started = false): void {
     const leases = this.leases(coreId);
     const lease = leases[agentId];
-    if (lease === undefined || lease.watched.includes(threadId)) return;
-    this.#saveLeases(coreId, { ...leases, [agentId]: { ...lease, watched: [...lease.watched, threadId].slice(-200) } });
+    if (lease === undefined) return;
+    const fresh = started && !(lease.started ?? []).includes(threadId);
+    if (lease.watched.includes(threadId) && !fresh) return;
+    const watched = lease.watched.includes(threadId) ? lease.watched : [...lease.watched, threadId].slice(-200);
+    this.#saveLeases(coreId, { ...leases, [agentId]: { ...lease, watched, ...(fresh ? { started: [...(lease.started ?? []), threadId].slice(-200) } : {}) } });
   }
 
   // -- requests ----------------------------------------------------------------
@@ -248,7 +272,7 @@ export class GroupBotHost {
     // It answers: what waited for it goes now, not after the wait its absence set.
     if (this.outbox(peer.coreId).length) this.#back(peer.coreId);
     switch (operation) {
-      case 'bot.lease': return this.lease(peer, raw);
+      case 'bot.lease': return this.#lease(peer, raw);
       case 'bot.threads': {
         const lease = this.#take(peer, raw.lease);
         let scope = this.scope(lease);
@@ -262,11 +286,11 @@ export class GroupBotHost {
       }
       case 'bot.thread': {
         const lease = this.#take(peer, raw.lease);
-        return this.#core.workforce.projects.detailOf(this.target(peer, lease, raw.target, 'bot.thread'));
+        return this.#core.workforce.projects.detailOf(this.#target(peer, lease, raw.target, 'bot.thread'));
       }
       case 'bot.act': {
         const lease = this.#take(peer, raw.lease);
-        const target = this.target(peer, lease, raw.target, 'bot.act');
+        const target = this.#target(peer, lease, raw.target, 'bot.act');
         const result = await this.#core.workforce.projects.perform(this.#steward(peer, lease), target, {
           action: raw.action as never,
           ...(typeof raw.title === 'string' ? { title: raw.title } : {}),
@@ -276,7 +300,7 @@ export class GroupBotHost {
       }
       case 'bot.answer': {
         const lease = this.#take(peer, raw.lease);
-        const target = this.target(peer, lease, raw.target, 'bot.answer');
+        const target = this.#target(peer, lease, raw.target, 'bot.answer');
         return this.#core.workforce.projects.answerAs(this.#steward(peer, lease), target, {
           questionId: textOf(raw.questionId, 'bot.answer.questionId', 128),
           optionIds: optionIdsOf(raw.optionIds),
@@ -286,13 +310,45 @@ export class GroupBotHost {
       }
       case 'bot.send': {
         const lease = this.#take(peer, raw.lease);
-        const target = this.target(peer, lease, raw.target, 'bot.send');
+        const target = this.#target(peer, lease, raw.target, 'bot.send');
         if (target.parentThreadId) throw refused(`bot.send.target: ${target.id} is a delegated agent; write to its parent ${target.parentThreadId}`, { field: 'target' });
         const letter = this.#letter(peer, lease, target, textOf(raw.text, 'bot.send.text', 12_000), textOf(raw.id, 'bot.send.id', 100));
         this.#watch(peer.coreId, lease.agentId, target.id);
         return { id: letter.id, status: 'received' as const, thread: this.#core.workforce.projects.row(this.#core.threads.require(target.id)) };
       }
+      case 'bot.start': return this.#start(peer, this.#take(peer, raw.lease), raw);
     }
+  }
+
+  /**
+   * `bot.start`: the bot starts a thread in a project of its lease here, on
+   * the rules a thread of another machine starts on (`threads/spawn.ts`). It
+   * goes on the bot's desk before its first turn, so that turn's answer goes
+   * back as an event of the desk. The answer carries the thread's row.
+   */
+  async #start(peer: CoordinationPeer, lease: BotLease, raw: Record<string, unknown>): Promise<AgentSpawn & { row: ProjectThreadRow }> {
+    const start = checkStartFields(raw, 'bot.start');
+    const trimmed = start.project.trim();
+    const wanted = trimmed.toLowerCase();
+    const scope = this.scope(lease);
+    const found = scope.includes(trimmed) ? [trimmed] : scope.filter(id => this.#core.journal.getProject(id)?.name.toLowerCase() === wanted);
+    if (found.length === 0) {
+      const names = scope.map(id => this.#core.journal.getProject(id)?.name ?? id);
+      throw refused(`bot.start.project: ${start.project} is not a project entrusted to ${lease.name} here${names.length ? `; its projects here are ${names.join(', ')}` : ''}`, { field: 'project', expected: names });
+    }
+    if (found.length > 1) throw refused(`bot.start.project: ${found.length} projects are named ${trimmed} here; name one by id: ${found.join(', ')}`, { field: 'project', expected: found });
+    const projectId = found[0]!;
+    const spawned = await this.#core.threads.spawns.startForBot(peer, lease, projectId, start, created => {
+      // Worktree preparation can outlive the owner's switch, the asker's membership and the grant.
+      if (!this.allowed()) throw refused(GROUP_BOTS_OFF);
+      if (this.#member(peer.coreId) === null) throw refused('bot.start: the machine that asked is no longer in this group');
+      const now = this.leases(peer.coreId)[lease.agentId];
+      if (now === undefined || !this.scope(now).includes(projectId)) throw refused(`bot.start.project: ${start.project} is no longer entrusted to ${lease.name} here`, { field: 'project' });
+      this.#watch(peer.coreId, lease.agentId, created.id, true);
+    });
+    // A retry puts it back on the desk, whatever a lease sync did meanwhile.
+    this.#watch(peer.coreId, lease.agentId, spawned.thread.id, true);
+    return { ...spawned, row: this.#core.workforce.projects.row(this.#core.threads.require(spawned.thread.id)) };
   }
 
   /**
@@ -319,7 +375,7 @@ export class GroupBotHost {
    * its letters not yet read go nowhere. The answer names the projects a bot
    * may be entrusted and how the followed threads stand.
    */
-  private lease(peer: CoordinationPeer, raw: Record<string, unknown>): { projects: { id: string; name: string }[]; rows: ProjectThreadRow[] } {
+  #lease(peer: CoordinationPeer, raw: Record<string, unknown>): { projects: { id: string; name: string }[]; rows: ProjectThreadRow[]; started: { agentId: string; row: ProjectThreadRow }[] } {
     if (!Array.isArray(raw.leases) || raw.leases.length > 50) throw invalidParams('bot.lease.leases: expected at most 50 leases');
     const v = raw.v;
     if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw invalidParams('bot.lease.v: expected an integer');
@@ -328,7 +384,7 @@ export class GroupBotHost {
     const next: Record<string, BotLease> = {};
     // A lease newer than this sync (one a request carried) stays as it is.
     for (const lease of Object.values(saved)) if (lease.v > v) next[lease.agentId] = lease;
-    for (const lease of sent) if (!(lease.agentId in next)) next[lease.agentId] = { ...lease, v };
+    for (const lease of sent) if (!(lease.agentId in next)) next[lease.agentId] = this.#kept(saved[lease.agentId], { ...lease, v });
     this.#saveLeases(peer.coreId, next);
     const leased = Object.values(next);
     this.#core.coordination.residentRevoked();
@@ -338,17 +394,22 @@ export class GroupBotHost {
       const thread = this.#core.journal.getThread(id);
       return thread !== null && leased.some(lease => this.#inScope(lease, thread)) ? [this.#core.workforce.projects.row(thread)] : [];
     });
-    return { projects, rows };
+    // The threads it started that the bot does not list go back on its desk there.
+    const started = leased.flatMap(lease => (lease.started ?? []).flatMap(id => {
+      const thread = this.#core.journal.getThread(id);
+      return thread !== null && this.#inScope(lease, thread) ? [{ agentId: lease.agentId, row: this.#core.workforce.projects.row(thread) }] : [];
+    }));
+    return { projects, rows, started };
   }
 
   // -- events ------------------------------------------------------------------
 
   /** The leases of every machine that a thread's event concerns, with whether the bot follows it. */
-  #concerned(thread: ThreadSummary): { coreId: string; lease: BotLease; follows: boolean }[] {
+  #concerned(thread: ThreadSummary): { coreId: string; lease: BotLease; follows: boolean; started: boolean }[] {
     if (!this.allowed() || thread.agentSessionId || thread.parentThreadId || thread.projectId === null) return [];
     return this.#coreIds().flatMap(coreId => Object.values(this.leases(coreId))
       .filter(lease => this.#inScope(lease, thread))
-      .map(lease => ({ coreId, lease, follows: lease.watched.includes(thread.id) })));
+      .map(lease => ({ coreId, lease, follows: lease.watched.includes(thread.id), started: (lease.started ?? []).includes(thread.id) })));
   }
 
   #onTurn(turn: Turn): void {
@@ -356,11 +417,11 @@ export class GroupBotHost {
     if (turn.status === 'queued' || turn.status === 'running') return;
     const thread = this.#core.journal.getThread(turn.threadId);
     if (thread === null || thread.archived) return;
-    for (const { coreId, lease, follows } of this.#concerned(thread)) {
+    for (const { coreId, lease, follows, started } of this.#concerned(thread)) {
       // As on its own machine: a followed thread reports every turn, the others only when they fail.
       if (!follows && turn.status !== 'error') continue;
       const answer = this.#core.delegation.result(turn);
-      this.#push(coreId, { agentId: lease.agentId, kind: 'turn', key: `turn:${turn.id}`, row: this.#core.workforce.projects.row(thread), status: turn.status, answer: answer === null ? null : cut(answer, TEXT_MAX) });
+      this.#push(coreId, { agentId: lease.agentId, kind: 'turn', key: `turn:${turn.id}`, row: this.#core.workforce.projects.row(thread), status: turn.status, answer: answer === null ? null : cut(answer, TEXT_MAX), ...(started ? { started: true as const } : {}) });
     }
   }
 

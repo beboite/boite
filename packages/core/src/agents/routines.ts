@@ -76,9 +76,9 @@ function outcomeOf(turn: Turn): NonNullable<AgentRoutine['lastOutcome']> {
  */
 export class AgentRoutines {
   readonly #core: Core;
-
-  constructor(core:Core){
-    this.#core = core;}
+  constructor(core:Core) {
+    this.#core = core;
+  }
   get #r(){return this.#core.workforce.records;}
 
   save(params:RpcParams<'agents.routine.save'>):AgentRoutine {

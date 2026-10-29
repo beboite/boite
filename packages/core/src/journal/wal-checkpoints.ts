@@ -89,16 +89,16 @@ function startWorker(): CheckpointWorker {
 }
 
 export class WalCheckpoints {
-  private readonly limitBytes: number;
-  private readonly idleMs: number;
+  readonly #limitBytes: number;
+  readonly #idleMs: number;
   readonly #makeWorker: () => CheckpointWorker;
   readonly #timer: ReturnType<typeof setInterval>;
   /** 1 while the Worker runs a request: its connection is open. */
-  private readonly state = new Int32Array(new SharedArrayBuffer(4));
-  private worker: CheckpointWorker | null = null;
+  readonly #state = new Int32Array(new SharedArrayBuffer(4));
+  #worker: CheckpointWorker | null = null;
   /** Set once the Worker failed: checkpoints run on this thread from then on. */
   #fallback = false;
-  private changes: number;
+  #changes: number;
   #lastWrite = performance.now();
   #sentAt = 0;
   #writtenSincePassive = false;
@@ -116,23 +116,22 @@ export class WalCheckpoints {
   readonly #db: Database;
   readonly #file: string;
   readonly #onError: (message: string) => void;
-
   constructor(db: Database, file: string, onError: (message: string) => void, options: WalCheckpointOptions = {}) {
     this.#db = db;
     this.#file = file;
     this.#onError = onError;
-    this.limitBytes = options.limitBytes ?? WAL_LIMIT_BYTES;
-    this.idleMs = options.idleMs ?? IDLE_MS;
+    this.#limitBytes = options.limitBytes ?? WAL_LIMIT_BYTES;
+    this.#idleMs = options.idleMs ?? IDLE_MS;
     this.#makeWorker = options.worker ?? startWorker;
     db.exec('PRAGMA wal_autocheckpoint = 0');
-    this.changes = this.#totalChanges();
+    this.#changes = this.#totalChanges();
     this.#timer = setInterval(() => this.tick(), options.tickMs ?? TICK_MS);
     this.#timer.unref?.();
   }
 
   /** True while the Worker runs a checkpoint. */
   get running(): boolean {
-    return Atomics.load(this.state, 0) !== 0;
+    return Atomics.load(this.#state, 0) !== 0;
   }
 
   /**
@@ -142,7 +141,7 @@ export class WalCheckpoints {
    * that starts under the mark and writes more than the room left crosses it.
    */
   get behind(): boolean {
-    return this.#walBytes() > this.limitBytes * 2;
+    return this.#walBytes() > this.#limitBytes * 2;
   }
 
   /** Looks for writes since the last tick and asks for the checkpoint they call for. */
@@ -150,8 +149,8 @@ export class WalCheckpoints {
     if (this.#stopped) return;
     try {
       const changes = this.#totalChanges();
-      if (changes !== this.changes) {
-        this.changes = changes;
+      if (changes !== this.#changes) {
+        this.#changes = changes;
         this.#lastWrite = performance.now();
         this.#writtenSincePassive = true;
         this.#writtenSinceTruncate = true;
@@ -162,11 +161,11 @@ export class WalCheckpoints {
         return;
       }
       // A truncation runs a passive checkpoint first, so it covers a WAL past its limit too.
-      if (this.#writtenSinceTruncate && performance.now() - this.#lastWrite >= this.idleMs) {
+      if (this.#writtenSinceTruncate && performance.now() - this.#lastWrite >= this.#idleMs) {
         this.#writtenSincePassive = false;
         this.#writtenSinceTruncate = false;
         this.#run('TRUNCATE');
-      } else if (this.#writtenSincePassive && this.#walBytes() > this.limitBytes) {
+      } else if (this.#writtenSincePassive && this.#walBytes() > this.#limitBytes) {
         this.#writtenSincePassive = false;
         this.#run('PASSIVE');
       }
@@ -183,10 +182,10 @@ export class WalCheckpoints {
     if (this.#stopped) return;
     this.#stopped = true;
     clearInterval(this.#timer);
-    if (this.worker !== null) {
-      if (Atomics.load(this.state, 0) !== 0) Atomics.wait(this.state, 0, 1, CLOSE_WAIT_MS);
-      this.worker.terminate();
-      this.worker = null;
+    if (this.#worker !== null) {
+      if (Atomics.load(this.#state, 0) !== 0) Atomics.wait(this.#state, 0, 1, CLOSE_WAIT_MS);
+      this.#worker.terminate();
+      this.#worker = null;
     }
     try {
       this.#db.query('PRAGMA wal_checkpoint(TRUNCATE)').get();
@@ -200,9 +199,9 @@ export class WalCheckpoints {
     // Without a Worker this thread checkpoints, as SQLite did, but no more than once a tick.
     if (worker === null) return this.#here(mode);
     this.ran.worker++;
-    Atomics.store(this.state, 0, 1);
+    Atomics.store(this.#state, 0, 1);
     this.#sentAt = performance.now();
-    worker.postMessage({ file: this.#file, mode, state: this.state });
+    worker.postMessage({ file: this.#file, mode, state: this.#state });
   }
 
   /**
@@ -221,21 +220,21 @@ export class WalCheckpoints {
   }
 
   #ensureWorker(): CheckpointWorker | null {
-    if (this.worker !== null) return this.worker;
+    if (this.#worker !== null) return this.#worker;
     try {
       const worker = this.#makeWorker();
       worker.onmessage = ({ data }) => {
         if ('error' in data) return this.#fail(data.error);
         // A truncation that met a reader is tried again at the next idle tick.
         if (data.busy !== 0) this.#writtenSinceTruncate = true;
-        if (!this.#stopped && this.#walBytes() > this.limitBytes * BEHIND) this.#here('PASSIVE');
+        if (!this.#stopped && this.#walBytes() > this.#limitBytes * BEHIND) this.#here('PASSIVE');
       };
       worker.onerror = (event) => {
         event.preventDefault?.();
         this.#fail(event.message);
       };
       worker.unref?.();
-      this.worker = worker;
+      this.#worker = worker;
       return worker;
     } catch (error) {
       this.#fail(messageOfError(error));
@@ -247,9 +246,9 @@ export class WalCheckpoints {
   #fail(reason: string): void {
     if (this.#fallback) return;
     this.#fallback = true;
-    this.worker?.terminate();
-    this.worker = null;
-    Atomics.store(this.state, 0, 0);
+    this.#worker?.terminate();
+    this.#worker = null;
+    Atomics.store(this.#state, 0, 0);
     this.#writtenSincePassive = true;
     this.#onError(`journal checkpoint worker unavailable, checkpointing on the main thread: ${reason}`);
   }

@@ -29,7 +29,6 @@ export class AgentSettingCards {
 
   readonly #core: Core;
   readonly #store: AgentStore;
-
   constructor(core: Core, store: AgentStore) {
     this.#core = core;
     this.#store = store;
