@@ -177,7 +177,7 @@ export interface ProcessPlatform {
   /** Normal priority during agent initialization; platform CPU and memory caps still apply. */
   startup?(threadId: string, active: boolean): void;
   terminate(threadId: string): boolean;
-  /** A held Windows handle, or a matching registered/sampled Linux birth. */
+  /** A held Windows handle, or a matching registered/sampled POSIX birth. */
   terminateProcess(threadId: string, pid: number, startedAt?: number | null): boolean;
   /**
    * Windows' fallback tree kill, for a pid outside the job: `killAll` waits for a returned promise.

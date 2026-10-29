@@ -516,8 +516,10 @@ CPU uses `/proc/<pid>/stat`; memory uses `RssAnon + RssShmem`, falling back to
 `VmRSS` on older kernels. The latter includes shared library mappings and can
 overcount a parallel workload. A process name is read from `/proc/<pid>/comm`
 once per birth and again only when the stat line's name changes, as after an
-`exec`; the boot time from `/proc/stat` is read once. macOS uses `proc_pid_rusage` physical footprint
-for each direct child and reports CPU as zero. The automatic memory guard can
+`exec`; the boot time from `/proc/stat` is read once. macOS walks descendants with
+`proc_listchildpids` and sums `proc_pid_rusage` physical footprint for registered
+roots and their descendants, once per PID. A separately registered conversation
+owns its subtree. CPU still reports zero. The automatic memory guard can
 stop the heaviest child tree when a thread exceeds its share. CPU job caps,
 focus guard and audio mute remain Windows-only.
 
@@ -529,6 +531,15 @@ registered process or the last sampled descendant. An orphan stop also checks
 the registry's captured start time. Each tree member is checked again before
 its signal; a missing or changed birth is skipped. These procfs checks and
 PID signals are separate operations, rather than a held native process handle.
+
+A macOS memory stop also accepts an unregistered sampled descendant. A fresh
+walk must place it under the conversation's unchanged registered roots, and
+`proc_pidinfo` BSD start seconds and microseconds must match its registered or
+sampled birth. Each member's birth is checked again before SIGKILL, with children
+stopped before parents. Unreadable identities, reused PIDs and other conversations'
+subtrees are skipped. These identity checks and signals are separate operations;
+they do not provide Windows' held-handle guarantee or track detached orphans
+after reparenting out of the registered tree.
 
 Linux also reads the cgroup of each thread's root agent process on the same
 sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
