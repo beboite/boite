@@ -6,11 +6,24 @@ export const strings = {
     heading: 'Managed by your organization',
     info: 'An administrator put a policy on this machine. Each setting listed here is locked to the value shown. Everything else stays yours.',
     file: 'Policy file',
+    lockedOne: '1 locked',
+    lockedMany: '{count} locked',
+    groups: {
+      privacy: 'Privacy',
+      updates: 'Updates',
+      providers: 'Providers',
+      tools: 'Tools',
+      network: 'Network'
+    },
     none: 'The file locks nothing.',
     failedClosed: 'The file cannot be read, so every setting it can lock takes its strictest value until it is fixed.',
-    problemsTitle: 'Your organization\'s policy has problems',
-    problemsInfo: 'Boite applies every valid key and keeps the strictest value for the others. Send these lines to your administrator.',
-    problem: '{field}: expected {expected}',
+    problemsTopic: 'Policy problems',
+    problemsOne: 'Your organization\'s policy has a problem',
+    problemsMany: 'Your organization\'s policy has {count} problems',
+    closedTitle: 'Your organization\'s policy cannot be read',
+    problemsInfo: 'Boite applies every valid key and keeps the strictest value for the others. Send the details to your administrator.',
+    details: 'Details',
+    expected: 'expected {expected}',
     providerOff: 'Turned off by your organization',
     quotasOff: 'Your organization turned off quota reads on this machine, so no limit is read for your accounts.',
     browserOff: 'Your organization turned off the agent browser on {machine}.',
@@ -45,7 +58,8 @@ export const strings = {
       check: 'Check only',
       auto: 'Automatic',
       local: 'Local engines only',
-      none: 'None'
+      none: 'None',
+      locked: 'Locked'
     }
   }
 } as const;

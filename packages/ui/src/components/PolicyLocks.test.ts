@@ -1,6 +1,6 @@
 import { afterEach, expect, vi } from 'vitest';
 import { flushSync, mount, unmount, type Component } from 'svelte';
-import { SPEECH_CATALOGUE, type SpeechConfig, type SpeechStatus } from '@boite/contracts';
+import { POLICY_KEYS, SPEECH_CATALOGUE, type SpeechConfig, type SpeechStatus } from '@boite/contracts';
 import { test } from '../test/fake-client';
 import type { Store } from '../lib/store.svelte';
 import { policyFixture } from '../lib/fake-client/policy';
@@ -54,16 +54,21 @@ async function managed(ready: (options?: { delayMs: number; policy: ReturnType<t
   return store;
 }
 
-test('Settings lists the policy file and every key it holds, with its value; a machine without one shows nothing', async ({ ready }) => {
+test('Settings lists the policy file once and every key it holds, with its value, in groups; a machine without one shows nothing', async ({ ready }) => {
   const store = await managed(ready);
   await show(PolicySettings, { store });
   expect(byId('policy-file')?.textContent).toBe('/etc/boite/policy.json');
+  expect(document.querySelectorAll('[data-testid="policy-file"]')).toHaveLength(1);
+  expect(byId('policy-count')?.textContent).toBe(fill(strings.policy.lockedMany, { count: String(store.policy!.locked.length) }));
   const rows = [...document.querySelectorAll('[data-testid="policy-key"]')];
-  expect(rows.map((row) => row.getAttribute('data-key'))).toEqual(store.policy!.locked);
+  expect(rows.map((row) => row.getAttribute('data-key')).sort()).toEqual([...store.policy!.locked].sort());
   const row = (key: string) => rows.find((entry) => entry.getAttribute('data-key') === key)?.textContent ?? '';
+  expect(row('analytics')).toContain(strings.policy.keys.analytics);
   expect(row('analytics')).toContain(strings.policy.values.basic);
   expect(row('providers.deny')).toContain('Grok');
+  expect(row('network.push')).toContain(strings.policy.values.off);
   expect(row('agentBrowser.searchUrl')).toContain('https://search.example.com/?q={query}');
+  expect(byId('policy-failed-closed')).toBeNull();
   await unmount(mounted!, { outro: false });
 
   const { store: plain } = await ready({ delayMs: 0, policy: policyFixture(null) });
@@ -71,23 +76,78 @@ test('Settings lists the policy file and every key it holds, with its value; a m
   expect(byId('policy-settings')).toBeNull();
 });
 
-test('a policy file with problems puts a banner with the file, the field and what was expected; one that does not parse says it failed closed', async ({ ready }) => {
+test('every key a policy can lock is listed exactly once under one group, even keys no real file locks together', async ({ ready }) => {
+  const policy = policyFixture('managed');
+  policy.locked = [...POLICY_KEYS];
+  const { store } = await ready({ delayMs: 0, policy });
+  await vi.waitFor(() => expect(store.policy?.present).toBe(true));
+  await show(PolicySettings, { store });
+  const keys = [...document.querySelectorAll('[data-testid="policy-group"] [data-testid="policy-key"]')].map((row) => row.getAttribute('data-key'));
+  expect(keys).toHaveLength(POLICY_KEYS.length);
+  expect([...keys].sort()).toEqual([...POLICY_KEYS].sort());
+  expect(document.querySelectorAll('[data-testid="policy-key"]')).toHaveLength(POLICY_KEYS.length);
+  for (const row of document.querySelectorAll('[data-testid="policy-key"]')) expect(row.querySelector('dd')?.textContent?.trim()).not.toBe('');
+  expect(byId('policy-count')?.textContent).toBe(fill(strings.policy.lockedMany, { count: String(POLICY_KEYS.length) }));
+});
+
+test('a policy file with problems puts a strip with their count; its details name the file once, each field and what was expected', async ({ ready }) => {
   const store = await managed(ready, 'broken');
   await show(PolicyBanner, { store });
-  const problems = [...document.querySelectorAll('[data-testid="policy-problem"]')];
-  expect(problems.map((row) => row.getAttribute('data-field'))).toEqual(['updates.app', 'telemetry']);
-  expect(problems[0]!.textContent).toContain('/etc/boite/policy.json');
-  expect(problems[0]!.textContent).toContain(fill(strings.policy.problem, { field: 'updates.app', expected: '"off" or "check" or "auto"' }));
+  expect(byId('policy-banner')?.getAttribute('data-state')).toBe('partial');
+  expect(byId('policy-banner-title')?.textContent).toBe(fill(strings.policy.problemsMany, { count: '2' }));
   expect(byId('policy-banner-closed')).toBeNull();
+  const toggle = byId<HTMLButtonElement>('policy-banner-toggle')!;
+  const details = byId('policy-banner-details')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.getAttribute('aria-controls')).toBe(details.id);
+  expect(details.inert).toBe(true);
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(details.inert).toBe(false);
+  const files = [...details.querySelectorAll('[data-testid="policy-banner-file"]')];
+  expect(files.map((file) => file.textContent)).toEqual(['/etc/boite/policy.json']);
+  const problems = [...details.querySelectorAll('[data-testid="policy-problem"]')];
+  expect(problems.map((row) => row.getAttribute('data-field'))).toEqual(['updates.app', 'telemetry']);
+  expect(problems[0]!.textContent).toContain('updates.app');
+  expect(problems[0]!.textContent).toContain(fill(strings.policy.expected, { expected: '"off" or "check" or "auto"' }));
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(details.inert).toBe(true);
   await unmount(mounted!, { outro: false });
 
   const closed = await managed(ready, 'closed');
   await show(PolicyBanner, { store: closed });
+  // Failing closed is said without opening anything.
+  expect(byId('policy-banner')?.getAttribute('data-state')).toBe('closed');
+  expect(byId('policy-banner-title')?.textContent).toBe(strings.policy.closedTitle);
   expect(byId('policy-banner-closed')?.textContent).toBe(strings.policy.failedClosed);
+  expect(byId('policy-banner-toggle')?.getAttribute('aria-expanded')).toBe('false');
   await unmount(mounted!, { outro: false });
 
   await show(PolicyBanner, { store: await managed(ready) });
   expect(byId('policy-banner')).toBeNull();
+});
+
+test('the strip and the managed section follow the file: fixed, broken again, then removed', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0, policy: policyFixture('closed') });
+  await vi.waitFor(() => expect(store.policy?.failedClosed).toBe(true));
+  mounted = mount(PolicyBanner, { target: document.body, props: { store } });
+  const settings = mount(PolicySettings, { target: document.body, props: { store } });
+  await settle();
+  expect(byId('policy-banner')?.getAttribute('data-state')).toBe('closed');
+  expect(byId('policy-failed-closed')?.textContent).toBe(strings.policy.failedClosed);
+  client.changePolicy(policyFixture('managed'));
+  await vi.waitFor(() => expect(byId('policy-banner')).toBeNull());
+  expect(byId('policy-failed-closed')).toBeNull();
+  expect(byId('policy-settings')).not.toBeNull();
+  client.changePolicy(policyFixture('broken'));
+  await vi.waitFor(() => expect(byId('policy-banner')?.getAttribute('data-state')).toBe('partial'));
+  client.changePolicy(policyFixture(null));
+  await vi.waitFor(() => expect(byId('policy-settings')).toBeNull());
+  expect(byId('policy-banner')).toBeNull();
+  await unmount(settings, { outro: false });
 });
 
 test('analytics capped at basic keeps the enhanced switch off and locked, and its tip names the key and the file', async ({ ready }) => {

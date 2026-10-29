@@ -8,11 +8,24 @@ export const fr: Translation = {
     heading: 'Géré par votre organisation',
     info: 'Un administrateur a posé une politique sur cette machine. Chaque réglage listé ici est verrouillé sur la valeur affichée. Tout le reste reste à vous.',
     file: 'Fichier de politique',
+    lockedOne: '1 verrouillé',
+    lockedMany: '{count} verrouillés',
+    groups: {
+      privacy: 'Confidentialité',
+      updates: 'Mises à jour',
+      providers: 'Fournisseurs',
+      tools: 'Outils',
+      network: 'Réseau'
+    },
     none: 'Le fichier ne verrouille rien.',
     failedClosed: 'Le fichier est illisible : chaque réglage qu’il peut verrouiller prend sa valeur la plus stricte jusqu’à sa correction.',
-    problemsTitle: 'La politique de votre organisation a des problèmes',
-    problemsInfo: 'Boite applique chaque clé valide et garde la valeur la plus stricte pour les autres. Envoyez ces lignes à votre administrateur.',
-    problem: '{field} : attendu {expected}',
+    problemsTopic: 'Problèmes de politique',
+    problemsOne: 'La politique de votre organisation a un problème',
+    problemsMany: 'La politique de votre organisation a {count} problèmes',
+    closedTitle: 'La politique de votre organisation est illisible',
+    problemsInfo: 'Boite applique chaque clé valide et garde la valeur la plus stricte pour les autres. Envoyez le détail à votre administrateur.',
+    details: 'Détails',
+    expected: 'attendu {expected}',
     providerOff: 'Désactivé par votre organisation',
     quotasOff: 'Votre organisation a désactivé la lecture des quotas sur cette machine : aucune limite n\'est lue pour vos comptes.',
     browserOff: 'Votre organisation a désactivé le navigateur des agents sur {machine}.',
@@ -47,7 +60,8 @@ export const fr: Translation = {
       check: 'Vérification seule',
       auto: 'Automatique',
       local: 'Moteurs locaux seulement',
-      none: 'Aucun'
+      none: 'Aucun',
+      locked: 'Verrouillé'
     }
   }
 };
