@@ -108,6 +108,9 @@ export class SharedNativeExecution {
     if (old) {await this.#core.procs.protection.release(id); this.#installed.delete(id);}
     if (!old && this.#core.procs.protection.policy(id)) await this.#core.procs.protection.release(id);
     if (!old && this.#core.procs.liveCount(id)) await this.#core.procs.stopAndWait(id);
+    // Host worktree Git can exit before its untraced Windows console leaves
+    // the job. Drain it before the capability's idle-process admission gate.
+    await this.#core.procs.waitForExit(id, undefined, {native: true});
     const changed = old?.changed ?? new Map<string, string | null>();
     const check = () => {
       this.#core.sharedCompute.assertTurn(id);
