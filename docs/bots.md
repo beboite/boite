@@ -506,7 +506,8 @@ bot's machine, `agents/group-host.ts` on the other.
 with the project as `boite threads` and `boite settings bot projects` name it
 (its `<core-id>/<project-id>` works too), or `boite thread new <project>
 <brief> --machine <machine>` with its name there, starts a thread in a project
-of that machine entrusted to the bot. The bot's machine checks the project is
+of that machine entrusted to the bot. Both machines refuse a name shared by
+several entrusted projects and list their ids; use an id to choose one. The bot's machine checks the project is
 one of its grants there (rereading that machine's project names once when it
 does not know the name) and sends `bot.start` with the lease; that machine
 checks it as any other request of the bot (its `groupBots`, the lease covering

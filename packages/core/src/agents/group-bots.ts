@@ -502,7 +502,12 @@ export class GroupBots {
       name = project.slice(slash + 1).trim();
     }
     const granted = this.grants(agent, peer.coreId);
-    const match = () => granted.find(id => id === name || this.names(peer.coreId).find(entry => entry.id === id)?.name.toLowerCase() === name.toLowerCase());
+    const match = () => {
+      if (granted.includes(name)) return name;
+      const found = granted.filter(id => this.names(peer.coreId).find(entry => entry.id === id)?.name.toLowerCase() === name.toLowerCase());
+      if (found.length > 1) throw refused(`agent.spawn.project: ${found.length} projects are named ${name} on ${peer.name}; name one by id: ${found.join(', ')}`, { field: 'project', expected: found });
+      return found[0];
+    };
     let projectId = match();
     if (projectId === undefined && granted.length > 0) {
       // Its names were never read, or the project was renamed since: they are read again once.

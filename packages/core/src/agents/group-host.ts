@@ -326,13 +326,16 @@ export class GroupBotHost {
    */
   private async start(peer: CoordinationPeer, lease: BotLease, raw: Record<string, unknown>): Promise<AgentSpawn & { row: ProjectThreadRow }> {
     const start = checkStartFields(raw, 'bot.start');
-    const wanted = start.project.trim().toLowerCase();
+    const trimmed = start.project.trim();
+    const wanted = trimmed.toLowerCase();
     const scope = this.scope(lease);
-    const projectId = scope.find(id => id === start.project || this.core.journal.getProject(id)?.name.toLowerCase() === wanted);
-    if (projectId === undefined) {
+    const found = scope.includes(trimmed) ? [trimmed] : scope.filter(id => this.core.journal.getProject(id)?.name.toLowerCase() === wanted);
+    if (found.length === 0) {
       const names = scope.map(id => this.core.journal.getProject(id)?.name ?? id);
       throw refused(`bot.start.project: ${start.project} is not a project entrusted to ${lease.name} here${names.length ? `; its projects here are ${names.join(', ')}` : ''}`, { field: 'project', expected: names });
     }
+    if (found.length > 1) throw refused(`bot.start.project: ${found.length} projects are named ${trimmed} here; name one by id: ${found.join(', ')}`, { field: 'project', expected: found });
+    const projectId = found[0]!;
     const spawned = await this.core.threads.spawns.startForBot(peer, lease, projectId, start, created => {
       // Worktree preparation can outlive the owner's switch, the asker's membership and the grant.
       if (!this.allowed()) throw refused(GROUP_BOTS_OFF);

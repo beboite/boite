@@ -373,6 +373,39 @@ test('a bot starts no thread on a machine whose groupBots is off, nor in a proje
   expect(desk.core.workforce.group.desk(agent()).map(watch => watch.threadId)).toEqual([spawned.thread.id]);
 }, 30_000);
 
+test('a bot refuses ambiguous remote project names on both machines and accepts an explicit project id', async () => {
+  answering();
+  const { desk, pc, owner, pcOwner, pcId, deskId, notes, accounts, cli, agent, machine } = await setup();
+  await pcOwner.call('projects.rename', { projectId: accounts.id, name: 'nOtEs' });
+  await pcOwner.call('settings.set', { groupBots: true });
+  const current = agent();
+  await owner.call('agents.profile.save', { id: current.id, expectedRevision: current.revision, value: { ...current, projectIds: [`${pcId}/${notes.id}`, `${pcId}/${accounts.id}`] } });
+  await desk.core.workforce.group.sync(pcId);
+  const before = pc.core.journal.listThreads().map(thread => thread.id).sort();
+
+  // The caller must not replace an ambiguous name with the first project's id.
+  const ambiguous = await cli(['thread', 'new', `${machine}/noTES`, 'File them', '--request-id', 'ambiguous-cli']);
+  expect(ambiguous.code).not.toBe(0);
+  expect(ambiguous.err).toContain('2 projects are named noTES');
+  expect(ambiguous.err).toContain(notes.id);
+  expect(ambiguous.err).toContain(accounts.id);
+
+  // The host decides independently, including a name sent by an older caller.
+  const peer = pc.core.group.peers().find(member => member.coreId === deskId)! as CoordinationPeer;
+  const lease = pc.core.workforce.groupHost.leases(deskId)[agent().id]!;
+  const ask = { lease, project: ' noTES ', prompt: 'File them', title: 'File', worktree: false, requestId: 'ambiguous-host', agent: { providerId: 'echo', permissionMode: 'default' } };
+  expect(await thrown(pc.core.workforce.groupHost.handle(peer, 'bot.start', ask)))
+    .toThrow(`bot.start.project: 2 projects are named noTES here; name one by id: ${notes.id}, ${accounts.id}`);
+  expect(pc.core.journal.listThreads().map(thread => thread.id).sort()).toEqual(before);
+
+  // An id disambiguates at either end; surrounding whitespace is ignored.
+  const named = await cli(['thread', 'new', `${machine}/${notes.id}`, 'File notes', '--request-id', 'notes-id', '--json']);
+  expect([named.code, named.err]).toEqual([0, '']);
+  expect((JSON.parse(named.out) as AgentSpawn).thread.projectId).toBe(notes.id);
+  const explicit = await pc.core.workforce.groupHost.handle(peer, 'bot.start', { ...ask, project: ` ${accounts.id} `, requestId: 'accounts-id' }) as AgentSpawn;
+  expect(explicit.thread.projectId).toBe(accounts.id);
+}, 30_000);
+
 test('a bot\'s thread on a machine that does not answer is refused, naming it', async () => {
   answering();
   const { desk, pc, pcOwner, cli, machine } = await setup();
