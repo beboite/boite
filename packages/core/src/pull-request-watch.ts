@@ -251,7 +251,7 @@ export class PullRequestWatches {
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
-      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN');
+      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN', { head: read.branch ?? '', headRepository: read.headRepository ?? '' });
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
       runtime.detail = read;

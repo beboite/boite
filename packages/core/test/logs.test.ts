@@ -167,6 +167,47 @@ describe('bounded persistent diagnostics', () => {
     }
   });
 
+  test('a log folder blocked at startup is written once it is free, with no flush asked', async () => {
+    const directory = temporary();
+    writeFileSync(join(directory, 'logs'), 'a file blocks the directory');
+    const logs = new DiagnosticLogs(directory, [], () => undefined);
+    try {
+      await logs.query({});
+      rmSync(join(directory, 'logs'));
+      logs.record('info', 'after the folder came back');
+      await waitFor(() => existsSync(join(directory, 'logs', 'core.0.ndjson')));
+    } finally { await logs.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  test('persistence resumes once the obstruction is gone, with every record written once and the outage logged', async () => {
+    const directory = temporary();
+    const reports: string[] = [];
+    const file = join(directory, 'logs', 'core.0.ndjson');
+    const logs = new DiagnosticLogs(directory, [], message => reports.push(message));
+    try {
+      logs.record('info', 'before');
+      await logs.flush();
+      // Something takes the newest file's place for a while: a folder, as a full disk or a lock would.
+      rmSync(file);
+      mkdirSync(file);
+      logs.record('info', 'during');
+      await logs.flush();
+      logs.record('info', 'still during');
+      await logs.flush();
+      expect(reports).toHaveLength(1);
+      rmSync(file, { recursive: true });
+      logs.record('info', 'after');
+      // No flush asked: the retry the last failure scheduled writes the queue by itself.
+      await waitFor(() => existsSync(file) && statSync(file).isFile() && readFileSync(file, 'utf8').includes('written again'));
+    } finally { await logs.close(); }
+    const reader = new DiagnosticLogs(directory);
+    try {
+      const messages = (await reader.query({})).map(record => record.message).reverse();
+      expect(messages.filter(message => message !== 'before')).toEqual(['during', 'still during', 'after', 'diagnostic logs are written again after 2 failed attempts']);
+      expect(reports).toHaveLength(1);
+    } finally { await reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test('restart tolerates a partial final NDJSON line and restores private modes', async () => {
     const directory = temporary();
     const first = new DiagnosticLogs(directory);

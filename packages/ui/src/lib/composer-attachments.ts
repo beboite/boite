@@ -1,6 +1,7 @@
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, type Attachment, type ProviderSummary } from '@boite/contracts';
 import { acceptAttachments, attachedBytes, decodedBytes, isImageMimeType, keepSource, readAttachmentFile } from './attachments';
 import { checkpoint, replaceInHistory } from './composer-history';
+import { closeDraftUndo } from './composer-editing';
 import { insertImageReference, removeImageReferences } from './composer-images';
 import type { ComposerState } from './composer-queue';
 import { loadedFrom, readSettled, readyAttachments, tileKey, type DraftAttachment } from './draft-attachments';
@@ -279,7 +280,8 @@ export function takeFiles(store: Store, state: ComposerState, files: File[], att
   return receiveFiles(store, files, {
     input: state,
     get attachments() { return state.attachments; },
-    set attachments(value: Attachment[]) { checkpoint(state); state.attachments = value; },
+    // A file arriving ends a phone's offer to undo clearing this draft: that undo would take the file back.
+    set attachments(value: Attachment[]) { closeDraftUndo(undefined, state); checkpoint(state); state.attachments = value; },
     placed(placeholder) {
       const key = keyOf();
       if (placeholder.kind === 'image' && key !== undefined) insertImageReference(store, key);

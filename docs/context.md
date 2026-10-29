@@ -395,7 +395,15 @@ transaction durability and a synchronous text backup in `localStorage` on each
 keystroke. The journal writes 800 ms after
 typing pauses and at least every five seconds while it continues. Attachments,
 failed backups, explicit flush, page hiding and navigation flush immediately.
-A local core changing port retains the same drafts.
+A local core changing port retains the same drafts. When attachment bytes push
+the backup past the `localStorage` quota, the backup keeps the text and
+attachment IDs; the journal supplies the bytes, and missing ones restore as
+placeholders. A prompt that left the box but has no core answer yet stays in
+the journal: a thread's prompt as an outbox entry under its `turns.start`
+request ID, a new conversation's as its draft. A crash before the answer
+brings it back without a duplicate turn: the owning core reads the receipt of
+that request ID, drops the entry when it already took it and starts it once
+when it never did.
 
 Accepted queues run on the core without an open client, including after restart
 when delivery is known to be safe. Unconfirmed provider submissions stay held.
@@ -420,7 +428,15 @@ writes have a three-second deadline; a failed read cannot overwrite unread
 durable drafts. Once readable, the text backup merges with them. Missing
 attachment bytes keep removable placeholders and their IDs through text edits;
 removed IDs stay removed after recovery. Send waits for unreadable attachments
-to become available or be explicitly removed.
+to become available or be explicitly removed. When the core refuses a record
+over the per-message attachment limits, the device keeps it and shows why; the
+next edit tries again.
+
+Edit on a sent message, recall and the composer's other replacements are one
+undo step, and undo restores the edit marker. On a touch screen, where there is
+no Ctrl+Z, a box emptied in one edit or replaced by Edit shows a short Undo
+toast. A retry whose resend fails leaves text typed meanwhile in the box and
+holds the prompt at the head of the queue.
 
 Asynchronous creation and send retain the original core, thread and draft
 identity. Accepted work does not select a thread after newer navigation or

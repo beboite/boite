@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as fsPromises from 'node:fs/promises';
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { xdgDocuments } from '../src/platform/folders.ts';
@@ -102,6 +103,48 @@ async function refusal(call: Promise<unknown>): Promise<string> {
 }
 
 describe('an incognito draft', () => {
+  test('retains its folder and journal ownership when another conversation has a live agent there', async () => {
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    const project = await client.call('projects.add', { path: thread.cwd, name: 'Shared incognito' });
+    const other = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId });
+    const ready = Promise.withResolvers<void>();
+    const child = harness.core.procs.spawnChild(other.id, process.execPath, ['-e', 'console.log("ready"); setTimeout(() => {}, 60_000)'], { cwd: thread.cwd });
+    child.stdout.once('data', () => ready.resolve());
+    await ready.promise;
+    expect(await thrown(client.call('threads.remove', { threadId: thread.id }))).toThrow('works there: archive it first');
+    expect(existsSync(thread.cwd)).toBe(true);
+    expect(harness.core.procs.liveCount(other.id)).toBe(1);
+    expect(harness.core.journal.getThread(thread.id)).not.toBeNull();
+    await harness.core.procs.stopAndWait(other.id);
+    await client.call('threads.archive', { threadId: other.id, archived: true });
+    await client.call('threads.remove', { threadId: thread.id });
+    expect(existsSync(thread.cwd)).toBe(false);
+    expect(harness.core.journal.getThread(thread.id)).toBeNull();
+  });
+
+  test('reserves its published folder while filesystem deletion is pending', async () => {
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    const project = await client.call('projects.add', { path: thread.cwd, name: 'Arrival during incognito cleanup' });
+    const deleting = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>();
+    const rm = fsPromises.rm;
+    const held = spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+      if (path === thread.cwd) { deleting.resolve(); await resume.promise; }
+      return rm(path, options);
+    });
+    const removing = client.call('threads.remove', { threadId: thread.id });
+    try {
+      await deleting.promise;
+      expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId }))).toThrow('is being removed');
+      expect(() => harness.core.procs.spawnChild('incognito-arrival', process.execPath, ['-e', ''], { cwd: thread.cwd })).toThrow('is being removed');
+      expect(existsSync(thread.cwd)).toBe(true);
+    } finally { resume.resolve(); await removing; held.mockRestore(); }
+    expect(existsSync(thread.cwd)).toBe(false);
+  });
+
   test('works in a folder of the data directory and is refused anywhere but the drafts', async () => {
     const drafts = await client.call('projects.drafts', {});
     const accountId = await echoAccount();

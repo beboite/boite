@@ -90,3 +90,56 @@ test('desktop and paired phone share drafts and attachments, and the core drains
     await desktop?.close(); await phone?.close(); client.close(); await core.stop();
   }
 }, 120_000);
+
+test('a long reply open on desktop and phone survives a core restart, words typed while it was down included', async () => {
+  ensureProductionUi();
+  let core = await startCore();
+  let client = await connect(core.url, core.token);
+  let desktop: BrowserPage | undefined, phone: BrowserPage | undefined;
+  try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    const project = await client.call('projects.add', { path: core.dataDir, name: 'Core restart' });
+    const account = (await client.call('accounts.list', {})).find(item => item.providerId === 'echo')!;
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Long reply' });
+    desktop = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+    phone = await BrowserPage.launch({ url: await mintPairing(core), windowSize: { width: 390, height: 844 } });
+    await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    const ready = 'document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"';
+    for (const page of [desktop, phone]) await page.waitFor(ready);
+    await desktop.click(`[data-thread-id="${thread.id}"]`);
+    await phone.click('[data-testid=mobile-back], [data-testid=mobile-home]');
+    await phone.click(`[data-testid="mobile-thread-${thread.id}"]`);
+    for (const page of [desktop, phone]) await page.waitFor(`document.querySelector('${input}')`);
+    const long = 'a reply that describes every problem at once. '.repeat(500);
+    const typeAtEnd = (words: string) => `(() => { const box = document.querySelector('${input}'); box.focus(); box.setSelectionRange(box.value.length, box.value.length); document.execCommand('insertText', false, ${JSON.stringify(words)}); return box.value; })()`;
+    await desktop.evaluate(`(async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+      canvas.getContext('2d').fillRect(0, 0, 320, 200);
+      const data = new DataTransfer();
+      data.items.add(new File([await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))], 'screen.png', { type: 'image/png' }));
+      document.querySelector('${input}').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+    })()`);
+    await desktop.waitFor(`document.querySelector('${input}').value.includes('[Image 1]')`);
+    await desktop.evaluate(typeAtEnd(long));
+    await phone.waitFor(`document.querySelector('${input}')?.value.endsWith(${JSON.stringify(long)})`, 20_000);
+
+    // The core goes away under both open boxes, as an update restarts it, and comes back on the same port.
+    client.close();
+    await core.stop({ keepDataDir: true });
+    for (const page of [desktop, phone]) await page.waitFor(`!(${ready})`, 20_000);
+    const typed = await desktop.evaluate<string>(typeAtEnd(' And what I typed while the core was down.'));
+    core = await startCore({ dataDir: core.dataDir, port: core.port });
+    client = await connect(core.url, core.token);
+    for (const page of [desktop, phone]) await page.waitFor(ready, 30_000);
+    expect(await desktop.evaluate<string>(`document.querySelector('${input}').value`)).toBe(typed);
+    await phone.waitFor(`document.querySelector('${input}')?.value === ${JSON.stringify(typed)}`, 20_000);
+    await phone.waitFor('document.querySelector("[data-testid=composer-attachment]")?.title.includes("screen.png")');
+    const saved = (await client.call('composer.list', {})).find(row => row.section === 'inputs' && row.id === thread.id)!;
+    expect(saved.value?.input.text).toBe(typed);
+    expect(saved.value?.input.attachments.map(file => file.name)).toEqual(['screen.png']);
+    expect(desktop.errors()).toEqual([]);
+    expect(phone.errors()).toEqual([]);
+  } finally {
+    await desktop?.close(); await phone?.close(); client.close(); await core.stop();
+  }
+}, 180_000);
