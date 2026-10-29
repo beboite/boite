@@ -179,7 +179,7 @@ subscription usage is not an invoice, and missing cost reports stay unknown.
 Briefs are limited to 12,000 characters. Boite does not copy the parent's
 conversation into every child. Messages are capped at 4,000 characters and
 delivered in batches of up to four. Unread steering messages expire after 15 minutes.
-Team messages are limited to 100 per hour; terminal results have a separate
+Local team messages are limited to 100 per hour; terminal results have a separate
 delivery path and stay available. They wake an idle parent or join its next
 prompt when live steering is unavailable.
 The panel lists children by their summaries and streams none of them. Clicking
@@ -231,6 +231,93 @@ explicit dependencies, fan-out, conditions and plan concurrency. They do not
 require an enabled team or custom profile; pause still holds launches. Workflow
 steps remain separate from the team's agent list. That guide owns plan syntax,
 structured output, commands and recovery.
+
+## On another machine of the group
+
+`boite delegate spawn "<brief>" --machine <name>` (MCP: `machine` on
+`boite_delegate_spawn`) starts the child on another machine of the same
+[group](groups.md), named as `--machine` names it for `thread new`. The child
+is an ordinary thread of that machine, in its project named like the parent's
+or the one `--project` names; a missing project is refused with that
+machine's project names. Its owner sees it in that machine's sidebar, where it
+belongs to no conversation of that machine.
+
+The machine that runs the child decides, through the same **Threads from the
+other machines** switch (`groupThreads`) as `thread new --machine`: while it is
+off the spawn is refused with the settings card to propose, and a letter from
+the parent is refused too. Stops, result pages and reports always pass. The
+parent's own gates apply first: subagents on and unpaused, the owner's
+any-model rule. A bot's subagents run on its own machine only.
+
+Without `--model`, `--effort` or `--speed`, the child runs on the parent's
+provider and model (or the named `--profile`) there, at the parent's level when
+that model lists it, else at its default; a machine where that provider has no
+account signed in or that model is not listed refuses with its own list. With
+one of them, the parent reads that machine's list first (`boite delegate models
+--machine <name>`), picks as `delegate models` does, and that machine starts on
+exactly that model, level and speed or refuses; a miss starts nothing.
+
+`delegate list` and `delegation.get` show the child with `machine` beside the
+model, as that machine last reported it: its state, last turn, last result,
+open questions and worktree. `delegate wait` settles on those reports.
+`delegate send <id>` steers it, or answers its question, through that machine
+at once, and is refused while it is away; `delegate result` reads the full
+answer from it. `delegate stop <id>`, a team stop and archiving or deleting the
+parent stop it there, and archiving or deleting the parent archives it there.
+`delegate resume <id>` accepts only children on the parent's machine. A team
+resume lifts the pause but does not continue remote children; use
+`delegate send <id> "<instruction>"` to continue one there.
+Its result, its questions and its own `delegate send` to the parent come back
+as letters from that machine, which wake the parent once each. Cross-machine
+letters have no hourly cap. A worktree child
+branches from that machine's checkout of the project, and its branch stays
+there. `delegate spawn` and `thread new` refuse the child; its instructions
+tell it not to start workflows either.
+
+### The protocol
+
+Five sealed operations between the two machines, each safe to repeat, since
+the transport retries a request across addresses and either side can restart
+or be away:
+
+| Operation | From | Key | What the receiver does |
+| --- | --- | --- | --- |
+| `delegation.start` | parent's machine | parent and `--request-id` | starts the child, or answers the one it started for that key; other content under the same key is refused. `groupThreads` and the caller's membership are checked again right before the child is created |
+| `delegation.report` | child's machine | child, and a letter's request id | keeps the newest state; files a result, question or message once |
+| `delegation.letter` | parent's machine | parent and request id | applies the stop it carries first and waits for the turn that stop ended, then checks `groupThreads`, the caller's membership and the link again and files the steer once, answering an open question when it is one; a stop numbered after the letter refuses it |
+| `delegation.read` | parent's machine | none, read only | returns a page of the named turn's answer |
+| `delegation.stop` | parent's machine | the stop's number | stops it once, and archives it when the parent was archived or deleted; the same number again, or one older than the last applied, stops nothing |
+
+Reports and stops wait in an outbox in the sender's journal until the other
+machine took them, tried again after 5 s, 15 s, 1 min and then every 5 min,
+and at once when that machine is heard from again. A report replaces the state
+waiting for the same child. A refusal drops the entry; a machine that left the
+group drops its outbox. A start whose answer was lost keeps its record on the
+parent's machine: the next report or the same `--request-id` finds the child.
+Archiving the parent before then keeps the retirement asked, and the report
+or answer that names the child sends it. Deleting it for good (with its
+project, or an incognito conversation) keeps only that retirement, until the
+report names the child. A stop asked by request id before then (a workflow
+step stopped while its start was out) waits the same way.
+The parent's machine numbers its stops in the order asked, and the child's
+machine keeps the number of the last one it applied: a stop sent again because
+its answer was lost, or arriving after a later one, does not cut the
+instruction that followed it. `delegate send` carries the stop still waiting
+for that child; the child's machine applies it before the letter and files the
+letter once the turn it stopped is over, so the stop ends the turn it meant
+and the instruction opens the next one. The letter takes a number in the same
+order: a stop asked after it, taken before it arrives or while it waits,
+refuses it, so a final stop is not undone by an older instruction. A Stop by
+the child's owner also cancels instructions waiting for the previous turn
+to end; a new explicit instruction can resume the child. A restart
+handoff on the child's machine keeps a turn the parent's letter opened and
+continues it like the turns of a child here. Until that machine's next core
+continues a cut turn, its reports mark the child `restarting`, which the parent
+counts as at work rather than as a result. A stop of that machine's owner or
+of the parent ends the cut for good and is reported at once without the mark;
+so is a turn the next core does not continue.
+A machine whose Boite lacks these operations is reported too old before
+anything starts there.
 
 ## Shared-project hosts
 
@@ -317,6 +404,15 @@ else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
 `speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
 works.
 
+`boite delegate models --machine <name>` (MCP `boite_delegate_models` with
+`machine`) prints the models of another machine of the group instead, read
+from it now, for the caller's provider and model, in the same format. They are
+the models a thread started there with `boite thread new --machine <name>
+--model` can run on ([CLI](cli.md#commands)). That machine answers only while its **Threads
+from the other machines** switch (`groupThreads`) is on, and is refused with
+the settings hint otherwise; a machine whose Boite cannot list its models is
+reported too old.
+
 Every answer is a few plain lines. `delegate list` starts with one summary
 line (`subagents: on; 1 running, 1 waiting, 2 done, 0 failed, 0 stopped`, with
 `, N interrupted` when there are some), then one row per
@@ -342,8 +438,10 @@ saying so, and `boite delegate resume <thread-id>` (or Resume in the Subagents
 panel) continues it, while `boite delegate send <thread-id> "<instruction>"`
 steers it. A task that ends is given 30 seconds
 to wake the agent; after that a failed or vanished task counts as interrupted
-and a completed one as done. Work that ended with its agent process counts at
-once.
+and a completed one prompts a request for its final result. The checkpoint
+never becomes the final result just because the work ended. Work that ended
+with its agent process counts at once. These waits also apply on another
+machine; use `delegate send` to continue an interrupted child there.
 
 A child can send a question or blocker to its parent with `delegate send`.
 Its final answer returns automatically, so it should not send a duplicate

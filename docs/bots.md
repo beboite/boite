@@ -517,7 +517,10 @@ of the project, on the bot's provider and model under the rules of `thread new
 it, else its default). The thread's first message carries the bot's note and
 link, naming the bot's machine; it is on the bot's desk on both machines before
 its first turn, so that turn's answer reaches the bot once, as a desk event,
-never as a letter. `groupThreads` plays no part. A retry with the same
+never as a letter. Without explicit model, effort or speed, `groupThreads`
+plays no part. Passing `--model`, `--effort` or `--speed` first reads that
+machine's model list and requires `groupThreads` too; the requested model,
+effort and speed must match that list, or no thread starts. A retry with the same
 `--request-id` answers the same thread, on the bot's machine and on the other
 one. When the answer to `bot.start` is lost, that machine keeps the thread
 watched until a lease of the bot lists it: the next lease sync's answer, or the

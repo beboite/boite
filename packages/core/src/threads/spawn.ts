@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import type { AgentProjectAdded, AgentSpawn, ContextPreset, ContextRequest, CoordinationPeer, Message, PermissionMode, RpcParams, ThreadId, ThreadLink, ThreadSummary, Turn } from '@boite/contracts';
+import type { AgentProjectAdded, AgentSpawn, ContextPreset, ContextRequest, CoordinationPeer, DelegationModels, Message, PermissionMode, RpcParams, ThreadId, ThreadLink, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { PeerRefusal } from '../coordination-wire.ts';
+import { catalog, chooseModel, readNamed, type RouteRequest } from '../delegation/routes.ts';
 import { invalidParams, messageOf, refused, requiredText, unavailable } from '../errors.ts';
 import { newId } from '../ids.ts';
+import type { ProviderProbe } from '../providers/probe.ts';
 import type { ThreadStore } from '../threads.ts';
-import { agentHere, checkGroupStart, GROUP_THREADS_OFF, machineArg, memberNamed, remoteOrigin, type GroupStart, type StartFields } from './group-spawn.ts';
+import { agentHere, catalogFor, checkGroupStart, GROUP_THREADS_OFF, machineArg, memberModels, memberNamed, peerRefusal, remoteOrigin, type GroupStart, type StartFields } from './group-spawn.ts';
 import { saveThread, withLoad } from './records.ts';
 
 const HOUR = 3_600_000;
@@ -29,6 +30,8 @@ interface Origin { origin: ThreadLink; reported: boolean; coreId?: string; bot?:
 interface Started { at: number; requestId: string; fingerprint: string; threadId: ThreadId; turnId: string; spawned?: AgentSpawn }
 
 const text = (value: unknown, field: string, max: number, method = 'agent.spawn') => requiredText(value, `${method}.${field}`, max);
+/** `--model`, `--effort` and `--speed`; none of them leaves the caller's agent as it always was. */
+type Choice = Omit<RouteRequest, 'profileId'>;
 
 /** What a new thread runs on and starts with, wherever the caller is. */
 interface Launch {
@@ -52,17 +55,22 @@ interface Launch {
  */
 export class ThreadSpawns {
   readonly #pending = new Map<string, { fingerprint: string; result: Promise<AgentSpawn> }>();
+  /** Reads the model lists an agent owns; set once the core registers its methods. */
+  #probe: ProviderProbe | null = null;
   readonly #core: Core;
   readonly #threads: ThreadStore;
+
   constructor(core: Core, threads: ThreadStore) {
     this.#core = core;
     this.#threads = threads;
   }
 
+  useProbe(probe: ProviderProbe): void { this.#probe = probe; }
+
   async spawn(params: RpcParams<'agent.spawn'>): Promise<AgentSpawn> {
     const caller = this.#threads.require(params.threadId);
     const threadId = caller.id;
-    if (caller.parentThreadId) {
+    if (caller.parentThreadId || this.#core.delegation.remote.parentOf(caller.id)) {
       throw refused('a delegated agent or workflow step cannot start threads; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
     }
     // A bot starts threads in any project from its own thread, and drives what it started.
@@ -77,7 +85,12 @@ export class ThreadSpawns {
     if (params.worktree !== undefined && typeof params.worktree !== 'boolean') throw invalidParams('agent.spawn.worktree: expected true or false');
     const worktree = params.worktree === true;
     const requestId = text(params.requestId, 'requestId', 128);
-    const fingerprint = createHash('sha256').update(JSON.stringify([params.project, prompt, params.title ?? null, worktree, ...(params.context === undefined ? [] : [params.context]), ...(machine === null ? [] : [{ machine }])])).digest('hex');
+    const choice: Choice | null = params.model === undefined && params.effort === undefined && params.speed === undefined ? null : {
+      ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256).trim() }),
+      ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 64).trim() }),
+      ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64).trim() }),
+    };
+    const fingerprint = createHash('sha256').update(JSON.stringify([params.project, prompt, params.title ?? null, worktree, ...(params.context === undefined ? [] : [params.context]), ...(machine === null ? [] : [{ machine }]), ...(choice === null ? [] : [{ choice }])])).digest('hex');
     const ledger = (this.#core.journal.getSetting(`${LEDGER}${threadId}`) as Started[] | undefined) ?? [];
     const retried = ledger.find((entry) => entry.requestId === requestId);
     if (retried) {
@@ -97,13 +110,14 @@ export class ThreadSpawns {
       const away = bot === null ? null : await this.#core.workforce.group.away(bot, params.project, machine);
       if (away !== null) {
         this.#firstGeneration(threadId, 'start another');
-        return this.#forBot(caller, away, { project: away.projectId, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) });
+        return this.#forBot(caller, away, { project: away.projectId, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) }, choice);
       }
-      if (machine !== null) return this.#elsewhere(caller, machine, { project: params.project, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) });
+      if (machine !== null) return this.#elsewhere(caller, machine, { project: params.project, prompt, title, worktree, requestId, fingerprint, ...(params.context === undefined ? {} : { context: params.context }) }, choice);
       const target = this.#core.projects.find(params.project, 'agent.spawn', 'project', { threadId });
       // A bot starts threads whatever its communication settings say.
       if (bot === null) this.#gate(threadId, target.id !== caller.projectId);
       else this.#firstGeneration(threadId, 'start another');
+      const picked = choice === null ? null : await this.#here(caller, choice);
       const now = Date.now();
       // A persistent agent has no project of its own: its link names it and the project it works on.
       const from = bot ? target : this.#core.projects.require(caller.projectId!);
@@ -118,7 +132,9 @@ export class ThreadSpawns {
           + `Your final answer to it is sent back to that agent automatically; boite threads send ${address.coreId}/${threadId} <text> reaches it sooner.\n\nBrief:\n`;
       const { created, turn } = await this.#launch({
         projectId: target.id, title, prompt, note, worktree, ...(params.context === undefined ? {} : { context: params.context }),
-        agent: { providerId: caller.providerId, accountId: caller.accountId, ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode },
+        agent: picked === null
+          ? { providerId: caller.providerId, accountId: caller.accountId, ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode }
+          : { ...picked, permissionMode: caller.permissionMode },
         origin: { origin, reported: false },
       // Worktree preparation can outlive the caller's agent socket and its archive.
       }, () => { if (this.#threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' }); });
@@ -190,22 +206,41 @@ export class ThreadSpawns {
     this.#core.journal.setSetting(`${prefix}${threadId}`, [...completed.filter((entry) => entry.at > started.at - 24 * HOUR), started]);
   }
 
-  /** The caller's side of `--machine`: its own gates, then the member's answer to `thread.start`. */
-  async #elsewhere(caller: ThreadSummary, query: string, ask: { project: string; prompt: string; title: string; worktree: boolean; requestId: string; fingerprint: string; context?: ContextRequest | ContextPreset }): Promise<AgentSpawn> {
+  /** `--model`, `--effort` and `--speed` against this machine's models, read first when the named one is not listed yet. */
+  async #here(caller: ThreadSummary, choice: Choice): Promise<ReturnType<typeof chooseModel>> {
+    if (this.#probe !== null && choice.model !== undefined) await readNamed(this.#core, this.#probe, caller, [choice.model]);
+    return chooseModel(catalog(this.#core, caller, true).choices, caller, choice, 'boite delegate models');
+  }
+
+  /** A chosen model must match the destination's catalog on both remote start paths. */
+  async #agentThere(caller: ThreadSummary, peer: CoordinationPeer, choice: Choice | null): Promise<GroupStart['agent']> {
+    if (choice === null) return { providerId: caller.providerId, model: caller.model, effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode };
+    const models = await memberModels(this.#core, caller, peer, 'start threads on a model chosen from another machine');
+    const picked = chooseModel(models.choices, caller, choice, `boite delegate models --machine ${machineArg(this.#core, peer)}`);
+    return { providerId: picked.providerId, model: picked.model, effort: picked.effort, speed: picked.speed, permissionMode: caller.permissionMode, strict: true };
+  }
+
+  /**
+   * The caller's side of `--machine`: its own gates, then the member's answer
+   * to `thread.start`. With a `choice`, the member's models are read first and
+   * the thread starts there on exactly the one picked from them, or not at all.
+   */
+  async #elsewhere(caller: ThreadSummary, query: string, ask: { project: string; prompt: string; title: string; worktree: boolean; requestId: string; fingerprint: string; context?: ContextRequest | ContextPreset }, choice: Choice | null): Promise<AgentSpawn> {
     const threadId = caller.id;
     // Another machine is outside this thread's project, whatever the project is called there.
     this.#gate(threadId, true);
     const peer = memberNamed(this.#core, query, 'agent.spawn');
     const from = this.#core.projects.require(caller.projectId!);
+    const agent = await this.#agentThere(caller, peer, choice);
     const start: GroupStart = {
       from: { threadId, title: caller.title, projectId: from.id, project: from.name },
       project: ask.project, prompt: ask.prompt, title: ask.title, worktree: ask.worktree, requestId: ask.requestId,
       ...(ask.context === undefined ? {} : { context: ask.context }),
-      agent: { providerId: caller.providerId, model: caller.model, effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode },
+      agent,
     };
     let answer: unknown;
     try { answer = await this.#core.coordination.request(peer, 'thread.start', start); }
-    catch (error) { throw this.#refusalFrom(peer, error); }
+    catch (error) { throw peerRefusal(this.#core, peer, error); }
     const spawned = answer as AgentSpawn;
     if (typeof spawned?.thread?.id !== 'string' || typeof spawned.turnId !== 'string' || spawned.address?.coreId !== peer.coreId) throw unavailable(`${peer.name} gave an answer this machine does not read; update Boite on both machines`);
     // The request awaited another machine; the caller may have been archived or paused meanwhile, and the thread there still runs.
@@ -222,16 +257,18 @@ export class ThreadSpawns {
     return spawned;
   }
 
+  /** `delegation.catalog`: this machine's models, for a thread another machine of the group would start here. */
+  catalogFor(payload: unknown): Promise<DelegationModels> { return catalogFor(this.#core, this.#probe, payload); }
   /**
    * A bot's side of a thread in a project of another machine entrusted to it:
    * that machine checks its lease and starts it with `bot.start`
    * (`agents/group-bots.ts`), and the thread is on the bot's desk at once.
    */
-  async #forBot(caller: ThreadSummary, away: { peer: CoordinationPeer; projectId: string }, ask: Omit<StartFields, 'agent'> & { fingerprint: string }): Promise<AgentSpawn> {
+  async #forBot(caller: ThreadSummary, away: { peer: CoordinationPeer; projectId: string }, ask: Omit<StartFields, 'agent'> & { fingerprint: string }, choice: Choice | null): Promise<AgentSpawn> {
     const threadId = caller.id;
     const { fingerprint, ...start } = ask;
     const spawned = await this.#core.workforce.group.start(threadId, away.peer, {
-      ...start, agent: { providerId: caller.providerId, model: caller.model, effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode },
+      ...start, agent: await this.#agentThere(caller, away.peer, choice),
     });
     this.#record(threadId, { at: Date.now(), requestId: ask.requestId, fingerprint, threadId: spawned.thread.id, turnId: spawned.turnId, spawned });
     const started: ThreadLink = { threadId: spawned.thread.id, title: spawned.thread.title, projectId: spawned.thread.projectId ?? '', project: spawned.project, machine: away.peer.name };
@@ -239,18 +276,6 @@ export class ThreadSpawns {
     return spawned;
   }
 
-  /** Why a member did not start the thread, in words the calling agent can act on. */
-  #refusalFrom(peer: CoordinationPeer, error: unknown): Error {
-    const name = machineArg(this.#core, peer);
-    if (error instanceof PeerRefusal) {
-      if (error.message === GROUP_THREADS_OFF) {
-        return refused(`${peer.name} does not let the other machines of its group start threads there; propose the switch to the user with boite settings request groupThreads true --machine ${name} --why "<what the thread is for>"`, { field: 'machine', setting: 'groupThreads' });
-      }
-      if (error.message.startsWith('operation: expected')) return refused(`Boite on ${peer.name} is too old to start threads for another machine; the owner updates it in Settings, Machines and updates`, { field: 'machine' });
-      return refused(`${peer.name}: ${error.message}`, { field: 'machine' });
-    }
-    return unavailable(`${peer.name} did not answer: ${messageOf(error)}`, { field: 'machine' });
-  }
 
   /**
    * `thread.start`, the member's side: another machine of the group starts a
@@ -342,7 +367,7 @@ export class ThreadSpawns {
     if (caller.agentSessionId || caller.projectId === null) {
       throw refused('a bot works in the projects the owner entrusts to it and cannot add projects', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
-    if (caller.parentThreadId) {
+    if (caller.parentThreadId || this.#core.delegation.remote.parentOf(caller.id)) {
       throw refused('a delegated agent or workflow step cannot add projects; ask its parent', { threadId, field: 'threadId', expected: 'a top-level thread' });
     }
     if (caller.archived) throw refused('an archived thread cannot add projects', { threadId, field: 'threadId', expected: 'a thread that is not archived' });

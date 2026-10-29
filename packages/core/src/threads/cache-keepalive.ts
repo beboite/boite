@@ -41,51 +41,54 @@ interface Wait {
 export class CacheKeepalive {
   private readonly waits = new Map<ThreadId, Wait>();
   /** The pings already asked to stop for a result, so a second letter does not stop them again. */
-  private readonly yielded = new Set<TurnId>();
+  readonly #yielded = new Set<TurnId>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  readonly #core: Core;
+
+  constructor(core: Core, private readonly threads: ThreadStore) {
+    this.#core = core;}
 
   /** Called once a finished turn and its thread are saved, in the same session. */
   turnFinished(thread: ThreadSummary, turn: Turn): void {
     const wait = this.waits.get(thread.id);
-    this.clearTimer(wait);
-    this.yielded.delete(turn.id);
+    this.#clearTimer(wait);
+    this.#yielded.delete(turn.id);
     if (turn.execution?.operation === 'keepalive') {
       if (wait === undefined) return;
       const miss = turn.status !== 'done' ? `the ping ended ${turn.status}` : missOf(turn.usage);
-      if (miss !== null) { this.end(thread.id, miss, turn.id); return; }
+      if (miss !== null) { this.#end(thread.id, miss, turn.id); return; }
       wait.pings += 1;
-      this.arm(thread, wait);
+      this.#arm(thread, wait);
       return;
     }
     this.waits.delete(thread.id);
     // A stop or a failure is the user's to look at: no ping keeps it company.
-    if (turn.status !== 'done' || !this.core.settings.get().cacheKeepalive) return;
+    if (turn.status !== 'done' || !this.#core.settings.get().cacheKeepalive) return;
     const next: Wait = { since: turn.finishedAt ?? Date.now(), pings: 0, timer: null, armed: false };
     this.waits.set(thread.id, next);
-    this.arm(thread, next);
+    this.#arm(thread, next);
   }
 
   /** Any turn opening disarms the next ping; a real one's end plans a new wait. */
   cancel(threadId: ThreadId): void {
-    this.clearTimer(this.waits.get(threadId));
+    this.#clearTimer(this.waits.get(threadId));
   }
 
   /** The user stopped the thread: its wait ends here. */
   forget(threadId: ThreadId): void {
     const wait = this.waits.get(threadId);
-    if (wait !== undefined) this.end(threadId, 'the thread was stopped');
+    if (wait !== undefined) this.#end(threadId, 'the thread was stopped');
   }
 
   close(): void {
-    for (const wait of this.waits.values()) this.clearTimer(wait);
+    for (const wait of this.waits.values()) this.#clearTimer(wait);
     this.waits.clear();
-    this.yielded.clear();
+    this.#yielded.clear();
   }
 
   /** Whether the thread's turn in flight is a ping: it takes no steering, it gives way. */
   pinging(threadId: ThreadId): boolean {
-    const turn = this.core.journal.lastTurn(threadId);
+    const turn = this.#core.journal.lastTurn(threadId);
     return turn !== null && (turn.status === 'queued' || turn.status === 'running') && turn.execution?.operation === 'keepalive';
   }
 
@@ -95,24 +98,24 @@ export class CacheKeepalive {
    * follows. True when there was a ping in the way.
    */
   yieldTo(threadId: ThreadId): boolean {
-    const turn = this.core.journal.lastTurn(threadId);
+    const turn = this.#core.journal.lastTurn(threadId);
     if (turn === null || (turn.status !== 'queued' && turn.status !== 'running') || turn.execution?.operation !== 'keepalive') return false;
-    if (this.yielded.has(turn.id)) return true;
-    this.yielded.add(turn.id);
-    this.end(threadId, 'a result came in', turn.id, true);
-    this.core.scheduler.stop(threadId);
+    if (this.#yielded.has(turn.id)) return true;
+    this.#yielded.add(turn.id);
+    this.#end(threadId, 'a result came in', turn.id, true);
+    this.#core.scheduler.stop(threadId);
     return true;
   }
 
-  private arm(thread: ThreadSummary, wait: Wait): void {
-    const plan = this.plan(thread, wait);
-    if (typeof plan === 'string') { this.end(thread.id, plan); return; }
+  #arm(thread: ThreadSummary, wait: Wait): void {
+    const plan = this.#plan(thread, wait);
+    if (typeof plan === 'string') { this.#end(thread.id, plan); return; }
     wait.armed = true;
-    this.schedule(thread.id, wait, plan - Date.now());
+    this.#schedule(thread.id, wait, plan - Date.now());
   }
 
-  private schedule(threadId: ThreadId, wait: Wait, delay: number): void {
-    this.clearTimer(wait);
+  #schedule(threadId: ThreadId, wait: Wait, delay: number): void {
+    this.#clearTimer(wait);
     const timer = setTimeout(() => {
       wait.timer = null;
       this.fire(threadId);
@@ -126,20 +129,20 @@ export class CacheKeepalive {
    * the margin, as long as the thread still qualifies, the cap and the
    * duration allow one more, and the cache has not lapsed already.
    */
-  private plan(thread: ThreadSummary, wait: Wait): number | string {
-    const setting = this.core.settings.get().cacheKeepalive;
+  #plan(thread: ThreadSummary, wait: Wait): number | string {
+    const setting = this.#core.settings.get().cacheKeepalive;
     if (!setting) return 'the setting is off';
     if (thread.archived) return 'the thread is archived';
     // A delegated agent answers its parent, who has the cache that matters.
     if (thread.parentThreadId) return 'not a conversation of the user';
     if (thread.sessionId === null) return 'the thread has no session to resume';
-    const waiting = this.waiting(thread.id);
+    const waiting = this.#waiting(thread.id);
     if (waiting !== true) return waiting;
     const cache = thread.promptCache ?? null;
     if (cache === null) return 'the thread shows no prompt cache';
     // Another model or account starts cold: there is no cached prefix to keep.
     if (cache.model !== thread.model || cache.accountId !== thread.accountId) return 'the cache is of another model or account';
-    const last = this.core.journal.lastEndedTurn(thread.id)?.execution;
+    const last = this.#core.journal.lastEndedTurn(thread.id)?.execution;
     // The same effort and speed as the request that wrote the cache, so a ping sends the same prefix.
     if (last && (last.effort !== thread.effort || (last.speed ?? null) !== (thread.speed ?? null))) return 'the thread\'s effort or speed changed since its last turn';
     const cap = KEEPALIVE_PING_CAP[cache.ttlSeconds];
@@ -153,10 +156,10 @@ export class CacheKeepalive {
   }
 
   /** True while a delegated agent of the thread works or a workflow of it runs, otherwise why not. */
-  private waiting(threadId: ThreadId): true | string {
+  #waiting(threadId: ThreadId): true | string {
     try {
-      if (this.core.delegation.get(threadId).agents.some((agent) => threadActive(agent.thread.status))) return true;
-      if (this.core.workflows.list(threadId).some((run) => run.status === 'running')) return true;
+      if (this.#core.delegation.get(threadId).agents.some((agent) => threadActive(agent.thread.status))) return true;
+      if (this.#core.workflows.list(threadId).some((run) => run.status === 'running')) return true;
     } catch (error) {
       return `its agents could not be read: ${messageOf(error)}`;
     }
@@ -167,47 +170,47 @@ export class CacheKeepalive {
    * Whether something else is about to open a turn here: that turn comes
    * first, and the ping looks again a little later.
    */
-  private expected(threadId: ThreadId): boolean {
+  #expected(threadId: ThreadId): boolean {
     // Keep the wait and recheck: cancelling compaction must allow the next
     // ping without requiring another conversation turn to rebuild the wait.
     if (this.threads.autoCompact.planned(threadId)) return true;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return true;
     const deferred = this.threads.deferred;
     if (deferred.pendingWakes.has(threadId) || deferred.deferredAnswers.has(threadId) || deferred.consumed.has(threadId)) return true;
-    const activity = this.core.activity.get(threadId);
+    const activity = this.#core.activity.get(threadId);
     if (activity.goal?.status === 'active' || activity.loop?.status === 'active') return true;
-    return this.core.delegation.hasMail(threadId);
+    return this.#core.delegation.hasMail(threadId);
   }
 
   private fire(threadId: ThreadId): void {
     const wait = this.waits.get(threadId);
-    if (wait === undefined || this.core.stopping || this.core.journal.isClosed()) return;
-    const thread = this.core.journal.getThread(threadId);
+    if (wait === undefined || this.#core.stopping || this.#core.journal.isClosed()) return;
+    const thread = this.#core.journal.getThread(threadId);
     if (thread === null) { this.waits.delete(threadId); return; }
     // A turn in flight plans the next ping when it ends.
     if (thread.status !== 'idle') return;
-    const plan = this.plan(thread, wait);
-    if (typeof plan === 'string') { this.end(threadId, plan); return; }
+    const plan = this.#plan(thread, wait);
+    if (typeof plan === 'string') { this.#end(threadId, plan); return; }
     // The setting or the cache moved since the timer was armed: a ping that lies ahead waits for its time.
-    if (plan > Date.now()) { this.schedule(threadId, wait, plan - Date.now()); return; }
-    if (this.expected(threadId)) { this.schedule(threadId, wait, CACHE_KEEPALIVE.retryMs); return; }
+    if (plan > Date.now()) { this.#schedule(threadId, wait, plan - Date.now()); return; }
+    if (this.#expected(threadId)) { this.#schedule(threadId, wait, CACHE_KEEPALIVE.retryMs); return; }
     try {
       const turn = this.threads.startTurn(threadId, { prompt: KEEPALIVE_PROMPT, display: KEEPALIVE_LABEL }, { kind: 'keepalive' });
       this.log('info', threadId, `Prompt cache keepalive ping ${wait.pings + 1} sent`, 'cache-keepalive.ping', turn.id, { pings: wait.pings + 1 });
     } catch (error) {
-      this.end(threadId, `the ping was refused: ${messageOf(error)}`);
+      this.#end(threadId, `the ping was refused: ${messageOf(error)}`);
     }
   }
 
-  private end(threadId: ThreadId, reason: string, turnId?: TurnId, yielded = false): void {
+  #end(threadId: ThreadId, reason: string, turnId?: TurnId, yielded = false): void {
     const wait = this.waits.get(threadId);
     if (wait === undefined) return;
-    this.clearTimer(wait);
+    this.#clearTimer(wait);
     this.waits.delete(threadId);
     if (wait.armed || yielded) this.log('info', threadId, `Prompt cache keepalive ended: ${reason}`, 'cache-keepalive.ended', turnId, { reason, pings: wait.pings });
   }
 
-  private clearTimer(wait: Wait | undefined): void {
+  #clearTimer(wait: Wait | undefined): void {
     if (wait?.timer == null) return;
     clearTimeout(wait.timer);
     wait.timer = null;
@@ -215,7 +218,7 @@ export class CacheKeepalive {
 
   private log(level: 'info' | 'warn', threadId: ThreadId, message: string, event: string, turnId: TurnId | undefined, data: Record<string, string | number>): void {
     try {
-      this.core.logs.record(level, message, { source: 'turns', event, threadId, ...(turnId ? { turnId } : {}), data });
+      this.#core.logs.record(level, message, { source: 'turns', event, threadId, ...(turnId ? { turnId } : {}), data });
     } catch { /* the wait stands without its record */ }
   }
 }

@@ -247,16 +247,23 @@ function executable(pid: number): string {
 const lostError = () => new WindowCaptureError('failed', 'the connection to the X server was lost');
 
 export class X11WindowCapture implements WindowCapture {
-  private readonly root: number;
-  private readonly atoms: Record<'clientList' | 'pid' | 'netName' | 'utf8' | 'state' | 'hidden' | 'wmState', number>;
+  readonly #root: number;
+  readonly #atoms: Record<'clientList' | 'pid' | 'netName' | 'utf8' | 'state' | 'hidden' | 'wmState', number>;
   /** Windows this connection redirected, with how many captures hold each. */
-  private readonly redirects = new Map<number, number>();
-  private closed = false;
+  readonly #redirects = new Map<number, number>();
+  #closed = false;
 
-  constructor(private readonly lib: X11, private readonly display: Pointer, private readonly composite: Composite | null) {
-    this.root = Number(lib.XDefaultRootWindow(display));
+  readonly #lib: X11;
+  readonly #display: Pointer;
+  readonly #composite: Composite | null;
+
+  constructor(lib: X11, display: Pointer, composite: Composite | null) {
+    this.#lib = lib;
+    this.#display = display;
+    this.#composite = composite;
+    this.#root = Number(lib.XDefaultRootWindow(display));
     const atom = (name: string) => Number(lib.XInternAtom(display, Buffer.from(`${name}\0`), 0));
-    this.atoms = {
+    this.#atoms = {
       clientList: atom('_NET_CLIENT_LIST'),
       pid: atom('_NET_WM_PID'),
       netName: atom('_NET_WM_NAME'),
@@ -269,30 +276,30 @@ export class X11WindowCapture implements WindowCapture {
 
   /** Whether the display still answers; a lost one is never used again. */
   get alive(): boolean {
-    return !this.closed && !lost.has(Number(this.display));
+    return !this.#closed && !lost.has(Number(this.#display));
   }
 
   async list(): Promise<NativeWindow[]> {
-    this.assertAlive();
-    const managed = this.property(this.root, this.atoms.clientList, XA_WINDOW);
-    const ids = managed ? longs(managed) : this.topLevels();
+    this.#assertAlive();
+    const managed = this.#property(this.#root, this.#atoms.clientList, XA_WINDOW);
+    const ids = managed ? longs(managed) : this.#topLevels();
     const windows: NativeWindow[] = [];
     for (const window of ids) {
-      const attributes = this.attributes(window);
+      const attributes = this.#attributes(window);
       // Closed since the window manager listed it.
       if (!attributes) continue;
       // No window manager: what a person sees is every mapped child of the root but popups.
       if (!managed && (!attributes.inputOutput || !attributes.viewable || attributes.overrideRedirect)) continue;
-      const pidProperty = this.property(window, this.atoms.pid, XA_CARDINAL);
+      const pidProperty = this.#property(window, this.#atoms.pid, XA_CARDINAL);
       // _NET_WM_PID is a process of the host in WM_CLIENT_MACHINE: a window forwarded from another
       // machine (ssh -X) has no program here, and the service refuses a window with no path.
-      const machine = text(this.property(window, XA_WM_CLIENT_MACHINE, ANY_PROPERTY_TYPE), this.atoms.utf8);
+      const machine = text(this.#property(window, XA_WM_CLIENT_MACHINE, ANY_PROPERTY_TYPE), this.#atoms.utf8);
       const pid = (!machine || thisHost(machine)) ? ((pidProperty && longs(pidProperty)[0]) || 0) : 0;
       const path = executable(pid);
-      const title = text(this.property(window, this.atoms.netName, this.atoms.utf8), this.atoms.utf8)
-        ?? text(this.property(window, XA_WM_NAME, ANY_PROPERTY_TYPE), this.atoms.utf8) ?? '';
+      const title = text(this.#property(window, this.#atoms.netName, this.#atoms.utf8), this.#atoms.utf8)
+        ?? text(this.#property(window, XA_WM_NAME, ANY_PROPERTY_TYPE), this.#atoms.utf8) ?? '';
       // "instance\0class\0"
-      const [instance, className] = (text(this.property(window, XA_WM_CLASS, ANY_PROPERTY_TYPE), this.atoms.utf8) ?? '').split('\0');
+      const [instance, className] = (text(this.#property(window, XA_WM_CLASS, ANY_PROPERTY_TYPE), this.#atoms.utf8) ?? '').split('\0');
       windows.push({
         id: String(window),
         pid,
@@ -306,23 +313,23 @@ export class X11WindowCapture implements WindowCapture {
         minimized: this.hidden(window) || (managed !== null && !attributes.viewable),
       });
     }
-    this.assertAlive();
+    this.#assertAlive();
     return windows;
   }
 
   capture(id: string): Promise<WindowPixels> {
-    return this.grab(id, null);
+    return this.#grab(id, null);
   }
 
   frames(id: string): WindowFrames {
     const held = new Set<number>();
     let closed = false;
     return {
-      next: () => closed ? Promise.reject(new WindowCaptureError('failed', 'these frames are closed')) : this.grab(id, held),
+      next: () => closed ? Promise.reject(new WindowCaptureError('failed', 'these frames are closed')) : this.#grab(id, held),
       close: () => {
         if (closed) return;
         closed = true;
-        for (const window of held) this.unredirect(window);
+        for (const window of held) this.#unredirect(window);
         held.clear();
       },
     };
@@ -330,14 +337,14 @@ export class X11WindowCapture implements WindowCapture {
 
   /** Closes this connection; a later `loadX11WindowCapture` opens a new one. */
   close(): void {
-    if (this.closed) return;
-    for (const window of [...this.redirects.keys()]) {
-      this.redirects.set(window, 1);
-      this.unredirect(window);
+    if (this.#closed) return;
+    for (const window of [...this.#redirects.keys()]) {
+      this.#redirects.set(window, 1);
+      this.#unredirect(window);
     }
-    this.closed = true;
+    this.#closed = true;
     if (shared === this) shared = null;
-    if (!lost.has(Number(this.display))) this.lib.XCloseDisplay(this.display);
+    if (!lost.has(Number(this.#display))) this.#lib.XCloseDisplay(this.#display);
   }
 
   /**
@@ -346,31 +353,31 @@ export class X11WindowCapture implements WindowCapture {
    * redirect for the next frame. Without it, X11 gives what is on screen in
    * the window's place, another window's pixels included.
    */
-  private async grab(id: string, held: Set<number> | null): Promise<WindowPixels> {
+  async #grab(id: string, held: Set<number> | null): Promise<WindowPixels> {
     const window = this.viewable(id).window;
     let redirected = held?.has(window) ?? false;
     let fresh = false;
-    if (!redirected && this.composite) {
-      fresh = !this.redirects.has(window);
-      redirected = this.redirect(window);
+    if (!redirected && this.#composite) {
+      fresh = !this.#redirects.has(window);
+      redirected = this.#redirect(window);
       if (redirected) held?.add(window);
     }
     try {
       if (redirected && fresh) await Bun.sleep(REDIRECT_SETTLE_MS);
       const { attributes } = this.viewable(id);
-      return (redirected && this.fromPixmap(window, attributes)) || this.fromScreen(id, window, attributes);
+      return (redirected && this.#fromPixmap(window, attributes)) || this.#fromScreen(id, window, attributes);
     } finally {
-      if (redirected && !held) this.unredirect(window);
+      if (redirected && !held) this.#unredirect(window);
     }
   }
 
   private viewable(id: string): { window: number; attributes: Attributes } {
-    this.assertAlive();
+    this.#assertAlive();
     if (!/^\d{1,10}$/.test(id) || Number(id) === 0 || Number(id) > 0xffff_ffff) throw goneError(id);
     const window = Number(id);
-    const attributes = this.attributes(window);
+    const attributes = this.#attributes(window);
     if (!attributes) {
-      this.assertAlive();
+      this.#assertAlive();
       throw goneError(id);
     }
     if (!attributes.viewable || this.hidden(window)) throw minimizedError();
@@ -378,30 +385,30 @@ export class X11WindowCapture implements WindowCapture {
     return { window, attributes };
   }
 
-  private fromPixmap(window: number, attributes: Attributes): WindowPixels | null {
-    const composite = this.composite!;
+  #fromPixmap(window: number, attributes: Attributes): WindowPixels | null {
+    const composite = this.#composite!;
     failed = 0;
-    const pixmap = Number(composite.XCompositeNameWindowPixmap(this.display, window));
-    this.lib.XSync(this.display, 0);
+    const pixmap = Number(composite.XCompositeNameWindowPixmap(this.#display, window));
+    this.#lib.XSync(this.#display, 0);
     if (failed || !pixmap) return null;
     try {
       // The pixmap includes the border; the window's own pixels start inside it.
-      const image = this.image(pixmap, attributes.border, attributes.border, attributes.width, attributes.height, attributes.masks);
+      const image = this.#image(pixmap, attributes.border, attributes.border, attributes.width, attributes.height, attributes.masks);
       return image && { ...image, via: 'x11-composite' };
     } finally {
-      this.lib.XFreePixmap(this.display, pixmap);
-      this.lib.XSync(this.display, 0);
+      this.#lib.XFreePixmap(this.#display, pixmap);
+      this.#lib.XSync(this.#display, 0);
       failed = 0;
     }
   }
 
   /** XGetImage refuses a rectangle past the screen's edge: read the part on screen and leave the rest black. */
-  private fromScreen(id: string, window: number, attributes: Attributes): WindowPixels {
-    const screen = this.attributes(this.root);
+  #fromScreen(id: string, window: number, attributes: Attributes): WindowPixels {
+    const screen = this.#attributes(this.#root);
     const x = new Int32Array(1), y = new Int32Array(1), child = new BigUint64Array(1);
     failed = 0;
-    if (!screen || !this.lib.XTranslateCoordinates(this.display, window, this.root, 0, 0, x, y, child) || failed) {
-      this.assertAlive();
+    if (!screen || !this.#lib.XTranslateCoordinates(this.#display, window, this.#root, 0, 0, x, y, child) || failed) {
+      this.#assertAlive();
       throw goneError(id);
     }
     const { width, height } = attributes;
@@ -410,10 +417,10 @@ export class X11WindowCapture implements WindowCapture {
     if (right <= left || bottom <= top) {
       throw new WindowCaptureError('failed', `window ${id} is off the screen, and without the X Composite extension only what is on screen can be read`);
     }
-    const part = this.image(window, left, top, right - left, bottom - top);
+    const part = this.#image(window, left, top, right - left, bottom - top);
     if (!part) {
-      this.assertAlive();
-      if (!this.attributes(window)) throw goneError(id);
+      this.#assertAlive();
+      if (!this.#attributes(window)) throw goneError(id);
       throw new WindowCaptureError('failed', `XGetImage refused window ${id} (X error ${failed})`);
     }
     if (part.width === width && part.height === height) return { ...part, via: 'x11' };
@@ -425,9 +432,9 @@ export class X11WindowCapture implements WindowCapture {
     return { width, height, bgra, via: 'x11' };
   }
 
-  private image(drawable: number, x: number, y: number, width: number, height: number, masks: Attributes['masks'] = null): { width: number; height: number; bgra: Uint8Array } | null {
+  #image(drawable: number, x: number, y: number, width: number, height: number, masks: Attributes['masks'] = null): { width: number; height: number; bgra: Uint8Array } | null {
     failed = 0;
-    const image = pointer(this.lib.XGetImage(this.display, drawable, x, y, width, height, ALL_PLANES, Z_PIXMAP));
+    const image = pointer(this.#lib.XGetImage(this.#display, drawable, x, y, width, height, ALL_PLANES, Z_PIXMAP));
     if (!image) return null;
     try {
       if (failed) return null;
@@ -448,16 +455,16 @@ export class X11WindowCapture implements WindowCapture {
       const bytes = new Uint8Array(toArrayBuffer(pointer(data), 0, layout.bytesPerLine * layout.height));
       return { width: layout.width, height: layout.height, bgra: ximageToBgra(layout, bytes) };
     } finally {
-      destroyImage(this.lib, image);
+      destroyImage(this.#lib, image);
     }
   }
 
-  private redirect(window: number): boolean {
-    const count = this.redirects.get(window) ?? 0;
+  #redirect(window: number): boolean {
+    const count = this.#redirects.get(window) ?? 0;
     if (count === 0) {
       failed = 0;
-      this.composite!.XCompositeRedirectWindow(this.display, window, COMPOSITE_REDIRECT_AUTOMATIC);
-      this.lib.XSync(this.display, 0);
+      this.#composite!.XCompositeRedirectWindow(this.#display, window, COMPOSITE_REDIRECT_AUTOMATIC);
+      this.#lib.XSync(this.#display, 0);
       if (failed) {
         failed = 0;
         return false;
@@ -465,46 +472,46 @@ export class X11WindowCapture implements WindowCapture {
       // The new pixmap holds nothing where the window was covered, and the server
       // exposes nothing by itself: ask for the background and an Expose, so the
       // app paints the whole window into it during the settle.
-      this.lib.XClearArea(this.display, window, 0, 0, 0, 0, 1);
-      this.lib.XSync(this.display, 0);
+      this.#lib.XClearArea(this.#display, window, 0, 0, 0, 0, 1);
+      this.#lib.XSync(this.#display, 0);
       failed = 0;
     }
-    this.redirects.set(window, count + 1);
+    this.#redirects.set(window, count + 1);
     return true;
   }
 
-  private unredirect(window: number): void {
-    const count = this.redirects.get(window) ?? 0;
+  #unredirect(window: number): void {
+    const count = this.#redirects.get(window) ?? 0;
     if (count > 1) {
-      this.redirects.set(window, count - 1);
+      this.#redirects.set(window, count - 1);
       return;
     }
-    this.redirects.delete(window);
+    this.#redirects.delete(window);
     if (count === 0 || !this.alive) return;
     // A window closed meanwhile answers BadWindow, which the handler swallows.
-    this.composite!.XCompositeUnredirectWindow(this.display, window, COMPOSITE_REDIRECT_AUTOMATIC);
-    this.lib.XSync(this.display, 0);
+    this.#composite!.XCompositeUnredirectWindow(this.#display, window, COMPOSITE_REDIRECT_AUTOMATIC);
+    this.#lib.XSync(this.#display, 0);
     failed = 0;
   }
 
-  private topLevels(): number[] {
+  #topLevels(): number[] {
     const root = new BigUint64Array(1), parent = new BigUint64Array(1), children = new BigUint64Array(1), count = new Uint32Array(1);
     failed = 0;
-    if (!this.lib.XQueryTree(this.display, this.root, root, parent, children, count) || failed) return [];
+    if (!this.#lib.XQueryTree(this.#display, this.#root, root, parent, children, count) || failed) return [];
     const at = pointer(children[0]!);
     if (!at) return [];
     try {
       const view = new DataView(toArrayBuffer(at, 0, count[0]! * 8));
       return Array.from({ length: count[0]! }, (_, index) => Number(view.getBigUint64(index * 8, true)));
     } finally {
-      this.lib.XFree(at);
+      this.#lib.XFree(at);
     }
   }
 
-  private attributes(window: number): Attributes | null {
+  #attributes(window: number): Attributes | null {
     const buffer = new Uint8Array(136);
     failed = 0;
-    if (!this.lib.XGetWindowAttributes(this.display, window, buffer) || failed) return null;
+    if (!this.#lib.XGetWindowAttributes(this.#display, window, buffer) || failed) return null;
     const view = new DataView(buffer.buffer);
     return {
       width: view.getInt32(8, true),
@@ -519,18 +526,18 @@ export class X11WindowCapture implements WindowCapture {
 
   /** `_NET_WM_STATE_HIDDEN`, or an ICCCM IconicState. */
   private hidden(window: number): boolean {
-    const state = this.property(window, this.atoms.state, XA_ATOM);
-    if (state && longs(state).includes(this.atoms.hidden)) return true;
-    const wmState = this.property(window, this.atoms.wmState, this.atoms.wmState);
+    const state = this.#property(window, this.#atoms.state, XA_ATOM);
+    if (state && longs(state).includes(this.#atoms.hidden)) return true;
+    const wmState = this.#property(window, this.#atoms.wmState, this.#atoms.wmState);
     return wmState !== null && longs(wmState)[0] === ICONIC_STATE;
   }
 
-  private property(window: number, atom: number, type: number): Property | null {
+  #property(window: number, atom: number, type: number): Property | null {
     const actualType = new BigUint64Array(1), actualFormat = new Int32Array(1), items = new BigUint64Array(1);
     const after = new BigUint64Array(1), data = new BigUint64Array(1);
     failed = 0;
     // 64k longs: 256 KB of text, or 64k window ids.
-    const status = this.lib.XGetWindowProperty(this.display, window, atom, 0, 65_536, 0, type, actualType, actualFormat, items, after, data);
+    const status = this.#lib.XGetWindowProperty(this.#display, window, atom, 0, 65_536, 0, type, actualType, actualFormat, items, after, data);
     const at = pointer(data[0]!);
     try {
       if (status !== 0 || failed || !at || actualType[0] === 0n) return null;
@@ -539,16 +546,16 @@ export class X11WindowCapture implements WindowCapture {
       const bytes = length > 0 ? new Uint8Array(toArrayBuffer(at, 0, length)).slice() : new Uint8Array();
       return { type: Number(actualType[0]!), format, bytes };
     } finally {
-      if (at) this.lib.XFree(at);
+      if (at) this.#lib.XFree(at);
     }
   }
 
-  private assertAlive(): void {
-    if (lost.has(Number(this.display))) {
+  #assertAlive(): void {
+    if (lost.has(Number(this.#display))) {
       if (shared === this) shared = null;
       throw lostError();
     }
-    if (this.closed) throw new WindowCaptureError('failed', 'this X11 window capture is closed');
+    if (this.#closed) throw new WindowCaptureError('failed', 'this X11 window capture is closed');
   }
 }
 

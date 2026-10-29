@@ -86,6 +86,17 @@ test('fake thread updates discover native metadata for the selected account', as
     .toMatchObject({ providerId: 'codex', accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' });
 });
 
+test('fake agent model discovery uses the caller account when the provider has several accounts', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const account = await client.call('accounts.add', { providerId: 'codex', label: 'Second account' });
+  const parent = await client.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: account.id });
+  const discovered: RpcEvents['providers.probed'][] = [];
+  client.on('providers.probed', event => discovered.push(event));
+  const child = await client.call('agent.spawn', { threadId: parent.id, project: 'p-boite', prompt: 'Read the code', model: 'codex-demo', requestId: 'second-account-child' });
+  expect(child.thread).toMatchObject({ accountId: account.id, model: 'codex-demo' });
+  expect(discovered.filter(event => event.providerId === 'codex').map(event => event.accountId)).toEqual([account.id]);
+});
+
 test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back from a large reconnect tail', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo', title: 'Byte pages' });

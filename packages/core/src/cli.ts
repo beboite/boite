@@ -32,7 +32,7 @@ import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
 import { contextRequest, parse, requiredText, Usage, type Parsed } from './cli-args.ts';
 import { issueCommand, logsCommand } from './logs-cli.ts';
-import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
+import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, spawnedLines, type Caller } from './control-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -51,11 +51,16 @@ export const USAGE = `usage: boite <command> [args] [--json]
                                  id or folder) when this turn ends
   thread new <project> <brief>   start a thread in a project; its first answer
                                  comes back to you (--worktree, --title <title>,
-                                 --machine <name>: on another machine of the
-                                 group, in a project there, once its owner
-                                 lets the group start threads there; a bot
-                                 names a project of another machine entrusted
-                                 to it as <machine>/<project>)
+                                 --machine <name> from an agent thread: on
+                                 another machine of the group, in a project
+                                 there, once its owner allows it. From a
+                                 terminal use --core <url>; --model
+                                 <provider/model>, --effort <level>, --speed
+                                 <tier> from boite delegate models, with the
+                                 same --machine for that machine's; refused
+                                 when it lacks them, never another model);
+                                 a bot names an entrusted remote project
+                                 as <machine>/<project>
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
@@ -178,6 +183,8 @@ ${CONTROL_HELP}
                                  as the owner, or --core with a paired device
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
+                                 (--machine <name>: another machine's, for
+                                 thread new or delegate spawn --machine --model)
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
                                  --effort <level>, --speed <tier>, --title <title>,
@@ -187,6 +194,8 @@ ${CONTROL_HELP}
                                  light|neutral, --keep|--drop <parts>, --tools
                                  <Tool,...>, --rules <text>|--rules-file <path>)
                                  --project <p> places a bot's child in an entrusted project
+                                 --machine <name> runs it on another machine of the
+                                 group, in its project named like yours or --project
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent;
@@ -490,7 +499,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
         ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
-        ...(parsed.worktree === true ? { worktree: true } : {}),
+        ...(parsed.worktree === true ? { worktree: true } : {}), ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
         ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) }),
       }, print);
     },
@@ -563,22 +572,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
           ...(parsed.machine === undefined ? {} : { machine: parsed.machine }),
+          ...(parsed.model === undefined ? {} : { model: parsed.model }), ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }),
           ...(parsed.context === undefined ? {} : { context: contextRequest(parsed, readRules) as RpcParams<'agent.spawn'>['context'] }),
         });
         // A bot hears of it through events on its desk, not as a message, on this machine or another.
         const persistent = await client.call('agents.snapshot', { threadId }).then(snapshot => snapshot.profiles.length > 0, () => false);
         const machine = spawned.machine ?? parsed.machine;
-        const ref = machine === undefined ? spawned.thread.id : `${machine}/${spawned.thread.id}`;
-        print([
-          `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`,
-          ...(machine === undefined ? [] : [`machine: ${machine}`]), `cwd: ${spawned.thread.cwd}`,
-          ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
-          `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
-          `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
-          persistent
-            ? `It is on your desk; each turn it ends wakes you with an event, so do not poll. boite thread send ${ref} <text> steers it.`
-            : 'Its first answer comes back to you as a message; do not poll. boite threads send <address> <text> steers it.',
-        ], spawned);
+        print(spawnedLines(spawned, machine, persistent), spawned);
         return;
       }
       if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);
