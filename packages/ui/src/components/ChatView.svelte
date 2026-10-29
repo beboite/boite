@@ -365,8 +365,9 @@
     .mobile-welcome small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
     .mobile-place { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; max-width: 100%; font-size: var(--text-md); font-weight: 600; }
     .mobile-place .machine { gap: 6px; }
+    /* Safe: a welcome taller than the room, home cards included, starts at the top instead of above it. */
     .draft-body {
-      padding: 24px; align-items: center; min-height: 0; overflow-y: auto;
+      padding: 24px; align-items: center; align-items: safe center; min-height: 0; overflow-y: auto;
     }
     :global(html[data-keyboard='open']) .draft-body { align-items: flex-start; }
   }

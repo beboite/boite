@@ -30,8 +30,11 @@ import { runCommand } from './run-command.ts';
 
 /** How often the files are looked at and the schedules checked. */
 export const HOME_CARD_TICK_MS = 30_000;
-/** A refresh that has not ended by then is stopped with everything it started. */
-export const HOME_CARD_RUN_TIMEOUT_MS = 120_000;
+/**
+ * A refresh that has not ended by then is stopped with everything it started.
+ * Under a client call's 120 s, so the button still hears how the run ended.
+ */
+export const HOME_CARD_RUN_TIMEOUT_MS = 90_000;
 
 interface Entry {
   card: HomeCard;
@@ -134,7 +137,7 @@ export class HomeCardStore {
       });
       // Never the script's own output: whatever it printed stays here.
       const message = result.timedOut
-        ? `did not finish within ${HOME_CARD_RUN_TIMEOUT_MS / 60_000} minutes and was stopped`
+        ? `did not finish within ${HOME_CARD_RUN_TIMEOUT_MS / 1000} seconds and was stopped`
         : result.code === null
           ? `could not start ${executable}: ${result.stderr.slice(0, 200)}`
           : result.code !== 0 ? `exited with code ${result.code}` : null;

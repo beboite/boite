@@ -81,7 +81,7 @@ button. The command runs:
   the absolute path of `card.json`, the file it should write;
 - through the core's process launcher, with tracing and the guards of any other
   process ([trace](trace.md));
-- for 2 minutes at most, then it is stopped with what it started;
+- for 90 seconds at most, then it is stopped with what it started, so the button still gets its answer within a call's 120 seconds;
 - once at a time: a second click joins the run already going.
 
 Its output stays in the core. A client sees whether the last run succeeded,
