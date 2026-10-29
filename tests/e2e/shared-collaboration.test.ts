@@ -25,7 +25,7 @@ afterAll(async () => { await server?.close(); }, 30_000);
 const prepare = `(async () => {
   const [{sharedFlow}, {workspace}, {setExperiment}] = await Promise.all([
     import('/src/test/shared-flow.ts'), import('/src/lib/workspace.svelte.ts'), import('/src/lib/experiments.ts')]);
-  setExperiment('contacts', true); setExperiment('goal2', true);
+  setExperiment('contacts', true);
   const pair = await sharedFlow(); window.__sharedFlow = pair;
   const store = workspace.active;
   store.detach(); store.attach(pair.a); await store.connect(); await store.open(pair.local.id);
