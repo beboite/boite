@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Account } from '@boite/contracts';
@@ -32,7 +32,12 @@ afterEach(async () => {
   delete process.env.BOITE_DATA_DIR;
 });
 
-const save = (auth: unknown) => writeFile(join(directory, 'auth.json'), JSON.stringify(auth));
+const save = async (auth: unknown) => {
+  // Replace the fixture atomically, as the core does, so concurrent reads see complete JSON.
+  const temporary = join(directory, 'auth.json.tmp');
+  await writeFile(temporary, JSON.stringify(auth));
+  await rename(temporary, join(directory, 'auth.json'));
+};
 const load = async () => JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8'));
 const report = () => Response.json({ config: { creditUsagePercent: 25 } });
 function mockFetch(handler: (url: string, options?: RequestInit) => Promise<Response>) {

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TOOL_OUTPUT_PREVIEW_CHARS, previewToolOutputs, type Message, type MessagePart } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
+import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { BLOB_MIN_CHARS, moveInlineOutputs, moveInlineValues, previewDigests, recodePartBlobs } from '../src/journal/part-blobs.ts';
 import { compactAll, schema36Journal } from './fixtures/journal-schema36.ts';
 
@@ -172,7 +173,7 @@ test('a schema 36 journal reads the same before and after the background passes,
   old.close();
 
   journal = new Journal(file);
-  expect(journal.schema).toEqual({ from: 36, to: 37 });
+  expect(journal.schema).toEqual({ from: 36, to: SCHEMA_VERSION });
   const before = journal.listMessages('thr_a');
   const pageBefore = journal.listMessagePage('thr_a', { limit: 10, toolPreviews: true }).messages;
   const proofBefore = previewDigests.get(pageBefore[0]!.parts[0]!);

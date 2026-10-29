@@ -68,9 +68,11 @@ test('a lock released after another core took its path leaves that core\'s lock'
   const file = join(scratch(), 'core.lock');
   const fstat = spyOn(fs, 'fstatSync').mockImplementation(((fd: number, options?: object) => withId(real.fstatSync(fd, options as never), A)) as never);
   restores.push(() => fstat.mockRestore());
-  stats('statSync', path => path === file ? B : undefined);
+  let replaced = false;
+  stats('statSync', path => path === file ? (replaced ? B : A) : undefined);
   const release = takeLock(file, () => 'busy');
-  // Another core found the lock stale and wrote its own: a new file at the path.
+  // The directory moved away and another core took its path: a new file there.
+  replaced = true;
   fs.rmSync(file);
   fs.writeFileSync(file, '{"pid":1}');
   release();

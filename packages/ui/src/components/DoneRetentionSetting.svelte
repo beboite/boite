@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { DEFAULT_THREAD_DONE_RETENTION_DAYS } from '@boite/contracts';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -31,6 +32,7 @@
     <label class="ui-label-box" for="{uid}-days">
       <span class="ui-label">{strings.settings.archived.doneRetentionLabel}</span>
       <InfoTip topic={strings.settings.archived.doneRetentionLabel} text={strings.settings.archived.doneRetentionHint} />
+      <SyncMark {store} key="threadDoneRetentionDays" />
     </label>
     <div class="actions">
       <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days}

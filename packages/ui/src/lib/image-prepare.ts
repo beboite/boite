@@ -126,6 +126,102 @@ export async function prepareImage(file: File, codec: ImageCodec = browserCodec)
 }
 
 /**
+ * Decoding, resizing and encoding off the main thread, so a pasted screenshot
+ * never stops the typing: a 4K PNG held the page for about 200 ms on the
+ * server (2026-10-28, in `toBlob` and `getImageData`), longer on a slower PC.
+ * The worker decodes with `createImageBitmap` and draws on an
+ * `OffscreenCanvas`; what it cannot decode (HEIC, which only Safari's image
+ * element reads, or a browser without those APIs) runs here through
+ * `browserCodec`. A given codec runs here too: the tests drive it.
+ */
+export function prepareImageAway(file: File, codec?: ImageCodec): Promise<Prepared> {
+  if (codec || !isReducible(file) || isHeic(file)) return prepareImage(file, codec);
+  const away = prepareWorker();
+  if (!away) return prepareImage(file);
+  return new Promise((resolve) => {
+    const id = ++lastJob;
+    jobs.set(id, (prepared) => { resolve(prepared ?? prepareImage(file)); });
+    away.postMessage({ id, file });
+  });
+}
+
+/** The worker, made for the first picture; null once it could not start, and every picture then runs here. */
+let worker: Worker | null | undefined;
+let lastJob = 0;
+const jobs = new Map<number, (prepared: Prepared | null) => void>();
+
+function prepareWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return worker = null;
+  try {
+    worker = new Worker(new URL('./image-prepare.worker.ts', import.meta.url), { type: 'module' });
+  } catch {
+    return worker = null;
+  }
+  worker.onmessage = ({ data }: MessageEvent<{ id: number; prepared: Prepared | null }>) => {
+    const done = jobs.get(data.id);
+    jobs.delete(data.id);
+    done?.(data.prepared);
+  };
+  // A worker that failed to load answers nothing: what it was given runs here.
+  worker.onerror = (event) => {
+    event.preventDefault();
+    worker?.terminate();
+    worker = null;
+    const waiting = [...jobs.values()];
+    jobs.clear();
+    for (const done of waiting) done(null);
+  };
+  return worker;
+}
+
+/** The worker's decoders. Null for a file only the page's image element might read. */
+export const offscreenCodec: ImageCodec = {
+  async decode(file) {
+    if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap !== 'function') return null;
+    let bitmap: ImageBitmap;
+    try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch {
+      try { bitmap = await createImageBitmap(file); } catch { return null; }
+    }
+    const { width, height } = bitmap;
+    let alphaChecked: boolean | null = null;
+    return {
+      width,
+      height,
+      hasAlpha() {
+        if (alphaChecked !== null) return alphaChecked;
+        const probe = fitWithin(width, height, 256);
+        const context = new OffscreenCanvas(probe.width, probe.height).getContext('2d', { willReadFrequently: true });
+        if (!context) return (alphaChecked = false);
+        context.drawImage(bitmap, 0, 0, probe.width, probe.height);
+        const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
+        alphaChecked = false;
+        for (let at = 3; at < pixels.length; at += 4) if (pixels[at]! < 255) { alphaChecked = true; break; }
+        return alphaChecked;
+      },
+      async encode(targetWidth, targetHeight, mimeType, quality) {
+        const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+        const context = canvas.getContext('2d');
+        if (!context) return null;
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        if (mimeType === 'image/jpeg') {
+          context.fillStyle = 'white';
+          context.fillRect(0, 0, targetWidth, targetHeight);
+        }
+        context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+        try {
+          const blob = await canvas.convertToBlob({ type: mimeType, quality });
+          return blob.type === mimeType ? blob : null;
+        } catch { return null; }
+      },
+      close: () => bitmap.close()
+    };
+  }
+};
+
+/**
  * The browser's decoders. `<img>` first: it is what decodes HEIC in Safari
  * and it applies the EXIF orientation; `createImageBitmap` where the image
  * element fails. The canvas draws on white, so a JPEG of a transparent image

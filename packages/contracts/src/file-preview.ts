@@ -1,5 +1,6 @@
 import type { Message, MessagePart } from './index';
 import { imageSize } from './image-size.ts';
+import { decodedBytes } from './attachment-validation.ts';
 
 /**
  * The blur a core holds for a deferred picture, by message and part, or null.
@@ -7,17 +8,13 @@ import { imageSize } from './image-size.ts';
  */
 export type ImagePreviews = (messageId: string, partIndex: number, data: string) => string | null;
 
-/** The bytes a base64 string decodes to. */
-function base64Bytes(data: string): number {
-  return Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-}
-
 /** A picture a client draws in its box, and so can wait for, deferred with its size and blur. */
 const DRAWN_IMAGE = /^image\/(png|jpeg|gif|webp)$/;
 
 /**
- * File links need names and sizes. An assistant's video, audio or PDF keeps
- * its bytes: it previews on mount. An assistant's picture above
+ * File links need names and sizes. Video and audio bytes are fetched separately
+ * when their player nears the screen. An assistant's PDF keeps its bytes for
+ * signature checking before preview. An assistant's picture above
  * `IMAGE_INLINE_CHARS` is deferred like a prompt's, with the size its header
  * gives and its blur, and is read once it nears the screen: nine screenshots
  * an agent attached made a 40-message page weigh 12 MB.
@@ -38,11 +35,11 @@ export function previewFileData(messages: Message[], previews?: ImagePreviews): 
 export function previewFilePart(part: MessagePart, role: Message['role'], messageId: string, index: number, previews?: ImagePreviews): MessagePart {
   if (part.type !== 'file' || part.dataDeferred) return part;
   const picture = DRAWN_IMAGE.test(part.mimeType);
-  if (role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
+  if (role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^image\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
   const size = picture ? imageSize(part.data) : null;
   const preview = picture ? previews?.(messageId, index, part.data) ?? null : null;
   return {
-    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...part, data: '', bytes: decodedBytes(part.data), dataDeferred: true as const,
     ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
   };
 }
@@ -74,7 +71,7 @@ export function previewImagePart(part: MessagePart, messageId: string, index: nu
   const size = imageSize(part.data);
   const preview = previews?.(messageId, index, part.data) ?? null;
   return {
-    ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+    ...part, data: '', bytes: decodedBytes(part.data), dataDeferred: true as const,
     ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
   };
 }

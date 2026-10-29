@@ -8,7 +8,7 @@ import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { startServer } from '../src/server.ts';
 import { AUTO_CONTINUE, AUTO_CONTINUE_LABEL } from '../src/threads/auto-continue.ts';
 import { CRASH_RESUMING, CRASH_WHILE_RUNNING } from '../src/threads/recovery.ts';
-import { echoThread, removeDir, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, removeDir, rolledBackArchive, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const defaults = { ...AUTO_CONTINUE, delaysMs: [...AUTO_CONTINUE.delaysMs] };
 const restores: (() => void)[] = [];
@@ -123,7 +123,7 @@ test('a cache ping neither cancels a planned resume nor holds it back: it gives 
     const { threadId } = await echoThread(h, client);
     await client.call('turns.start', { threadId, prompt: 'port the shader' });
     await waitFor(() => turns(h, threadId)[0]?.status === 'error');
-    h.core.threads.startTurn(threadId, 'ping', [], undefined, 'keepalive');
+    h.core.threads.startTurn(threadId, 'ping', { kind: 'keepalive' });
     await waitFor(() => pinged);
     expect(h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry?.kind).toBe('auto-continue');
     await waitFor(() => turns(h, threadId).length === 3 && turns(h, threadId)[2]!.status === 'done');
@@ -184,6 +184,23 @@ test('the user writing, Stop or Do not resume cancels a planned resume', async (
   } finally { await h.stop(); }
 });
 
+test('an archive that rolls back keeps the planned resume, which still fires', async () => {
+  AUTO_CONTINUE.delaysMs = [400, 400];
+  const h = await startTestCore();
+  scripted(failed(), done);
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const retryOf = () => h.core.threads.list({ includeArchived: true }).find(thread => thread.id === threadId)?.retry ?? null;
+    await client.call('turns.start', { threadId, prompt: 'one' });
+    await waitFor(() => retryOf()?.kind === 'auto-continue');
+    rolledBackArchive(h, threadId);
+    expect([h.core.threads.require(threadId).archived, retryOf()?.kind]).toEqual([false, 'auto-continue']);
+    await waitFor(() => turns(h, threadId)[1]?.status === 'done');
+    expect(turns(h, threadId)[1]!.execution?.operation).toBe('resume');
+  } finally { await h.stop(); }
+});
+
 test('a turn that ends right after a compaction, with no answer after it, resumes', async () => {
   const h = await startTestCore();
   const asked = scripted(ctx => {
@@ -221,6 +238,8 @@ test('background work that ends without waking its agent resumes the thread; a S
     const { threadId } = await echoThread(h, client);
     await client.call('turns.start', { threadId, prompt: 'build the release' });
     await waitFor(() => turns(h, threadId)[0]?.status === 'done' && h.core.threads.require(threadId).status === 'idle');
+    // This scenario ends the task after the turn, even when both callbacks run in one millisecond.
+    setSystemTime(new Date(turns(h, threadId)[0]!.finishedAt! + 1));
     agent!.backgroundFinished?.('bg-1', 'error');
     // The agent had its moment to wake on the failure and did not take it.
     setSystemTime(new Date(Date.now() + 31_000));

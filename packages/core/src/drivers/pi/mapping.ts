@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { AgentCommand, ImageAttachment } from '@boite/contracts';
+import type { AgentCommand, ImageAttachment, ThreadContextMode } from '@boite/contracts';
+import { stringify } from '../tool-text.ts';
 import { resolveDataDir } from '../../paths.ts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
 import type { PromptCacheLife, SessionContext } from '../types.ts';
@@ -82,15 +83,6 @@ export function contentText(value: unknown): string | null {
   return parts.length === 0 ? null : parts.join('\n');
 }
 
-function stringify(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value) ?? null;
-  } catch {
-    return String(value);
-  }
-}
 
 /**
  * Where this thread's transcript lives: its own directory under the account's
@@ -100,6 +92,22 @@ function stringify(value: unknown): string | null {
 export function sessionDirOf(ctx: SessionContext): string {
   const base = ctx.account.isolationDir ?? resolveDataDir();
   return join(base, SESSION_ROOT, ctx.thread.id);
+}
+
+/**
+ * What a thread in a context mode leaves out on pi's command line. pi has no
+ * approval gate in RPC mode, so a thread with no tool (`TOOL_FREE_CONTEXT`)
+ * starts with none at all. Extensions, pi's way to MCP servers and hooks, go
+ * with either; its context files, skills and prompt templates with instructions.
+ * A mode a request may ask of pi drops guides alone, which leaves all of this.
+ */
+export function contextArgs(mode: ThreadContextMode | null | undefined): string[] {
+  if (!mode) return [];
+  return [
+    ...(mode.tools?.length === 0 ? ['--no-tools'] : []),
+    ...(mode.mcp && mode.hooks ? [] : ['--no-extensions']),
+    ...(mode.instructions ? [] : ['--no-context-files', '--no-skills', '--no-prompt-templates']),
+  ];
 }
 
 /**
@@ -127,6 +135,8 @@ export function modelArgs(ctx: SessionContext): string[] {
 export function sessionKey(ctx: SessionContext): string {
   const model = ctx.thread.model;
   return JSON.stringify({
+    protection: ctx.protectedExecution?.fingerprint ?? null,
+    contextMode: ctx.thread.contextMode ?? null,
     ownModel: model === null || model === AGENT_OWN_MODEL,
     ownEffort: ctx.thread.effort === null,
     cwd: ctx.thread.cwd,

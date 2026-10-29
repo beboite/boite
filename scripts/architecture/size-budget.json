@@ -1,5 +1,8 @@
 {
   "ceiling": 900,
-  "allow": {},
+  "allow": {
+    "apps/android-server/termux/boite-server.ts": 1230,
+    "apps/shell/src-tauri/src/browser.rs": 1229
+  },
   "exempt": {}
 }

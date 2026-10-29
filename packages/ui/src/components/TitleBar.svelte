@@ -12,9 +12,15 @@
   import { isMac } from '../lib/keybindings';
   import { linuxShell } from '../lib/shell-platform';
   import ProjectTile from './ProjectTile.svelte';
+  import WindowResizeHandles from './WindowResizeHandles.svelte';
   import { contactsRail, contactsShown } from '../lib/contacts-rail.svelte';
 
   let { store }: { store: Store } = $props();
+  let ContactRequestNotice = $state<typeof import('./home/ContactRequestNotice.svelte').default>();
+  $effect(() => {
+    if (!contactsShown(store) || ContactRequestNotice) return;
+    void import('./home/ContactRequestNotice.svelte').then(module => { ContactRequestNotice = module.default; }).catch(() => {});
+  });
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   /** macOS draws its own traffic lights over the bar's left end, and no caption buttons are drawn here. */
@@ -120,6 +126,8 @@
 
 </script>
 
+<WindowResizeHandles />
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header style:--project-width={`${Math.max(0, (store.sidebarCollapsed ? 156 : store.sidebarWidth - 40) - lights)}px`} class="titlebar" class:browser={!inShell} class:mac={macShell} class:linux={linuxFrame} {onmousedown} data-testid="titlebar">
   {#if foldable}
@@ -143,6 +151,7 @@
   {:else}
     <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : store.page === 'home' ? strings.contacts.heading : heading}</span>
   {/if}
+  {#if ContactRequestNotice && contactsShown(store) && (inShell || !mobile.current)}<ContactRequestNotice {store} />{/if}
   {#if contactsToggle}
     <button type="button" class="ghost icon contacts-toggle" class:open={!contactsRail.folded}
       aria-label={contactsRail.folded ? strings.contacts.rail.show : strings.contacts.rail.hide}

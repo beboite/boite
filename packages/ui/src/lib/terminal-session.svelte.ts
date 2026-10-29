@@ -31,12 +31,19 @@ import type { IDecoration, IMarker, Terminal } from '@xterm/xterm';
 import type { RpcEvents, TerminalShell, TerminalState } from '@boite/contracts';
 import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
+import { touchScreen } from './device';
 import { readTerminalCursor, readTerminalGpu } from './terminal-cursor';
 import { clearLineKeys, parseConEmuCwd, parsePromptMark } from './terminal-marks';
 import { ShellStatusReader } from './terminal-status';
 import type { Store } from './store.svelte';
 
-export type TerminalStart = (cols: number, rows: number) => Promise<TerminalState | null>;
+/** Local attachment metadata; the core's snapshot stays unchanged on the wire. */
+export interface TerminalAttachment extends TerminalState {
+  /** Characters replayed from the snapshot; the rest arrived live while it was in flight. */
+  replayChars?: number;
+}
+
+export type TerminalStart = (cols: number, rows: number) => Promise<TerminalAttachment | null>;
 
 export interface TerminalMount {
   autofocus: boolean;
@@ -249,7 +256,7 @@ export class TerminalSession {
     if (this.#disposed) return;
     this.#host = host;
     this.#onexit = options.onexit;
-    this.#wantsFocus = options.autofocus;
+    this.#wantsFocus = options.autofocus && !touchScreen();
     host.append(this.element);
     if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
     this.#releaseTimer = null;
@@ -722,9 +729,10 @@ export class TerminalSession {
       onexit?.(null);
       return;
     }
-    let output = state.output;
+    const replayChars = state.replayChars ?? state.output.length;
+    let live = state.output.slice(replayChars);
     for (const event of this.#pending) {
-      if (state.sequence === undefined || event.sequence === undefined || event.sequence > state.sequence) output += event.data;
+      if (state.sequence === undefined || event.sequence === undefined || event.sequence > state.sequence) live += event.data;
     }
     this.#pending = [];
     this.#attached = true;
@@ -747,13 +755,20 @@ export class TerminalSession {
       mark.marker.dispose();
     }
     term.reset();
-    term.write(output, () => {
-      this.#muted--;
+    const flushTyped = () => {
+      if (this.#disposed || run !== this.#run) return;
       if (this.#muted > 0 || !this.#attached || this.#typed.length === 0) return;
       const typed = this.#typed;
       this.#typed = '';
       this.store.writeTerminal(this.id, typed);
+    };
+    term.write(state.output.slice(0, replayChars), () => {
+      this.#muted--;
+      if (live.length === 0) flushTyped();
     });
+    // Only replayed queries were already answered. Live cursor queries must
+    // reach the shell, even when they arrived before the snapshot response.
+    if (live.length > 0) term.write(live, flushTyped);
     this.#scheduleResize();
   }
 

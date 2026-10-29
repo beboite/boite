@@ -19,7 +19,7 @@ RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; 
 ARG BOITE_RELEASE_TELEMETRY=
 RUN bun run build:ui && bun run build:core
 
-FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS agents
+FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS agents
 COPY docker/agents/package.json docker/agents/package-lock.json /opt/agents/
 # npm installs both x64 OpenCode builds (185 MB each), and its postinstall picks
 # one by the build host's CPU, which always has AVX2. Keep the baseline build,
@@ -31,7 +31,7 @@ RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force \
        fi \
     && node_modules/.bin/opencode --version
 
-FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS runtime
+FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS runtime
 ARG BOITE_CHANNEL=stable
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git ripgrep tini bash \
@@ -48,15 +48,19 @@ COPY docker/boite /opt/boite-cli/boite
 COPY docker/healthcheck.ts /app/healthcheck.ts
 COPY LICENSE /app/LICENSE
 RUN chmod +x /usr/local/bin/boite-server /opt/boite-cli/boite
+# /opt/agents is root's and no npm prefix. `npm install -g`, which agent updates
+# run (Boite's, `codex update`, `pi update self`), writes to the user's prefix in
+# the home volume instead, and its bin comes first so the updated copy wins.
 ENV NODE_ENV=production \
     BOITE_CHANNEL=${BOITE_CHANNEL} \
     BOITE_DATA_DIR=/data \
     BOITE_CLI_DIR=/opt/boite-cli \
     HOME=/home/node \
-    PATH=/opt/agents/node_modules/.bin:/home/node/.local/bin:/usr/local/bin:/usr/bin:/bin
+    NPM_CONFIG_PREFIX=/home/node/.local \
+    PATH=/home/node/.local/bin:/opt/agents/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 LABEL org.opencontainers.image.title="boite-server" \
       org.opencontainers.image.description="Self-hosted coding agent manager with a web UI" \
-      org.opencontainers.image.source="https://github.com/beboite/boite" \
+      org.opencontainers.image.source="https://github.com/mtsu-dev/boite" \
       org.opencontainers.image.licenses="MIT"
 WORKDIR /workspace
 USER node

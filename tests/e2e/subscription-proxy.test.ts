@@ -110,7 +110,10 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
 
   // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
   await openLimitsTab(page);
-  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
+  expect(await page.evaluate('Array.from(document.querySelectorAll("[data-testid=gateway-quotas]"), group => group.dataset.provider)')).toEqual(['claude', 'codex', 'antigravity', 'meta']);
+  expect(await page.text('[data-testid=gateway-quotas][data-provider=meta]')).toContain('Muse Code subscription');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=gateway-quotas][data-provider=meta] [role=meter]").length')).toBe(0);
   await expectNoNativeOpenCode();
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
   expect(await page.text('[data-testid=gateway-quotas][data-provider=antigravity]')).toContain('Antigravity · 10 accounts');
@@ -124,7 +127,7 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
 
   await page.click('[data-testid="nav-settings"]');
   await openLimitsTab(page);
-  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail] [data-testid=gateway-quotas]")');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
@@ -183,7 +186,7 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-grok]")');
   await expectNoNativeOpenCode();
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=settings] > header").getBoundingClientRect().bottom')).toBe(true);
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=mobile-settings-header]").getBoundingClientRect().bottom')).toBe(true);
   await capture('boite-proxy-native-limits-phone.png');
   await page.click('[data-testid="subscription-proxy-show-dashboard"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');
@@ -207,6 +210,37 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   await capture('boite-proxy-disabled-native-limits-phone.png');
   expect(page.errors()).toEqual([]);
 }, 30_000);
+
+test('a paired phone switches the gateway the owner saved, on and off, from Limits', async () => {
+  const phone = await BrowserPage.launch({ url: `${origin}/?fake=1&principal=session&open=recent&gateway=douane`, windowSize: { width: 390, height: 844 } });
+  const shot = async (name: string) => {
+    await phone.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    await phone.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
+  };
+  const input = '[data-testid=mobile-settings-detail] [data-testid=gateway-switch-input]';
+  try {
+    await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await phone.waitFor('document.querySelector("[data-testid=mobile-header]")');
+    await mobileAction(phone, 'mobile-settings');
+    await openLimitsTab(phone);
+    await phone.waitFor(`document.querySelector(${JSON.stringify(input)})?.checked === false`);
+    expect(await phone.text('[data-testid=gateway-switch]')).toContain('Use Douane');
+    expect(await phone.text('[data-testid=gateway-switch]')).toContain('https://gateway.example.test');
+    // The owner's form stays on the desktop.
+    expect(await phone.evaluate('document.querySelector("[data-testid=subscription-proxy-settings]") === null')).toBe(true);
+    await shot('boite-gateway-switch-off-phone.png');
+    await phone.click(input);
+    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 4');
+    expect(await phone.evaluate(`document.querySelector(${JSON.stringify(input)}).checked`)).toBe(true);
+    expect(await phone.evaluate('document.querySelector("[data-testid=gateway-switch-error]") === null')).toBe(true);
+    expect(await phone.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await shot('boite-gateway-switch-on-phone.png');
+    await phone.click(input);
+    await phone.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 0');
+    expect(await phone.evaluate(`document.querySelector(${JSON.stringify(input)}).checked`)).toBe(false);
+    expect(phone.errors()).toEqual([]);
+  } finally { await phone.close(); }
+}, 45_000);
 
 test('the Douane plugin: its row in Plugins and the proxy card pointing at it, at desktop and phone widths', async () => {
   const local = await BrowserPage.launch({ url: `${origin}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
@@ -264,7 +298,19 @@ test('production desktop and phone embed the dashboard through the real core wit
   let browser: BrowserPage | undefined;
   try {
     await client.call('settings.set', { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: dashboard, dashboardUrl: `${dashboard}/admin/#quotas` } });
-    browser = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+    browser = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
+    // Reproduce a loaded runner: the page loads before its first authenticated hello completes.
+    const { identifier: slowHello } = await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `{
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data !== 'string' || JSON.parse(data).method !== 'hello') return send.call(this, data);
+        setTimeout(() => { if (this.readyState === WebSocket.OPEN) send.call(this, data); }, 1500);
+      };
+    }` }) as { identifier: string };
+    await browser.navigate(pairingUrlOf(core));
+    await browser.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: slowHello });
+    // The token leaves the URL before hello; it is remembered only once the connection is ready.
+    await browser.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
     const profileKey = JSON.stringify([client.core.hostname, client.core.dataDir, client.core.channel]);
     await browser.evaluate(`localStorage.setItem('boite.machine-profiles', ${JSON.stringify(JSON.stringify({ [profileKey]: { label: 'Test core' } }))})`);
     await browser.reload();

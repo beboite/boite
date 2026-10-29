@@ -6,15 +6,35 @@
  */
 import type { BrowserAction, BrowserActionResult, BrowserDialog, BrowserReply } from '@boite/contracts';
 import { kit } from './page-kit.ts';
+import { CdpSessionDetachedError } from './cdp.ts';
+
+/** A way into one document of a tab: the top one speaks on the tab's own session. */
+export interface FrameChannel {
+  send<T = Record<string, unknown>>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
+  /** A frame that shares its parent's renderer runs in a context of its own on the parent's session. */
+  contextId?: number;
+  /** The session a frame in another process speaks on; the tab's own otherwise. */
+  session?: string;
+}
+
+/** How a tab reaches frames of other origins, whose documents the page's own script cannot read. */
+export interface PageFrames {
+  /** The way into the document frame `frameId` shows, from the document that embeds it; null when the browser offers none. */
+  reach(parent: FrameChannel, frameId: string): Promise<FrameChannel | null>;
+  /** Closes what `reach` opened for the command that ran. */
+  release(): void;
+}
 
 /** One tab as the commands see it: its DevTools session and the dialogs answered for the agent. */
-export interface AgentPage {
-  send<T = Record<string, unknown>>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
+export interface AgentPage extends FrameChannel {
   /** Dialogs raised during the agent's commands, oldest first, at most 20. */
   dialogs: BrowserDialog[];
   dialogPolicy: { accept: boolean; text: string | null };
   /** Downloads this tab's frames began: a navigation that turned into one ends there. */
   downloads?: number;
+  frames?: PageFrames;
+  /** Refs the last snapshot found in frames of other origins, each with the iframe refs that lead to it from the top. */
+  frameRefs?: Map<string, string[]>;
 }
 
 /** The kinds this module runs; the others belong to the browser itself. */
@@ -24,9 +44,11 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** A value as a JavaScript literal; the characters JSON leaves unescaped are escaped too. */
 const js = (value: unknown) => (JSON.stringify(value) ?? 'undefined').replace(/[<>\/\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
-export async function evaluate(page: AgentPage, expression: string, timeoutMs = 12_000): Promise<unknown> {
+const inContext = (channel: FrameChannel) => channel.contextId === undefined ? {} : { contextId: channel.contextId };
+
+export async function evaluate(page: FrameChannel, expression: string, timeoutMs = 12_000): Promise<unknown> {
   const reply = await page.send<{ result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } }>(
-    'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, timeout: timeoutMs }, timeoutMs + 5000);
+    'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, timeout: timeoutMs, ...inContext(page) }, timeoutMs + 5000);
   if (reply.exceptionDetails) {
     // The page's own message, without the stack the agent cannot use.
     const details = reply.exceptionDetails;
@@ -41,10 +63,91 @@ export async function evaluate(page: AgentPage, expression: string, timeoutMs = 
  * navigation commit and its first script context can hold an evaluation; the
  * agent hears sooner that the page is not ready.
  */
-function run<T>(page: AgentPage, body: string, timeoutMs = 8000): Promise<T> {
+function run<T>(page: FrameChannel, body: string, timeoutMs = 8000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`the page did not answer within ${timeoutMs / 1000} s; it may still be loading: wait --load domcontentloaded, then try again`)), timeoutMs); });
   return Promise.race([evaluate(page, kit(body), timeoutMs), late]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/** The frame an iframe of `channel`'s document shows, by its ref there. */
+async function frameOf(channel: FrameChannel, ref: string): Promise<string | null> {
+  const reply = await channel.send<{ result?: { objectId?: string }; exceptionDetails?: { exception?: { description?: string } } }>(
+    'Runtime.evaluate', { expression: kit(`return K.find(${js(ref)})`), awaitPromise: true, ...inContext(channel) }, 5000);
+  if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description?.split('\n')[0]?.replace(/^Error: /, '') ?? 'page evaluation failed');
+  const objectId = reply.result?.objectId;
+  if (!objectId) return null;
+  try { return (await channel.send<{ node?: { frameId?: string } }>('DOM.describeNode', { objectId }, 5000)).node?.frameId ?? null; }
+  finally { void channel.send('Runtime.releaseObject', { objectId }).catch(() => {}); }
+}
+
+/** The document of the frame iframe `ref` shows; null when the tab has no way into it. */
+async function enter(page: AgentPage, channel: FrameChannel, ref: string): Promise<FrameChannel | null> {
+  if (!page.frames) return null;
+  const frameId = await frameOf(channel, ref);
+  return frameId ? page.frames.reach(channel, frameId) : null;
+}
+
+/** A target's document, and the iframes of other origins that lead there from the top one. */
+interface Scope { channel: FrameChannel; path: Array<{ parent: FrameChannel; owner: string }> }
+
+/** Where `target` lives: a ref the last snapshot read in a frame of another origin is reached through its iframes. */
+async function scopeOf(page: AgentPage, target: string | undefined): Promise<Scope> {
+  const scope: Scope = { channel: page, path: [] };
+  const ref = target === undefined ? undefined : /^@?(e\d+)$/.exec(target.trim())?.[1];
+  for (const owner of (ref && page.frameRefs?.get(ref)) || []) {
+    const child = await enter(page, scope.channel, `@${owner}`).catch(() => null);
+    if (!child) throw new Error(`ref @${ref} is inside a frame that changed or is gone; take a new snapshot`);
+    scope.path.push({ parent: scope.channel, owner: `@${owner}` });
+    scope.channel = child;
+  }
+  return scope;
+}
+
+/** Frames of other origins one snapshot reads at most: each takes several round trips, and a page can embed hundreds of ads. */
+const SNAPSHOT_FRAMES_MAX = 30;
+/** What a snapshot holds at most, frames included; the page kit stops there too. */
+const SNAPSHOT_CHARS = 40_000;
+
+interface SnapshotPart { text: string; refs: number; frames?: Array<{ ref: string; at: number; depth: number }> }
+interface Reading { next: number; left: number; frames: number; routes: Map<string, string[]>; options: Record<string, unknown> }
+
+/**
+ * A snapshot of the tab: the top document, then each frame of another origin
+ * read in its own context and set under its iframe, its refs numbered after
+ * those read before. A frame of the same origin is already in its parent's.
+ */
+async function snapshot(page: AgentPage, action: Extract<BrowserAction, { kind: 'snapshot' }>): Promise<{ text: string; refs: number; url: string; title: string }> {
+  const options = { interactive: action.interactive, compact: action.compact, depth: action.depth, urls: action.urls };
+  const top = await run<SnapshotPart & { url: string; title: string }>(page, `return { ...K.snapshot(${js({ ...options, selector: action.selector })}), url: location.href, title: document.title }`);
+  const reading: Reading = { next: top.refs, left: SNAPSHOT_CHARS - top.text.length, frames: 0, routes: new Map(), options };
+  const lines = await withFrames(page, page, [], top, reading);
+  page.frameRefs = reading.routes;
+  return { text: lines.join('\n'), refs: reading.next, url: top.url, title: top.title };
+}
+
+async function withFrames(page: AgentPage, channel: FrameChannel, route: string[], part: SnapshotPart, reading: Reading): Promise<string[]> {
+  const lines = part.text ? part.text.split('\n') : [];
+  let shift = 0;
+  for (const frame of part.frames ?? []) {
+    const indent = '  '.repeat(reading.options.interactive ? 0 : frame.depth);
+    let inner: string[];
+    if (reading.frames >= SNAPSHOT_FRAMES_MAX || reading.left <= 0) inner = [`${indent}- note: not read, the snapshot is full; snapshot -s <selector> reads a part of the page`];
+    else {
+      reading.frames++;
+      const child = await enter(page, channel, frame.ref).catch(() => null);
+      const read = child && await run<SnapshotPart>(child, `return K.snapshot(${js({ ...reading.options, start: reading.next, base: frame.depth, maxChars: reading.left, limit: SNAPSHOT_CHARS })})`, 5000).catch(() => null);
+      if (!child || !read) inner = [`${indent}- note: this frame could not be read`];
+      else {
+        for (let n = reading.next + 1; n <= read.refs; n++) reading.routes.set(`e${n}`, [...route, frame.ref]);
+        reading.next = read.refs; reading.left -= read.text.length;
+        inner = await withFrames(page, child, [...route, frame.ref], read, reading);
+      }
+    }
+    // With -i, a frame with nothing to act on says nothing.
+    if (!inner.length && reading.options.interactive) { lines.splice(frame.at - 1 + shift, 1); shift--; continue; }
+    lines.splice(frame.at + shift, 0, ...inner); shift += inner.length;
+  }
+  return lines;
 }
 
 interface PageState { url: string; title: string; ready: 'loading' | 'interactive' | 'complete'; token: string; leaving: boolean }
@@ -134,7 +237,7 @@ const HELD: Record<string, { key: string; keyCode: number }> = {
   shift: { key: 'Shift', keyCode: 16 }, meta: { key: 'Meta', keyCode: 91 }, cmd: { key: 'Meta', keyCode: 91 }, command: { key: 'Meta', keyCode: 91 },
 };
 /** A key or a combination such as `Control+a`, as native key events. */
-export async function press(page: AgentPage, combo: string): Promise<void> {
+export async function press(page: FrameChannel, combo: string): Promise<void> {
   const parts = combo === '+' ? ['+'] : combo.endsWith('++') ? [...combo.slice(0, -2).split('+'), '+'] : combo.split('+');
   const name = parts.pop()!;
   const mods = parts.map(part => part.toLowerCase());
@@ -148,50 +251,90 @@ export async function press(page: AgentPage, combo: string): Promise<void> {
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, modifiers });
   for (const mod of held.reverse()) await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: mod.key, code: `${mod.key}Left`, windowsVirtualKeyCode: mod.keyCode, modifiers: 0 });
 }
-async function nativeClick(page: AgentPage, point: { x: number; y: number }, count: 1 | 2): Promise<void> {
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+async function nativeClick(page: FrameChannel, scope: Scope, selector: string, point: { x: number; y: number }, count: 1 | 2): Promise<CdpSessionDetachedError | undefined> {
+  // A newly drawn cross-process frame can still route input to its iframe.
+  // Confirm the native move reached the target before pressing, never retry a click.
+  await run(scope.channel, `K.watchPointer(${js(selector)})`);
+  try {
+    for (const end = Date.now() + 2000;;) {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+      let local: Point = point;
+      for (const { parent, owner } of scope.path) {
+        if (!local) break;
+        local = await run<Point>(parent, `return K.into(${js(owner)}, ${local.x}, ${local.y})`);
+      }
+      if (local && await run<boolean>(scope.channel, `return K.pointerMoved(${local.x}, ${local.y})`)) break;
+      if (Date.now() >= end) throw new Error('the element did not receive native pointer movement; wait for the page to finish drawing, then try again');
+      await sleep(16);
+    }
+  } finally { await run(scope.channel, 'K.stopPointer()').catch(() => {}); }
   for (let click = 1; click <= count; click++) {
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: click });
-    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click });
+    try { await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: click }); }
+    catch (error) {
+      // A popup may close itself on release without acknowledging that input.
+      // Earlier input failures and detachment of another session remain errors.
+      if (error instanceof CdpSessionDetachedError && error.method === 'Input.dispatchMouseEvent' && error.sessionId === page.session) return error;
+      throw error;
+    }
   }
 }
 
 type Point = { x: number; y: number; covered?: string } | null;
 
-/** Clicks through native input where the element is reachable, through the DOM when something covers it. */
-async function click(page: AgentPage, selector: string, count: 1 | 2): Promise<string | undefined> {
-  const point = await run<Point>(page, `return K.point(${js(selector)}, 'click')`);
-  if (point && !point.covered) { await nativeClick(page, point, count); return undefined; }
-  await run(page, `return K.dom('click', ${js(selector)}, ${count})`);
-  return point?.covered ? `the element was covered by ${point.covered}; it was clicked through the DOM` : undefined;
+/**
+ * Where native input reaches the element, in the top document's viewport: a
+ * point in a frame moves out through each iframe around it, once each is
+ * scrolled into its parent's view. Something drawn over an iframe covers the
+ * element too.
+ */
+async function pointOf(scope: Scope, selector: string, mode: string): Promise<Point> {
+  for (const { parent, owner } of scope.path) await run(parent, `return K.reveal(${js(owner)})`);
+  let point = await run<Point>(scope.channel, `return K.point(${js(selector)}, ${js(mode)})`);
+  for (const { parent, owner } of [...scope.path].reverse()) {
+    if (!point) return point;
+    const out: NonNullable<Point> = await run(parent, `return K.through(${js(owner)}, ${point.x}, ${point.y})`);
+    point = { x: out.x, y: out.y, ...(point.covered ?? out.covered ? { covered: point.covered ?? out.covered } : {}) };
+  }
+  return point;
 }
 
-async function write(page: AgentPage, kind: 'fill' | 'type', selector: string, text: string): Promise<string | undefined> {
-  const before = kind === 'type' ? await run<string | null>(page, `return K.value(${js(selector)})`) ?? '' : '';
-  const point = await run<Point>(page, `return K.point(${js(selector)}, ${js(kind)})`);
+/** Clicks through native input where the element is reachable, through the DOM when something covers it. */
+async function click(page: AgentPage, scope: Scope, selector: string, count: 1 | 2): Promise<{ note?: string; closed?: CdpSessionDetachedError }> {
+  const point = await pointOf(scope, selector, 'click');
+  if (point && !point.covered) return { closed: await nativeClick(page, scope, selector, point, count) };
+  await run(scope.channel, `return K.dom('click', ${js(selector)}, ${count})`);
+  return { note: point?.covered ? `the element was covered by ${point.covered}; it was clicked through the DOM` : undefined };
+}
+
+async function write(page: AgentPage, scope: Scope, kind: 'fill' | 'type', selector: string, text: string): Promise<string | undefined> {
+  const before = kind === 'type' ? await run<string | null>(scope.channel, `return K.value(${js(selector)})`) ?? '' : '';
+  const point = await pointOf(scope, selector, kind);
   if (point) {
     if (text) await page.send('Input.insertText', { text });
     else if (kind === 'fill') await press(page, 'Backspace');
-    const value = await run<string | null>(page, `return K.value(${js(selector)})`);
+    const value = await run<string | null>(scope.channel, `return K.value(${js(selector)})`);
     if (value === before + text) return undefined;
   }
   // A field that rewrote native typing: set the value the page's way.
-  await run(page, `return K.dom(${js(kind)}, ${js(selector)}, ${js(text)})`);
+  await run(scope.channel, `return K.dom(${js(kind)}, ${js(selector)}, ${js(text)})`);
   return point ? 'native typing did not produce the text; the value was set through the DOM' : undefined;
 }
 
-async function check(page: AgentPage, selector: string, wanted: boolean): Promise<string | undefined> {
-  if (await run<boolean>(page, `return K.checked(${js(selector)})`) === wanted) return undefined;
-  const note = await click(page, selector, 1);
+async function check(page: AgentPage, scope: Scope, selector: string, wanted: boolean): Promise<string | undefined> {
+  if (await run<boolean>(scope.channel, `return K.checked(${js(selector)})`) === wanted) return undefined;
+  const { note, closed } = await click(page, scope, selector, 1);
+  if (closed) throw closed;
   await sleep(30);
-  if (await run<boolean>(page, `return K.checked(${js(selector)})`) === wanted) return note;
-  await run(page, `return K.dom('click', ${js(selector)}, 1)`);
-  if (await run<boolean>(page, `return K.checked(${js(selector)})`) === wanted) return 'a native click did not change it; it was clicked through the DOM';
+  if (await run<boolean>(scope.channel, `return K.checked(${js(selector)})`) === wanted) return note;
+  await run(scope.channel, `return K.dom('click', ${js(selector)}, 1)`);
+  if (await run<boolean>(scope.channel, `return K.checked(${js(selector)})`) === wanted) return 'a native click did not change it; it was clicked through the DOM';
   throw new Error(`the element stayed ${wanted ? 'unchecked' : 'checked'}; it may be a custom control, take a snapshot`);
 }
 
 async function wait(page: AgentPage, action: Extract<BrowserAction, { kind: 'wait' }>): Promise<BrowserActionResult> {
   if (action.ms !== undefined) { await sleep(action.ms); return { ok: true }; }
+  const scope = await scopeOf(page, action.selector);
   const timeout = action.timeoutMs ?? 10_000;
   const deadline = Date.now() + timeout;
   const spec = js({ selector: action.selector, text: action.text, url: action.url, load: action.load === 'networkidle' ? undefined : action.load });
@@ -204,7 +347,7 @@ async function wait(page: AgentPage, action: Extract<BrowserAction, { kind: 'wai
         const now = await run<{ ready: string; resources: number }>(page, 'return { ready: document.readyState, resources: K.resources() }', 2000);
         if (now.ready === 'complete' && now.resources === resources) { if (Date.now() - quietSince >= 500) return { ok: true }; }
         else { resources = now.resources; quietSince = Date.now(); }
-      } else if (await run<boolean>(page, `return K.met(${spec})`, 2000)) return { ok: true };
+      } else if (await run<boolean>(scope.channel, `return K.met(${spec})`, 2000)) return { ok: true };
     } catch (error) {
       if (/stale|unknown ref/.test(String(error))) throw error;
     }
@@ -215,34 +358,53 @@ async function wait(page: AgentPage, action: Extract<BrowserAction, { kind: 'wai
 
 /** One of `PAGE_ACTIONS` on `tabId`'s page. */
 export async function automate(page: AgentPage, tabId: string, action: BrowserAction): Promise<BrowserReply> {
+  try { return await act(page, tabId, action); }
+  finally { page.frames?.release(); }
+}
+
+async function act(page: AgentPage, tabId: string, action: BrowserAction): Promise<BrowserReply> {
   const reply = (value: unknown): BrowserReply => ({ tabId, value });
   switch (action.kind) {
-    case 'snapshot': {
-      const options = js({ interactive: action.interactive, compact: action.compact, depth: action.depth, selector: action.selector, urls: action.urls });
-      return reply(await run(page, `return { ...K.snapshot(${options}), url: location.href, title: document.title }`));
+    case 'snapshot': return reply(await snapshot(page, action));
+    case 'get': {
+      const scope = await scopeOf(page, action.selector);
+      return reply(await run(scope.channel, `return K.get(${js(action.what)}, ${js(action.selector ?? null)}, ${js(action.name ?? null)})`));
     }
-    case 'get': return reply(await run(page, `return K.get(${js(action.what)}, ${js(action.selector ?? null)}, ${js(action.name ?? null)})`));
     case 'click': case 'press': case 'check': case 'uncheck': case 'select': case 'fill': case 'type': {
+      const scope = await scopeOf(page, action.kind === 'press' ? undefined : action.selector);
       const before = await begin(page);
       const dialogs = page.dialogs.length, downloads = page.downloads;
       let note: string | undefined, value: unknown;
-      if (action.kind === 'click') note = await click(page, action.selector, action.count ?? 1);
-      else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(page, action.selector, action.kind === 'check');
-      else if (action.kind === 'select') value = await run(page, `return K.select(${js(action.selector)}, ${js(action.values)})`);
-      else if (action.kind === 'fill' || action.kind === 'type') note = await write(page, action.kind, action.selector, action.text);
+      if (action.kind === 'click') {
+        const clicked = await click(page, scope, action.selector, action.count ?? 1);
+        if (clicked.closed) return reply({ ok: true });
+        note = clicked.note;
+      }
+      else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(page, scope, action.selector, action.kind === 'check');
+      else if (action.kind === 'select') value = await run(scope.channel, `return K.select(${js(action.selector)}, ${js(action.values)})`);
+      else if (action.kind === 'fill' || action.kind === 'type') note = await write(page, scope, action.kind, action.selector, action.text);
       else if (action.kind === 'press') await press(page, action.key);
       const result = await settle(page, before, dialogs, undefined, downloads);
       return reply({ ...result, ...(note ? { note } : {}), ...(value === undefined ? {} : { value }) });
     }
     case 'hover': {
-      const point = await run<Point>(page, `return K.point(${js(action.selector)}, 'hover')`);
+      const scope = await scopeOf(page, action.selector);
+      const point = await pointOf(scope, action.selector, 'hover');
       if (point && !point.covered) await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
-      else await run(page, `return K.dom('hover', ${js(action.selector)})`);
+      else await run(scope.channel, `return K.dom('hover', ${js(action.selector)})`);
       return reply({ ok: true });
     }
-    case 'focus': await run(page, `return K.focus(${js(action.selector)})`); return reply({ ok: true });
-    case 'scrollintoview': await run(page, `return K.scrollIntoView(${js(action.selector)})`); return reply({ ok: true });
-    case 'scroll': return reply({ ok: true, value: await run(page, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
+    case 'focus': await run((await scopeOf(page, action.selector)).channel, `return K.focus(${js(action.selector)})`); return reply({ ok: true });
+    case 'scrollintoview': {
+      const scope = await scopeOf(page, action.selector);
+      for (const { parent, owner } of scope.path) await run(parent, `return K.reveal(${js(owner)})`);
+      await run(scope.channel, `return K.scrollIntoView(${js(action.selector)})`);
+      return reply({ ok: true });
+    }
+    case 'scroll': {
+      const scope = await scopeOf(page, action.selector);
+      return reply({ ok: true, value: await run(scope.channel, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
+    }
     case 'wait': return reply(await wait(page, action));
     case 'history': {
       const before = await begin(page);

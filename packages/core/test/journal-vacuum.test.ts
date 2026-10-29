@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,9 +17,18 @@ const when = { share: 0.25, bytes: 4 * MiB };
 const file = () => join(dir, 'journal.db');
 const pragma = (journal: Journal, name: string) => Object.values(journal.db.query(`PRAGMA ${name}`).get() as Record<string, number>)[0]!;
 
-/** A journal whose background passes finished, holding `freed` bytes of free pages and a kept message. */
+/** A journal file made before new journals started in incremental auto-vacuum: its first page is written without it. */
+function legacyJournalFile(): void {
+  const db = new Database(file(), { create: true });
+  db.exec('CREATE TABLE legacy (x); DROP TABLE legacy;');
+  db.close();
+}
+
+/** An older journal whose background passes finished, holding `freed` bytes of free pages and a kept message. */
 function journalWithFreePages(freed: number, finished = true): void {
+  legacyJournalFile();
   const journal = new Journal(file());
+  expect(pragma(journal, 'auto_vacuum')).toBe(0);
   journal.putMessage({ id: 'msg_kept', threadId: 'thr_a', turnId: 'trn_a', role: 'assistant', parts: [{ type: 'text', text: 'kept' }], state: 'complete', createdAt: 1 });
   const insert = journal.db.query("INSERT INTO events (thread_id, ts, type, version, payload) VALUES ('thr_b', 1, 'turn.finished', 1, ?)");
   journal.db.transaction(() => { for (let n = 0; n < freed / 4096; n++) insert.run('x'.repeat(4000)); })();
@@ -67,6 +77,19 @@ test('once the passes are done, a start gives the free pages back and turns on i
   } finally {
     journal.close();
   }
+});
+
+test('a new journal starts in incremental auto-vacuum and never needs the VACUUM', () => {
+  const journal = new Journal(file());
+  try {
+    expect(pragma(journal, 'auto_vacuum')).toBe(2);
+    expect(journal.db.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
+    for (const key of ONE_TIME_PASSES) journal.setSetting(key, Number.MAX_SAFE_INTEGER);
+    journal.setSetting(PRUNED_AT, 1);
+  } finally {
+    journal.close();
+  }
+  expect(vacuumPlan(file(), { share: 0, bytes: 0 })).toBeNull();
 });
 
 test('no VACUUM before the passes finished or under the thresholds, and the journal is left as it was', () => {

@@ -1,5 +1,6 @@
 import {
   CONVERSATION_PROFILE_ID,
+  DEFAULT_WORKFLOW_LIMITS,
   RpcErrorCode,
   WorkflowPlanError,
   WORKFLOW_LIMITS,
@@ -122,6 +123,8 @@ export class FakeWorkflows {
   owns(threadId: ThreadId): boolean { return this.#steps.has(threadId); }
   /** Full retained collection, including paused runs beyond the display page. */
   active(rootId: ThreadId): boolean { return [...this.#runs.values()].some(run => run.rootThreadId === rootId && (run.status === 'running' || run.status === 'paused' || ((run.status === 'done' || run.status === 'failed') && !run.delivered))); }
+  /** As the core: a run at work now, which Mark done waits for while it stops a paused one. */
+  atWork(rootId: ThreadId): boolean { return [...this.#runs.values()].some(run => run.rootThreadId === rootId && run.status === 'running'); }
 
   private readonly handlers: Handlers = {
     'workflows.list': ({ threadId }) => {
@@ -364,7 +367,9 @@ export class FakeWorkflows {
       if (this.#halted(run)) break;
       const running = run.nodes.reduce((n, node) => n + node.instances.filter(i => i.status === 'running').length, 0);
       if (running >= run.limits.maxConcurrent) break;
-      const node = run.nodes.find(n => n.instances.some(i => i.status === 'waiting'));
+      const localRunning = run.nodes.filter(n => !run.plan.steps.find(s => s.id === n.id)!.compute).reduce((n, node) => n + node.instances.filter(i => i.status === 'running').length, 0);
+      const localLimit = run.plan.limits?.maxConcurrent ?? DEFAULT_WORKFLOW_LIMITS.maxConcurrent;
+      const node = run.nodes.find(n => (localRunning < localLimit || run.plan.steps.find(s => s.id === n.id)!.compute) && n.instances.some(i => i.status === 'waiting'));
       if (!node) break;
       this.#launch(run, node, node.instances.find(i => i.status === 'waiting')!, config);
     }

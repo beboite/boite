@@ -1,4 +1,4 @@
-import { currentOs } from '../src/paths.ts';
+import { currentOs, homePath } from '../src/paths.ts';
 import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { Account } from '@boite/contracts';
 import { assertDriverRunnable } from '../src/drivers/index.ts';
@@ -59,6 +59,21 @@ afterEach(async () => {
 });
 
 describe('providers', () => {
+  test('common environment expands for every OS and profile values override it', () => {
+    const descriptor = validDescriptor();
+    descriptor.env = { XDG_DATA_HOME: '{home}/.local/share/mine', MINE_MODE: 'common' };
+    (descriptor.profiles as Record<string, Record<string, unknown>>).windows!.env = { MINE_MODE: 'windows' };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toEqual([]);
+    const profiles = harness.core.providers.require('mine').profiles;
+    for (const os of ['windows', 'linux', 'macos'] as const) {
+      expect(profiles[os]?.env).toEqual({ XDG_DATA_HOME: `${homePath()}/.local/share/mine`, MINE_MODE: os === 'windows' ? 'windows' : 'common' });
+    }
+    descriptor.env = { XDG_DATA_HOME: 42 };
+    writeUserDescriptor('common-env.json', descriptor);
+    expect(harness.core.providers.load().rejected).toMatchObject([{ field: 'env.XDG_DATA_HOME' }]);
+  });
+
   test('a directory cannot mask a runnable fallback executable', () => {
     const directory = join(harness.dataDir, 'not-an-executable');
     mkdirSync(directory);
@@ -314,7 +329,7 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi']);
+    expect(ids).toEqual(['antigravity', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi']);
     // OpenCode 2 is the one experimental descriptor: listed, and off until it is turned on.
     expect(loaded.filter((provider) => provider.experimental === true).map((provider) => provider.id)).toEqual(['opencode-v2']);
     expect(loaded.filter((provider) => provider.enabled === false).map((provider) => provider.id)).toEqual(['opencode-v2']);
@@ -388,6 +403,9 @@ describe('providers', () => {
     expect(descriptor.login).toEqual({ command: ['opencode2', 'auth', 'login', '--standalone'], terminal: true });
     for (const os of ['windows', 'linux', 'macos'] as const) {
       const profile = descriptor.profiles[os];
+      for (const [variable, directory] of Object.entries({ XDG_DATA_HOME: '.local/share', XDG_CONFIG_HOME: '.config', XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache' })) {
+        expect(profile?.env?.[variable]).toBe(`${homePath()}/${directory}/opencode-v2`);
+      }
       // Version 2 refuses `--port`, which version 1's line carries.
       expect(profile?.launch?.args).toEqual(['acp']);
       expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}', XDG_STATE_HOME: '{isolationDir}/state' });
@@ -399,6 +417,7 @@ describe('providers', () => {
       const first = harness.core.providers.require('opencode').profiles[os];
       expect(first?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([1]);
     }
+    expect(harness.core.accounts.defaultLocation(descriptor)).toBe(descriptor.profiles[currentOs()]?.env?.['XDG_DATA_HOME'] ?? null);
   });
 
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {
@@ -452,10 +471,10 @@ describe('providers', () => {
     if (process.arch === requiredArch) {
       expect(antigravity?.install?.state).toBe('absent');
     } else {
-      expect(antigravity?.install).toEqual({ state: 'failed', version: 'agy_acp_server_1.1.1',
+      expect(antigravity?.install).toEqual({ state: 'failed', version: 'agy_acp_server_1.4.1',
         message: `antigravity requires ${requiredArch}; this machine is ${process.arch}` });
     }
-    expect(antigravity?.install?.version).toBe('agy_acp_server_1.1.1');
+    expect(antigravity?.install?.version).toBe('agy_acp_server_1.4.1');
     expect(antigravity?.available).toBe(false);
 
     const descriptor = harness.core.providers.require('antigravity');
@@ -470,7 +489,7 @@ describe('providers', () => {
     const windows = descriptor.profiles['windows'];
     expect(windows?.install?.url).toContain('dl.google.com');
     expect(windows?.install?.sha256).toHaveLength(64);
-    expect(windows?.install?.archiveBytes).toBe(468238392);
+    expect(windows?.install?.archiveBytes).toBe(129599308);
     expect(windows?.install?.files.map((file) => file.path)).toEqual([
       'agy_acp_server.exe',
       'localharness_external.exe',
@@ -502,45 +521,6 @@ describe('providers', () => {
     } else {
       expect(profile?.launch?.args).toEqual([]);
     }
-  });
-
-  test('the shipped antigravity cli descriptor runs the installed agy on the user s own login', async () => {
-    const client = await harness.connect();
-    const { loaded, rejected } = await client.call('providers.list', {});
-    expect(rejected).toEqual([]);
-
-    const cli = loaded.find((provider) => provider.id === 'antigravity-cli');
-    expect(cli?.source).toBe('shipped');
-    expect(cli?.protocol).toBe('agy');
-    expect(cli?.name).toBe('Antigravity CLI');
-    expect(cli?.shortName).toBe('agy');
-    expect(cli?.models).toEqual([{ id: 'default', name: 'Antigravity CLI default', default: true }]);
-    // Print mode has no approval gate, and a plan mode behind `--mode plan`.
-    expect(cli?.capabilities.approvals).toBe(false);
-    expect(cli?.capabilities.planMode).toBe(true);
-    // Nothing to download: the user installs agy, so there is no install state.
-    expect(cli?.install).toBeNull();
-
-    const descriptor = harness.core.providers.require('antigravity-cli');
-    // The token sits in the system keyring and nothing moves the config
-    // directory, so there is no session file to read and no isolation to offer.
-    expect(descriptor.auth).toEqual({ kind: 'none' });
-    expect(descriptor.login).toBeUndefined();
-    expect(descriptor.isolation).toBeUndefined();
-
-    const profile = descriptor.profiles[currentOs()];
-    expect(profile?.isolation).toEqual({});
-    expect(profile?.launch).toBeUndefined();
-    expect(profile?.unsetEnv).toBeUndefined();
-    // Never a process closed by name: the user's own agy runs beside Boite's.
-    expect(profile?.close?.processes).toEqual([]);
-    expect(profile?.env?.['BROWSER']).toBe(join(harness.dataDir, currentOs() === 'windows' ? 'browser-noop.cmd' : 'browser-noop.sh'));
-
-    const windows = descriptor.profiles['windows'];
-    expect(windows?.executable[0]).toEqual({ kind: 'path', value: 'agy' });
-    expect(windows?.executable[1]?.kind).toBe('file');
-    expect(windows?.executable[1]?.value.endsWith(join('AppData', 'Local', 'agy', 'bin', 'agy.exe'))).toBe(true);
-    expect(windows?.executable[1]?.value).not.toContain('{home}');
   });
 
   test('the shipped codex descriptor loads and is launched as the app-server', async () => {

@@ -32,3 +32,24 @@ test('a mouse right click after a long press whose click never came opens its me
   node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
   expect(menus.map(event => event.clientX)).toEqual([10, 40]);
 });
+
+test('a press outside the accepted elements is left to the platform and swallows no later tap', () => {
+  vi.useFakeTimers();
+  const block = document.createElement('p');
+  const link = document.createElement('a');
+  block.append('some text ', link);
+  document.body.append(block);
+  const menus: EventTarget[] = [];
+  block.addEventListener('contextmenu', event => menus.push(event.target!));
+  const clicks: EventTarget[] = [];
+  block.addEventListener('click', event => clicks.push(event.target!));
+  longPress(block, target => target === link);
+  pointer(block, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 5, clientY: 5 });
+  vi.advanceTimersByTime(LONG_PRESS_MS);
+  expect(menus).toEqual([]);
+  link.click();
+  expect(clicks).toEqual([link]);
+  pointer(link, 'pointerdown', { pointerId: 2, pointerType: 'touch', clientX: 5, clientY: 5 });
+  vi.advanceTimersByTime(LONG_PRESS_MS);
+  expect(menus).toEqual([link]);
+});

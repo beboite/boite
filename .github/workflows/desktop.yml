@@ -97,6 +97,8 @@ jobs:
           save-if: false
       - name: Shell Rust tests
         run: bun run test:shell --release
+      - name: Windows CLI launcher tests
+        run: cargo test --locked --manifest-path apps/shell/launcher/Cargo.toml
 
   windows:
     name: Windows x64
@@ -154,7 +156,7 @@ jobs:
       - name: Windows installer regression tests
         env:
           BOITE_CI_INSTALLER_REQUIRED: '1'
-        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
+        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts scripts/ci/installed-cli-windows.test.ts
       # Test shells keep their data directory, WebView2 profile included, on
       # the runner's temp drive (D:), as the E2E shards do (docs/ci.md). On C:,
       # a fresh profile's cookie database held the first document request for
@@ -207,7 +209,14 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Install Linux shell dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils
+        run: |
+          # These packages come from Ubuntu, independent of the runner's other feeds.
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          if [ ! -s "$ubuntu_sources" ]; then ubuntu_sources=/etc/apt/sources.list; fi
+          test -s "$ubuntu_sources"
+          apt_sources=(-o "Dir::Etc::sourcelist=$ubuntu_sources" -o "Dir::Etc::sourceparts=-")
+          sudo apt-get "${apt_sources[@]}" -o APT::Update::Error-Mode=any update
+          sudo apt-get "${apt_sources[@]}" install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils
       - name: Run Intel binaries under Rosetta
         if: runner.os == 'macOS' && env.BOITE_TARGET == 'x86_64-apple-darwin'
         run: arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
@@ -363,6 +372,11 @@ jobs:
           file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
           version=$(bun -e 'console.log(require("./package.json").version)')
           bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
+          # The Android server ships the core's scripts, the same on every runner: one bundle, from x64.
+          if [ "$PORTABLE_ID" = linux-x64 ]; then
+            file=$(bun scripts/ci/android-server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
+            bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
+          fi
       - name: Diagnose Linux packaging failures
         if: failure() && runner.os == 'Linux'
         run: |

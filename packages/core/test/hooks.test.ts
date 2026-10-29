@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderRejected } from '@boite/contracts';
-import { countEvents, readSource } from '../src/hooks.ts';
+import { countEvents, readSource, sourcePath } from '../src/hooks.ts';
 import { Rejection, validateDescriptor } from '../src/providers/validate.ts';
 import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -137,6 +137,16 @@ describe('hook sources', () => {
     writeFileSync(join(root, 'plugins', 'notify.mjs'), '');
     writeFileSync(join(root, 'plugins', 'README.md'), '');
     expect(readSource({ variable: 'MINE_HOME', path: 'plugins', format: 'modules' })).toMatchObject({ count: 3, error: null });
+  });
+
+  test('hook diagnostics read the provider\'s configured home instead of a sibling version', () => {
+    const own = join(root, 'v2');
+    mkdirSync(join(own, 'plugins'), { recursive: true });
+    writeFileSync(join(own, 'plugins', 'guard.ts'), '');
+    const source = { variable: 'MINE_HOME', path: 'plugins', format: 'modules' } as const;
+    const profile = { env: { MINE_HOME: own } };
+    expect(sourcePath(source, profile)).toBe(join(own, 'plugins'));
+    expect(readSource(source, profile)).toMatchObject({ count: 1, error: null });
   });
 
   test('a test core reads nothing of the profile it would count', () => {

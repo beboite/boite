@@ -133,11 +133,13 @@ export class NewerPages {
  * False, with the failure shown, when one could not be read.
  */
 export async function loadAttachments(ctx: StoreContext, threadId: ThreadId, message: Message): Promise<boolean> {
+  const client = ctx.client, generation = ctx.clientGeneration, navigation = ctx.threads.openGeneration;
+  const current = () => client !== null && ctx.currentClient(client, generation) && ctx.currentNavigation(client, navigation);
   try {
     await Promise.all(message.parts.map((part, index) => (part.type === 'file' || part.type === 'image') && part.dataDeferred ? ctx.threads.loadMessageAttachment(threadId, message.id, index) : undefined));
-    return true;
+    return current() && !message.parts.some(part => (part.type === 'file' || part.type === 'image') && part.dataDeferred);
   } catch (error) {
-    ctx.fail(error);
+    if (current()) ctx.fail(error);
     return false;
   }
 }

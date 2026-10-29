@@ -33,10 +33,11 @@ export function createCodexDriver(): Driver {
     const key = sessionKey(ctx);
     let session = sessions.get(threadId) ?? null;
     const usable = session?.usable(key, warmMs) === true;
-    noteWarmSession(ctx, 'Codex app-server', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange: 'the thread changed mode, account or folder' });
+    const setupChange = 'the thread changed mode, account, folder or compaction limit';
+    noteWarmSession(ctx, 'Codex app-server', { kept: session !== null, usable, sameSetup: session?.key === key, setupChange });
     if (session !== null && !usable) {
       sessions.delete(threadId);
-      session.close(session.key === key ? null : 'the thread changed mode, account or folder', ctx);
+      session.close(session.key === key ? null : setupChange, ctx);
       session = null;
     }
     if (session === null) {

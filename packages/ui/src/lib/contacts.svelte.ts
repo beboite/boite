@@ -1,15 +1,22 @@
 /*
  * The Home page's state for one machine: its contacts, their requests, the
  * contact settings and the Tailscale side, read with `contacts.get` and read
- * again on `contacts.updated`. Only the Contacts page and the contact lists
- * import it, so it rides their chunks and never the boot bundle.
+ * again on `contacts.updated`. The Contacts page, lists and request notice
+ * load it with the Contacts experiment.
  */
 
 import type { Contact, ContactInvite, ContactRequest, ContactSettings, ContactsState, ContactTailscale, ProjectId } from '@boite/contracts';
 import { untrack } from 'svelte';
 import { errorText } from './errors';
+import { RpcFailure } from './rpc-error';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
 import { workspace, type Machine } from './workspace.svelte';
+
+/** What `isBusy` names while a grant changes: the project, on the machine that holds it. */
+export function grantKey(coreId: string, projectId: ProjectId, machine?: string): string {
+  return machine ? `grant:${coreId}:${machine}:${projectId}` : `grant:${coreId}:${projectId}`;
+}
 
 export class ContactsView {
   state = $state<ContactsState | null>(null);
@@ -21,6 +28,8 @@ export class ContactsView {
   invite = $state<ContactInvite | null>(null);
   /** What `contacts.join` answered: the four words stay on screen until the owner closes them. */
   joined = $state<Contact | null>(null);
+  /** A join waiting for the inviter's address to reach the internet, until `until`. */
+  joinWaiting = $state<{ until: number } | null>(null);
   /** Keys of the calls in flight, so a button does not send twice. */
   busy = $state<string[]>([]);
 
@@ -28,7 +37,9 @@ export class ContactsView {
   #watchers = 0;
   #release: (() => void) | null = null;
   #client: unknown = null;
+  #ready = false;
   #reading = 0;
+  #joinAttempt = 0;
 
   constructor(store: Store) {
     this.store = store;
@@ -44,27 +55,32 @@ export class ContactsView {
       this.#release?.();
       this.#release = null;
       this.#client = null;
+      this.#ready = false;
+      this.#reading += 1;
     };
   }
 
-  /** A reconnection is a new client: subscribe on it and read again. */
+  /** A socket can reconnect on the same client: read again after either one changes. */
   follow(): void {
     const client = this.store.client;
-    if (this.#watchers === 0 || client === this.#client) return;
+    const ready = this.store.connection === 'ready';
+    if (this.#watchers === 0 || (client === this.#client && ready === this.#ready)) return;
     this.#release?.();
     this.#client = client;
+    this.#ready = ready;
+    this.#reading += 1;
     this.#release = client ? client.on('contacts.updated', () => { void this.refresh(); }) : null;
-    void this.refresh();
+    if (ready) void this.refresh();
   }
 
   async refresh(): Promise<void> {
-    const client = this.store.client;
-    if (!client) return;
     const read = ++this.#reading;
+    const client = this.store.client;
+    if (!client || this.store.connection !== 'ready') return;
     try {
       const state = await client.call('contacts.get', {});
       // An older read that lands after a newer one must not put back what changed since.
-      if (read !== this.#reading) return;
+      if (read !== this.#reading || client !== this.store.client) return;
       this.state = state;
       this.loadError = '';
     } catch (error) {
@@ -115,13 +131,14 @@ export class ContactsView {
     if (contact) this.#put(contact);
   }
 
-  async grant(coreId: string, projectId: ProjectId, readThreads?: boolean): Promise<void> {
-    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.grant', { coreId, projectId, ...(readThreads === undefined ? {} : { readThreads }) }));
+  /** `machine`: the core id of the group member that holds the project, when it is not this machine's. */
+  async grant(coreId: string, projectId: ProjectId, readThreads?: boolean, machine?: string): Promise<void> {
+    const contact = await this.#run(grantKey(coreId, projectId, machine), () => this.#connected().call('contacts.grant', { coreId, projectId, ...(readThreads === undefined ? {} : { readThreads }), ...(machine ? { machine } : {}) }));
     if (contact) this.#put(contact);
   }
 
-  async revoke(coreId: string, projectId: ProjectId): Promise<void> {
-    const contact = await this.#run(`grant:${coreId}:${projectId}`, () => this.#connected().call('contacts.revoke', { coreId, projectId }));
+  async revoke(coreId: string, projectId: ProjectId, machine?: string): Promise<void> {
+    const contact = await this.#run(grantKey(coreId, projectId, machine), () => this.#connected().call('contacts.revoke', { coreId, projectId, ...(machine ? { machine } : {}) }));
     if (contact) this.#put(contact);
   }
 
@@ -147,19 +164,77 @@ export class ContactsView {
     return next;
   }
 
-  async createInvite(): Promise<void> {
-    const invite = await this.#run('invite', () => this.#connected().call('contacts.invite', {}));
+  /**
+   * `tailnet`: the invitee already reaches this machine on Tailscale, so the
+   * link alone does. `share`: the link also shares this machine with another
+   * tailscale.com tailnet. `internet`: the invitee is on another network and
+   * the link reaches this machine through Tailscale Funnel. True once this
+   * call made the invitation now shown.
+   */
+  async createInvite(reach: InviteReach = 'share'): Promise<boolean> {
+    const params = reach === 'internet' ? { internet: true } : { share: reach === 'share' };
+    const invite = await this.#run('invite', async () => {
+      // An older core would answer `internet` with a share of this machine: never sent there.
+      if (reach === 'internet' && this.state?.internet !== true) throw new Error(strings.contacts.invite.internetOld);
+      return this.#connected().call('contacts.invite', params);
+    });
     if (invite) this.invite = invite;
+    return invite !== null;
+  }
+
+  /** Every link not used yet stops working, the one shown included. */
+  async cancelInvites(): Promise<void> {
+    const done = await this.#run('cancel-invites', () => this.#connected().call('contacts.cancelInvites', {}));
+    if (!done) return;
+    this.invite = null;
+    if (this.state) this.state.invitations = 0;
   }
 
   async join(link: string): Promise<Contact | null> {
-    const contact = await this.#run('join', () => this.#connected().call('contacts.join', { link }));
-    if (contact) {
-      this.joined = contact;
-      this.#put(contact);
+    if (this.isBusy('join')) return null;
+    const attempt = ++this.#joinAttempt;
+    const until = Date.now() + JOIN_WAIT_MS;
+    for (;;) {
+      let wait = 0;
+      const contact = await this.#run('join', async () => {
+        try { return await this.#connected().call('contacts.join', { link }); } catch (error) {
+          wait = retryAfter(error);
+          throw error;
+        }
+      });
+      const current = attempt === this.#joinAttempt;
+      if (contact) {
+        // A join stopped or replaced while its call was in flight still linked a contact: its words show unless newer ones do.
+        if (current) this.joinWaiting = null;
+        if (current || !this.joined) this.joined = contact;
+        this.#put(contact);
+        return contact;
+      }
+      // The inviter's Funnel name is not in public DNS yet: the invitation is unspent, so the same join goes again.
+      if (!current || wait <= 0 || Date.now() + wait > until) {
+        if (current) this.joinWaiting = null;
+        return null;
+      }
+      this.joinWaiting = { until };
+      await new Promise(resolve => setTimeout(resolve, wait));
+      if (attempt !== this.#joinAttempt) return null;
     }
-    return contact;
   }
+
+  /** Ends a join waiting for the inviter's address. */
+  stopJoin(): void {
+    this.#joinAttempt += 1;
+    this.joinWaiting = null;
+  }
+}
+
+/** A join waits this long at most for the inviter's Funnel name to reach public DNS. */
+const JOIN_WAIT_MS = 15 * 60_000;
+
+/** The delay the core asks before the same join, 0 when it does not. */
+function retryAfter(error: unknown): number {
+  const wait = error instanceof RpcFailure ? (error.data as { retryAfterMs?: unknown } | undefined)?.retryAfterMs : undefined;
+  return typeof wait === 'number' && Number.isFinite(wait) && wait > 0 ? Math.min(wait, 120_000) : 0;
 }
 
 const views = new WeakMap<Store, ContactsView>();
@@ -193,7 +268,7 @@ export function watchContacts(machines: () => readonly Machine[]): () => Machine
     const releases = untrack(() => watched.map(view => view.watch()));
     return () => { for (const release of releases) release(); };
   });
-  $effect(() => { for (const { machine, view } of views) { void machine.store.client; untrack(() => view.follow()); } });
+  $effect(() => { for (const { machine, view } of views) { void machine.store.client; void machine.store.connection; untrack(() => view.follow()); } });
   return () => views;
 }
 
@@ -207,6 +282,9 @@ export function contactRows(views: readonly MachineContacts[]): ContactRow[] {
 }
 
 /** Opens a contact's page, or the page that adds one, on the machine that holds it. */
+/** Where the invitee is, seen from this machine: what an invitation must carry to reach it. */
+export type InviteReach = 'tailnet' | 'share' | 'internet';
+
 export async function openContact(owner: Store, coreId: string | null): Promise<void> {
   if (workspace.active !== owner) await workspace.select(owner);
   owner.showHome(coreId);

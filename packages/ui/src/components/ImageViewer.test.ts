@@ -7,7 +7,6 @@ import ChatFile from './ChatFile.svelte';
 import UserMessage from './UserMessage.svelte';
 import type { MediaItem } from '../lib/media-gallery';
 import type { Store } from '../lib/store.svelte';
-import type { TurnProgress } from '../lib/turn-progress.svelte';
 
 const mounted: Record<string, unknown>[] = [];
 const createObjectURL = URL.createObjectURL;
@@ -209,8 +208,7 @@ test('a picture sent with a prompt opens in the viewer among the others', () => 
     ]
   } as unknown as Message;
   const store = { providerOf: () => undefined, openThread: null } as unknown as Store;
-  const progress = { responded: () => false } as unknown as TurnProgress;
-  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, progress } }));
+  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, accepted: false, responded: false } }));
   flushSync();
   const shots = [...document.querySelectorAll<HTMLButtonElement>('[data-testid=image-open]')];
   shots[1]!.click(); flushSync();
@@ -236,12 +234,31 @@ test('a deferred picture drawn from its light copy opens its original in the vie
   const loadMessageAttachment = vi.fn(async () => { part.data = btoa('original'); delete part.dataDeferred; return part.data; });
   const loadDisplayImage = vi.fn(async () => 'data:image/webp;base64,COPY');
   const store = { providerOf: () => undefined, openThread: null, loadMessageAttachment, loadDisplayImage, reportError: vi.fn() } as unknown as Store;
-  const progress = { responded: () => false } as unknown as TurnProgress;
-  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, progress } }));
+  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, accepted: false, responded: false } }));
   flushSync();
 
   query<HTMLButtonElement>('[data-testid=image-open]').click();
   await vi.waitFor(() => expect(document.querySelector('[data-testid=image-viewer] img')?.getAttribute('src')).toBe(`data:image/png;base64,${btoa('original')}`));
   expect(loadMessageAttachment).toHaveBeenCalledWith('t1', 'm2', 0);
   expect(query<HTMLImageElement>('[data-testid=image-viewer] img').alt).toBe('screen.png');
+});
+
+test('a cancelled deferred file download neither saves empty bytes nor reports an error', async () => {
+  const message: Message = {
+    id: 'cancelled-file', threadId: 't1', turnId: 'u1', role: 'user', createdAt: 1_790_000_000_000, state: 'complete',
+    parts: [{ type: 'file', name: 'notes.txt', mimeType: 'text/plain', data: '', dataDeferred: true, bytes: 12 }]
+  };
+  const reportError = vi.fn();
+  const loadMessageAttachment = vi.fn(async () => null);
+  const store = { loadMessageAttachment, reportError } as unknown as Store;
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  try {
+    mounted.push(mount(UserMessage, { target: document.body, props: { store, message, turn: undefined, accepted: false, responded: false } }));
+    flushSync();
+    query<HTMLAnchorElement>('[data-testid=file-part]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(loadMessageAttachment).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(download).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  } finally { download.mockRestore(); }
 });

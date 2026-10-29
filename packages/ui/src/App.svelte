@@ -5,6 +5,7 @@
   import { shellStarting, takeNotificationTarget } from './lib/endpoint';
   import { watchAgentBrowser } from './lib/agent-browser-watch';
   import { watchDevices } from './lib/device-watch';
+  import { watchWindows } from './lib/window-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -37,12 +38,15 @@
   import { hostLocalAgentBrowser } from './lib/agent-browser-host.svelte';
   import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
-  import { prefetchAllowed, prefetchNames, warmPages, whenIdle } from './lib/prefetch';
-  import { mobileNavigation, parts, prefetchParts } from './lib/deferred-parts';
+  import { whenIdle } from './lib/idle';
+  import { prefetchAllowed, prefetchNames, warmPages } from './lib/prefetch';
+  import { parts, prefetchParts } from './lib/deferred-parts';
+  import { mobileNavigation } from './lib/mobile-navigation';
   import { voice } from './lib/voice-prefs.svelte';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import { reportDesktopUpdates } from './lib/desktop-update.svelte';
+  import { watchUpdates } from './lib/update-watch';
   import MobileConnect from './components/MobileConnect.svelte';
   import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
@@ -56,10 +60,11 @@
   import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
+  import AgentsLayout from './components/agents/AgentsLayout.svelte';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  // The phone's navigation (`lib/deferred-parts.ts`). A failed fetch (offline,
+  // The phone's navigation (`lib/mobile-navigation.ts`). A failed fetch (offline,
   // cold cache) lets the app draw with a bar that says so and retries, by hand,
   // when the core answers again or when the browser is back online.
   function loadMobileNavigation(): void {
@@ -84,21 +89,22 @@
     const timer = setInterval(look, 1000);
     return () => { live = false; clearInterval(timer); };
   });
-  // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
+  // New agent pages bring the panel forward on wider clients; phones stay on the user's chosen view.
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
     if (threadId && store.client?.state === 'ready') return watchAgentBrowser(store, threadId);
   });
-  // A simulator or emulator the agent opens shows up in the panel, here and on a phone (docs/devices.md).
+  // A simulator or emulator the agent opens shows up in the panel, here and on a phone (docs/devices.md); so does a desktop window it watches.
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (threadId && store.client?.state === 'ready') return watchDevices(store, threadId);
+    const stops = threadId && store.client?.state === 'ready' ? [watchDevices(store, threadId), watchWindows(store, threadId)] : [];
+    return () => stops.forEach((stop) => stop());
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
-  let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
+  let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat'), mobileTabs = $state(false);
   const mobileRecovery = $derived(!inShell && (store.pairingRequired || (!store.core && store.connection !== 'ready'))
     && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   // Wider than a phone (an iPhone on its side, a tablet, a desktop browser)
@@ -172,13 +178,6 @@
   });
   hostLocalAgentBrowser();
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
-  let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
-  let agentsLoadError = $state('');
-  $effect(() => {
-    if (store.page !== 'agents' || !experimentOn('resident-agents') || AgentsPage) return;
-    void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
-      .catch(() => { agentsLoadError = strings.agents.offline; });
-  });
   // Switched off with the page open: every machine goes back to its chat, so
   // switching it on again does not reopen a page nobody navigated to.
   $effect(() => {
@@ -226,6 +225,9 @@
 
   onMount(installWhipEscape);
 
+  // This computer's own setting decides whether the window's updater installs by itself.
+  $effect(() => { appUpdater.autoInstall = workspace.machines.find((machine) => machine.store.localCore)?.store.settings?.autoInstallUpdates === true; });
+
   onMount(() => {
     const stopViewport = startViewport();
     const stopRest = watchRest();
@@ -234,12 +236,7 @@
     const stopAutoLink = agentAutoLink.start();
     // Another machine of the group reads this computer's app updates from its core.
     const stopDesktopReport = reportDesktopUpdates(() => workspace.machines.map((machine) => machine.store));
-    let stopAppUpdater: () => void = () => undefined;
-    let updateDelay: number | undefined;
-    const updateFrame = typeof requestAnimationFrame === 'function'
-      ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
-      : undefined;
-    if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
+    const stopUpdates = watchUpdates(() => workspace.machines.map((machine) => machine.store));
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -261,12 +258,7 @@
     window.addEventListener('online', resume);
     window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
-    const notification = (event: MessageEvent) => {
-      if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
-      if (typeof event.data.key === 'string' && event.data.core === undefined) void workspace.openNotification(event.data.key);
-      else void workspace.openFromWorker(event.data.threadId, event.data.core);
-      mobileScreen = 'chat';
-    };
+    const notification = (event: MessageEvent) => { if (workspace.workerMessage(event.data)) mobileScreen = 'chat'; };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();
@@ -275,9 +267,7 @@
       stopAutoLink();
       stopDesktopReport();
       stopInstall();
-      if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
-      if (updateDelay !== undefined) clearTimeout(updateDelay);
-      stopAppUpdater();
+      stopUpdates();
       stopLocalNetwork();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
@@ -341,7 +331,7 @@
     const held = workspace.waiting && owner === workspace.primary;
     // Chrome refuses every socket until "Local network" is allowed: the recovery screen says so, and "socket error" says nothing more.
     const blocked = mobileRecovery && localNetwork.state === 'denied';
-    if (!error || pairingNotice || held || blocked) {
+    if (!error || owner.errorOffline || pairingNotice || held || blocked) {
       toast.hide();
       return;
     }
@@ -366,8 +356,14 @@
     else scrim.hide();
   });
 
+  /**
+   * The thread the right panel belongs to: the chat's open thread, or on the
+   * Agents page the agent's own; an ordinary thread left open behind the
+   * Agents page has no panel there.
+   */
+  const panelThread = $derived(store.page === 'agents' ? (store.openThread?.agentSessionId ? store.openThread : null) : store.openThread);
   $effect(() => {
-    if (store.panelOpen && store.openThread) panelSlot.show();
+    if (store.panelOpen && panelThread) panelSlot.show();
     else panelSlot.hide();
   });
   $effect(() => {
@@ -550,11 +546,11 @@
   <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 {/if}
 
-<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:tabbed={!inShell && mobileTabs} class:quitting bind:this={appRoot}>
   {#if !inShell && booted}
     {#if mobileNavigation.current}
       {@const MobileNavigation = mobileNavigation.current}
-      <MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />
+      <MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} bind:tabbed={mobileTabs} />
     {:else}
       <p class="mobile-navigation-failed" role="alert" data-testid="mobile-navigation-failed">
         <span>{strings.parts.navigationFailed}</span>
@@ -564,7 +560,7 @@
   {/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={store.page === 'chat' && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={(store.page === 'chat' || store.page === 'agents') && rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !booted}
       <p class="empty boot" class:long={compacting}>{compacting ? strings.app.compacting : strings.app.loading}</p>
     {:else if wideRecovery}
@@ -585,7 +581,7 @@
         </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
-      {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
+      <AgentsLayout {store} panel={panelSlot} showPanel={panelSlot.shown && panelThread !== null} RightPanel={deferred.RightPanel} />
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
@@ -645,7 +641,8 @@
         {/key}
       {/if}
       {/if}
-      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}{#key store}<contacts.ContactsRail {store} />{/key}{/if}
+      <!-- Not keyed on the machine: the column lists every machine's contacts, and a new one would slide in again. -->
+      {#if contacts.ContactsRail && contactsShown(store) && !narrow.current}<contacts.ContactsRail {store} />{/if}
     {/if}
   </div>
 
@@ -869,11 +866,11 @@
     .mobile-navigation-failed button { flex: none; min-height: 44px; padding: 0 14px; border-radius: var(--radius-md); }
     /* Safari scrolls the document to reveal a focused field even with overflow
        hidden. Anchor the app to the viewport so its header does not leave with it. */
-    .app:not(.shell) { position: fixed; left: 0; right: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); overflow: hidden; }
+    .app:not(.shell) { position: fixed; left: 0; right: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); overflow: hidden; }
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
-    /* The header owns the top safe area; pages keep clear of the home indicator. */
-    .app.off-chat .body { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+    /* The header owns the top safe area; pages keep clear of the home indicator, unless the bottom bar (tabbed) does. */
+    .app.off-chat:not(.tabbed) .body { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
     /* Skips layout and paint of the chat streaming behind the list; its DOM, state and scroll stay as they were.
        Skipped content does not advance its animations, so the switch waits for the exits the cover started
        (a menu closing) to end, and lifts at once on return. */

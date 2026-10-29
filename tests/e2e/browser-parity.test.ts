@@ -11,8 +11,8 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
   const fixture = readFileSync(join(import.meta.dir, 'fixtures/browser-parity.html'), 'utf8');
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
-    // A sized popup answers the page that opened it, then closes.
-    if (path === '/popup') return new Response(`<!doctype html><script>opener.postMessage({ popup: 'answered', at: location.pathname }, '*'); close()</script>`, { headers: { 'content-type': 'text/html;charset=utf-8' } });
+    // A sign-in popup answers the page that opened it, and closes itself on a click.
+    if (path === '/popup') return new Response(`<!doctype html><title>Popup</title><button id="shut" onclick="window.close()">Done</button><script>opener.postMessage({ popup: 'answered', at: location.pathname }, '*')</script>`, { headers: { 'content-type': 'text/html;charset=utf-8' } });
     return new Response(path === '/' ? fixture : 'Missing demo resource', { status: path === '/' ? 200 : 404, headers: { 'content-type': 'text/html;charset=utf-8' } });
   } });
   const session = await startBrowserSession(executable!);
@@ -42,15 +42,22 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
     for (let i = 0; i < 100 && !saved().includes('hosted'); i++) await Bun.sleep(100);
     expect(saved()).toContain('"login"');
     console.log('Saved sign-ins reach the hosted tab, and its own reach the core');
-    // The agent's tab is off screen, so its sized popup opens hidden; its page
-    // must still run and answer through `window.opener`.
-    const answer = await command({ kind: 'evaluate', expression: `new Promise((resolve, reject) => {
-      addEventListener('message', event => resolve(event.data), { once: true });
-      setTimeout(() => reject(new Error('the hidden popup never answered its opener')), 10000);
-      if (!open('/popup', 'agent-popup', 'width=420,height=320')) reject(new Error('window.open returned null'));
-    })` }, id);
-    expect(answer.value).toEqual({ popup: 'answered', at: '/popup' });
-    console.log('A hidden popup of an off-screen agent tab answered its opener');
+    // A sized popup of an agent tab, opened by a script, becomes a tab the agent drives,
+    // in the same sign-in and still answering through `window.opener`.
+    expect((await command({ kind: 'evaluate', expression: `addEventListener('message', event => { globalThis.answered = event.data }, { once: true }); open('/popup', 'agent-popup', 'width=420,height=320') !== null` }, id)).value).toBe(true);
+    type Tab = { tabId: string; url: string; view?: string };
+    const listed = async () => ((await command({ kind: 'status' })).value as { tabs: Tab[] }).tabs;
+    let popup: Tab | undefined;
+    for (let i = 0; i < 100 && !popup; i++) { popup = (await listed()).find(tab => new URL(tab.url).pathname === '/popup'); if (!popup) await Bun.sleep(100); }
+    expect(popup?.view).toStartWith('agent-popup-');
+    expect((await command({ kind: 'evaluate', expression: '[opener !== null, document.cookie]' }, popup!.tabId)).value).toEqual([true, expect.stringContaining('login=hosted')]);
+    for (let i = 0; i < 100 && !(await command({ kind: 'evaluate', expression: 'globalThis.answered ?? null' }, id)).value; i++) await Bun.sleep(100);
+    expect((await command({ kind: 'evaluate', expression: 'globalThis.answered' }, id)).value).toEqual({ popup: 'answered', at: '/popup' });
+    // Its page closing itself closes the tab.
+    await command({ kind: 'click', selector: '#shut' }, popup!.tabId);
+    for (let i = 0; i < 100 && (await listed()).some(tab => tab.tabId === popup!.tabId); i++) await Bun.sleep(100);
+    expect((await listed()).map(tab => tab.tabId)).toEqual([id]);
+    console.log('A popup of an agent tab is a tab of its own, answers its opener and closes itself');
     expect(JSON.stringify(await command({ kind: 'snapshot' }, id))).toContain('ATELIER BOITE');
     await command({ kind: 'preset', preset: 'iphone-15-pro' }, id);
     expect((await command({ kind: 'evaluate', expression: '[innerWidth,innerHeight]' }, id)).value).toEqual([393, 852]);
@@ -104,12 +111,22 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
         functionDeclaration: `function(base64, mime) { return new Promise((resolve, reject) => {
           const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
           const video = document.createElement('video'), url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-          const cleanup = () => { video.remove(); URL.revokeObjectURL(url); };
+          const events = [];
+          for (const name of ['loadedmetadata', 'loadeddata', 'seeking', 'seeked', 'stalled', 'suspend', 'error']) video.addEventListener(name, () => events.push(name));
+          const timer = setTimeout(() => {
+            const state = { events, ready: video.readyState, network: video.networkState, duration: video.duration, at: video.currentTime, seeking: video.seeking, error: video.error?.message };
+            cleanup(); reject(new Error('recording decode timed out: ' + JSON.stringify(state)));
+          }, 15000);
+          const cleanup = () => { clearTimeout(timer); video.remove(); URL.revokeObjectURL(url); };
           video.onloadeddata = () => {
             video.onseeked = () => { resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration, seeked: video.currentTime }); cleanup(); };
             video.currentTime = video.duration / 2;
           };
-          video.onerror = () => { cleanup(); reject(new Error('recording cannot play')); };
+          video.onerror = () => { const message = video.error?.message; cleanup(); reject(new Error('recording cannot play: ' + message)); };
+          // Keep the paused decoder in the document through load and seek.
+          video.muted = true; video.preload = 'auto';
+          video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+          document.body.append(video);
           video.src = url; video.load();
         }); }`,
         arguments: [{ value: bytes.toString('base64') }, { value: recorded.mime }],

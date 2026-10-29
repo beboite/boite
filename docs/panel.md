@@ -2,10 +2,17 @@
 
 The Panel button or [surface shortcuts](keybindings.md) open a thread's tabs
 beside the chat. Tabs are stored per machine/thread; width is shared on this device.
-Below 720 px it covers the chat; Back closes it. A mobile reload keeps tabs but
-starts with the panel closed, without changing the stored desktop layout.
+At 720 px and below it covers the chat; **Chat** or Back hides it without
+closing the agent's browser tabs. The phone header's **Browser** button opens
+the agent browser directly. New agent pages leave the phone on its chosen
+view. A mobile reload keeps tabs but starts with the panel closed, without
+changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
+
+Captures: [phone chat](images/agent-browser-chat-phone.png),
+[phone browser](images/agent-browser-return-phone.png),
+[desktop browser](images/agent-browser-live-desktop.png).
 
 The panel's left edge, the thread list's right edge, the terminal drawer's top
 edge and the line between two terminal panes share `ResizeHandle.svelte`. It is
@@ -79,6 +86,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
+| Desk     | one      | a bot's desk, beside its own thread only: now, work, routines, memory, today; see [bots.md](bots.md) |
 | Browser  | one      | the conversation's browser, the one its agent drives: a webview of the Windows desktop app on its own core, frames from the thread's machine elsewhere, covered until Show except a tab the owner opens there; see [browser.md](browser.md) |
 | Preview  | many     | a `boite preview` page, in a shell child webview with persistent cookies, where preview comments pick elements; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
@@ -89,6 +97,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 | Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
+| Window   | one      | the desktop window an agent watches with `boite window watch`, read-only and covered until Show, see [windows.md](windows.md) |
 
 The launcher and the new-surface menu offer one Browser card, and `boite
 browse <url>` opens its page as a new tab of that same browser. Only `boite
@@ -132,11 +141,15 @@ tabs open in. The profile button in the address bar names the tab's profile
 (only its icon on a narrow bar). Its menu, like the panel's **+** menu, opens a
 new tab in another profile, or a private tab. A private tab is chosen per tab,
 never as the default. Private tabs share one session that keeps nothing once
-the last of them closes.
+the last of them closes. On Windows that session is InPrivate in a WebView2
+profile of its own, `boite_private`, rather than InPrivate on the default
+profile, so it shares none of the default profile's sign-ins.
 
-The profiles belong to the desktop that shows the browser: they are stored in
-the settings of the core its shell started, and a phone has no Browser surface
-to choose them. Deleting a profile closes its tabs in every conversation and
+These native webview profiles belong to the desktop that shows the browser:
+they are stored in the settings of the core its shell started. A phone watches
+the conversation machine's agent browser instead
+([processes and profiles](browser.md#processes-and-profiles)).
+Deleting a profile closes its tabs in every conversation and
 erases what it kept. On Windows each profile is a WebView2 profile of the
 shell's single browser process (`src/platform/webview_profiles.rs`): the
 debugging port is unchanged, and WebView2 removes a deleted profile's folder
@@ -164,15 +177,21 @@ profile, or in the private session, and keeps `window.opener`: the sign-in
 answers the page through it and closes itself. Its title starts with the
 host it shows, since it has no address bar. Closing the tab closes its
 popups. A popup from the tab on screen comes to the front; one from a user's
-tab off screen opens behind without the focus. One from a tab an agent drives
-out of sight opens hidden, its page still running, and shows only while that
-tab is on screen, so an agent's `window.open` never puts a window over the
-user's work. A `target="_blank"` link, or `window.open` without a size, opens a tab
-in the same panel and profile instead, and that tab has no opener. So does a
-sized `window.open` while the tab already holds three popups: WebView2 has no
-popup blocker. Popups are
-desktop windows: an agent's browser commands and the phone's remote view see
-the tab, not its popups.
+tab off screen opens behind without the focus. A `target="_blank"` link, or
+`window.open` without a size, opens a tab in the same panel and profile
+instead, and that tab has no opener. So does a sized `window.open` while the
+tab already holds three popups: WebView2 has no popup blocker. Popups are
+desktop windows: the phone's remote view sees the tab, not its popups.
+
+On Windows a page of an agent tab gets neither: every window it opens, sized
+or not, by a click or a script, becomes another agent tab of the conversation
+(`apps/shell/src-tauri/src/browser/adopted.rs`). The shell hands WebView2 a
+webview in the opener's environment and session, so the page keeps
+`window.opener`, then moves it into the main window off screen beside the
+other agent tabs and tells the core, which attaches to it like any tab. Its
+page calling `window.close()` closes the tab. Before this, a sized popup of an
+agent tab opened as a hidden desktop window the agent never saw: Gmail's
+"Send mail as" editor could not be reached (2026-10-26).
 
 Surfaces and popups show other sites without the app's bridge. On Windows
 `src/platform/browser_page.rs` turns off WebView2's `chrome.webview`, and removes
@@ -220,7 +239,20 @@ save chord through `files.write`.
 
 An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
-memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
+memory only, and closing that tab asks first.
+
+`lib/file-documents.svelte.ts` holds one document per thread and path, shared
+by every editor mounted on the file. A core may finish two writes in either
+order, so at most one write of a file is out: a save asked meanwhile waits and
+leaves with the last text saved. A read's answer replaces the confirmed disk
+text only when no newer read or write already set it and no write was out
+during the read. An edit stays until no write is out and the disk confirmed
+its text. A tab closed while a read or write is out drops its edit, and the
+document stays until that answer lands, so the reopened tab knows the new disk.
+Archiving the thread drops its edits the same way and keeps such a document, which
+the restored thread takes back.
+
+An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
 the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a
@@ -341,6 +373,41 @@ open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
 opens a surface: A, B, C, D, F, K, M, T. M opens Discussions, D the Device
 surface and B the Browser, the conversation's.
+
+## Preview comments
+
+Settings, General, **Preview comments** is on by default. Open a Browser tab in the integrated panel and choose Reference an element.
+Clicking an element inserts an `@element` mention at the cursor in the
+existing composer. Write around it and send normally. Draft text,
+attachments and queued messages stay intact. On a phone-sized window, selection
+returns to the composer. There is no separate comment form.
+
+References stay inline with the text, in the accent color, in drafts and sent
+messages. Editing a mention removes its element association. Click
+one to reopen its thread's browser and highlight the element. A closed tab is
+reopened at the captured URL; a surviving tab that changed pages is refused.
+Missing elements and inaccessible pages report errors. Open shadow roots are
+supported, including sibling elements within them. The highlight follows scroll
+and resize for three seconds. Existing references remain clickable with the
+switch off.
+
+Each message carries up to eight typed references. The core validates the URL,
+mention positions, selector, shadow-root path, selected text and viewport bounds, then supplies
+them as labeled untrusted context to every agent. The visible message keeps
+only the user's prose and inline mentions. References survive queued sends,
+failed sends, idempotent retries and prompt recall. Stashing a referenced draft
+or sending it with `/goal` or `/loop` is refused explicitly, preserving the draft.
+
+Escape cancels selection. Switching it off or leaving the surface
+cancels the picker. Desktop child webviews support selection across origins.
+The iframe test bridge only inspects accessible same-origin documents and
+reports inaccessible pages explicitly. Selected page content is untrusted data;
+it never grants the page access to host commands. This version does not attach
+a screenshot to the reference.
+
+`preview-comments.test.ts` (end to end) covers the desktop and phone-sized
+interfaces. Preview unit tests cover owning-machine boundaries and selection
+validation. No live provider login is required.
 
 ## Experimental PR review
 

@@ -10,8 +10,15 @@
  * to carry, `callback:<url>` with the redirect URL a test is meant to paste,
  * `fetched:<path>` when that URL is hit, `authenticated`, `new:<cwd>` for
  * each session it opens with its model list, and `prompt:<sessionId>` for a
- * prompt, answered with one word. The session token lands under
- * `GEMINI_HOME`, which is how the account is rechecked.
+ * prompt, answered with one word, then `block:<type>` for each block after
+ * its text. The session token lands under `GEMINI_HOME`, which is how the
+ * account is rechecked.
+ *
+ * A prompt that names a scenario plays it: `scenario:subagents` launches a
+ * batch with `start_subagent`, fails a second launch, runs an MCP tool of
+ * the same title and launches a third batch with 1.4.1's `invoke_subagent`; `scenario:command` answers while a shell command it started
+ * still runs, and `scenario:short-command` finishes that command a moment
+ * after its answer.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,7 +26,7 @@ import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
 /** The variables a test asserts on: the isolation, the harness, the browser suppression and where it unpacks. */
-const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY', 'TEMP', 'TMP', 'TMPDIR'];
+const WATCHED = ['GEMINI_HOME', 'AGY_ACP_FORCE_FILE_STORAGE', 'ANTIGRAVITY_HARNESS_PATH', 'BROWSER', 'GEMINI_API_KEY', 'TEMP', 'TMP', 'TMPDIR', 'SSL_CERT_FILE'];
 
 /** The model option the real server answers `session/new` with, cut to three entries. */
 const MODEL_OPTION = {
@@ -90,7 +97,7 @@ const app = agent({ name: 'agy-fake' })
     for (const name of WATCHED) log(`env ${name}=${process.env[name] ?? ''}`);
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: true },
+      agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
       agentInfo: { name: 'agy-fake', version: '1' },
       authMethods: [{ id: 'oauth-personal', name: 'Sign in with Google', description: null }],
     };
@@ -121,10 +128,33 @@ const app = agent({ name: 'agy-fake' })
   })
   .onRequest('session/prompt', async ({ params, client }) => {
     log(`prompt:${params.sessionId}`);
-    await client.notify('session/update', {
-      sessionId: params.sessionId,
-      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'pong' } },
-    });
+    const [first, ...rest] = params.prompt;
+    for (const block of rest) log(`block:${block.type}${block.type === 'image' ? `:${block.mimeType}` : ''}`);
+    const text = first?.type === 'text' ? first.text : '';
+    if (text.includes('Attached files available on this machine')) log('prompt names a saved file');
+    const update = (body: Record<string, unknown>): Promise<void> =>
+      client.notify('session/update', { sessionId: params.sessionId, update: body as never });
+    if (text.includes('scenario:subagents')) {
+      // Captured from 1.1.1: the launch returns its description before any child finished.
+      await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:2`, title: 'Running start_subagent', kind: 'other', status: 'in_progress', rawInput: {} });
+      await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:2`, status: 'completed', rawOutput: 'Launch readers' });
+      await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:3`, title: 'Running start_subagent', kind: 'other', status: 'failed', rawInput: {}, rawOutput: 'Subagent exceeded its limit.' });
+      await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:4`, title: 'Running start_subagent', kind: 'other', status: 'completed', rawInput: {}, rawOutput: 'mcp', _meta: { is_mcp_tool_call: true } });
+      // 1.4.1 renamed the tool `invoke_subagent`; it asks under `Run invoke_subagent?` and runs under the same title.
+      await update({ sessionUpdate: 'tool_call', toolCallId: `${params.sessionId}:5`, title: 'Run invoke_subagent?', kind: 'other', status: 'pending', rawInput: {} });
+      await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:5`, title: 'Running invoke_subagent', kind: 'other', status: 'in_progress', rawInput: {} });
+      await update({ sessionUpdate: 'tool_call_update', toolCallId: `${params.sessionId}:5`, status: 'completed', rawOutput: 'Launch reviewers' });
+    }
+    if (text.includes('scenario:command') || text.includes('scenario:short-command')) {
+      const id = `${params.sessionId}:cmd`;
+      await update({ sessionUpdate: 'tool_call', toolCallId: id, title: 'Running command', kind: 'execute', status: 'in_progress', rawInput: { CommandLine: 'sleep 600' } });
+      if (text.includes('scenario:short-command')) {
+        setTimeout(() => {
+          void update({ sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', rawOutput: { combinedOutput: 'done', exitCode: 0 } });
+        }, 300);
+      }
+    }
+    await update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'pong' } });
     return { stopReason: 'end_turn' as const };
   });
 

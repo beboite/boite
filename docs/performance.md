@@ -232,11 +232,14 @@ history; selection yields every eight rows and shares a scheduler snapshot only
 within that synchronous group. Family, input, result and checkout guards remain
 fresh after asynchronous validation and immediately before the archive write.
 Large retained families and unindexed branch-holder checks can still cost more.
-Proofs share one `git remote -v` and one `gh pr list` per repository with the
+Proofs share one `git remote -v` and one page of PRs per repository with the
 sidebar badges, and a thread without a merged PR waits 5 minutes, then up to
 an hour, before its next proof. Four unmerged worktree threads cost 2 processes
 on the first pass and none on the next ones, against 12 and then 8 a minute
 before ([bench/results/2026-10-15-perf-git.md](../bench/results/2026-10-15-perf-git.md)).
+Those counts hold for a repository with fewer than 100 PRs, whose page is
+complete. On a full page, a thread whose branch the page does not show also
+walks its checkout's status and reads its branch alone before a proof.
 
 Short git reads (30 seconds or less) share eight slots per core; a read waits
 for a free one before its git starts, and the wait does not count against its
@@ -258,7 +261,7 @@ browser on the fake core with a simulated 200 ms round trip
 (`?fake=1&rtt=200`), the mouse button held 120 ms, and times the release to
 the thread's messages in hand, each sample on a fresh page with nothing cached.
 On 2026-10-12 in the Linux container, three runs of four samples each: a plain
-click had medians of 222, 230 and 232 ms, and the Load on press experiment 95,
+click had medians of 222, 230 and 232 ms, and Load on press 95,
 96 and 100 ms. The Windows CI job measured medians of 225 and 92 ms the same
 day. The press saved about the 120 ms it was held, up to one round trip. The fake does not delay pushed events or model payload size, and a real
 core adds its own handling time to both paths.
@@ -274,22 +277,50 @@ This measures local history lookup and title persistence, not provider latency.
 
 ## Persistent-agent history
 
-`bun run bench/agents-snapshot.ts [steps]` records finished work, its run with
-20 KB of frozen instructions, a message and a memory per step, plus a session
-every ten steps, on a temporary core. It then reads `agents.snapshot` over RPC
-and looks up one live session among the recorded ones, six samples each after a
-warm-up. On 2026-09-24, at 2,000 steps:
+`bun run bench/agents-snapshot.ts [steps]` gives one agent's thread a finished
+turn per step (prompt and answer, a third of them routine wakes, one in six
+quiet, each with its cost) and leaves a 20 KB work row of the older agent model
+per step in `agent_entities`, on a temporary core. It then reads
+`agents.snapshot` over RPC and looks up the agent of its thread, six samples
+each after a warm-up. On 2026-10-23, at 2,000 steps, on Linux:
+snapshot 1,018 bytes, median 8.15 ms, and 2.39 ms once the last answer walks
+the thread's own index (below); thread lookup median 0.010 ms. The
+snapshot no longer carries history: the conversation is the thread's, paged
+like any thread, and the status (today's turns and spend, the last answer)
+reads the turns table with SQL instead of loading the thread.
 
-| | main (11631eb) | bounded snapshot |
+The older model measured, on 2026-09-24 at 2,000 steps, 43.0 MB and 351.78 ms
+on main `11631eb` and 121 KB and 3.66 ms with a bounded snapshot of messages,
+memories and work.
+
+### Ten agents at weeks of scale
+
+`bun run bench/agents-load.ts [turns-per-agent]` gives 10 agents 5,000 turns
+each, a desk of 100 watched threads (a third with a linked pull request), 10
+routines each and 20,000 rows of the older agent model, then counts the SQL
+statements each step runs by wrapping `db.query`. On 2026-10-23, on this Linux
+LXC, before and after the desk and status reads were batched:
+
+| Step | Before | After |
 | --- | --- | --- |
-| Snapshot JSON | 43.0 MB | 121 KB |
-| Snapshot median | 351.78 ms | 3.66 ms |
-| Session lookup median | 0.238 ms | 0.021 ms |
+| `agents.snapshot` over RPC | 407 ms, 4,106 statements | 29 ms, 96 statements |
+| One agent's own snapshot | 71 ms, 415 statements | 3.0 ms, 14 statements |
+| Context block, turn that sends nothing | 7.0 ms, 298 statements | 0.8 ms, 7 statements |
+| Context block, fresh session (5.7 KB) | 7.8 ms, 296 statements | 2.0 ms, 9 statements |
+| Stall check, every 10 s | 13.5 ms, 1,000 statements | 0.13 ms, 1 statement |
+| `turn.finished` of a thread in an entrusted project | 3.4 ms, 35 statements | 1.1 ms, 15 statements |
+| Idle core with 10 agents | 86 statements/s | 3.2 statements/s, as with none |
 
-The snapshot carries the newest 50 messages, memories and finished work, all
-unfinished work, and runs without their instructions. At 500 and 8,000 steps it
-measured 86 KB and 260 KB; the difference is the session list, which grows with
-contexts rather than with history. Main measured 10.8 MB at 500 steps.
+The snapshot stays 353 KB at this scale: every agent's desk rides in it. The
+batching: a desk's threads are one `listThreadsIn`, their linked pull requests
+one `settings` read, the stall check one read of the threads at work, the
+context block reads the desk only when it goes out, the last answer walks
+`turns_by_thread` (SQLite picked `turns_by_status` and read every done turn of
+every thread, 31 ms per agent), today's sums go through `turns_by_thread_queue`
+and are kept per thread until a turn or row of that thread changes.
+`agents.changed` goes out once a second while an agent works (6 in 6.1 s of 20
+parts a second). The 500 ms agents tick costs 5 µs and no statement when
+nothing is due.
 
 ## Local and remote connections
 
@@ -443,10 +474,13 @@ when the core advertises `chunkedAnswers`.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  An assistant's video, audio or PDF keeps its bytes, since it previews on
-  mount. An assistant's picture above 8 KiB is deferred like a prompt's, with
-  its size and blur, and `ChatFile` loads it within 400 px of the screen in a
-  box of its proportions. Nine screenshots an agent attached made a 40-message
+  Video and audio players ask for a file ticket within 400 px of the screen;
+  the browser fetches their metadata and streams their bytes over HTTP, outside
+  the thread's JSON frames. Older cores and desktop relay connections fall back
+  to a separate base64 read. An assistant's PDF keeps its bytes for signature
+  checking before preview. An assistant's picture above 8 KiB is deferred like
+  a prompt's, with its size and blur, and `ChatFile` loads it within 400 px of
+  the screen in a box of its proportions. Nine screenshots an agent attached made a 40-message
   page of one thread weigh 12,020,008 bytes, 7,472,667 deflated (measured on
   2026-10-07). The same page projected this way weighs 50,961 bytes, 13,679
   deflated.
@@ -513,11 +547,10 @@ when the core advertises `chunkedAnswers`.
   base64: at 150 ms with no rate cap, ticketed thumbnails took 488 ms against
   299 ms for base64 large copies, and ticketed large copies gain no bytes over
   deflated base64 (1,325 against 1,327 KB) while taking that round trip.
-- A light read first makes the blurs of the messages around its page that no
-  read looked at before, waiting 1.5 s at most. It does this before the page is
-  read, never between the read and the answer, so the answer still holds every
-  event sent before it. A picture without a blur yet is sent without one and
-  queued.
+- A light read queues missing blurs while projecting its messages and answers
+  without waiting for image conversion. It does not scan surrounding messages
+  for previews before reading the page. Cached blurs accompany later reads;
+  a picture without one still reserves its dimensions while its copy loads.
 - `ChatImage.svelte` draws each picture in a box of its own proportions from
   the first frame: the blur, then the picture fading in over it. A picture that
   came with its bytes reads its size from their header. Nothing around the box
@@ -680,13 +713,13 @@ them in its cache. A link that asks to save data, or reads as 3G or slower,
 skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
 tour is prefetched only for a device that has not seen it.
 
-Settings, the Agents page with its first snapshot (behind its experiment) and,
+Settings, the Bots page with its first snapshot (behind its experiment) and,
 for the owner, the terminal's xterm modules are fetched in the same idle pass.
-The Agents view lives as long as its machine's store: a return visit draws the
+The Bots view lives as long as its machine's store: a return visit draws the
 last snapshot at once and refreshes it, and nothing follows `agents.changed`
 while the page is away. `bun run bench/agents-page.ts` measures a click on
-Agents until its first conversation row, behind an emulated 40 ms, 4 Mbit/s
-link, on a temporary core with twelve agents. On 2026-10-11 in this Linux
+Bots until its first bot row, behind an emulated 40 ms, 4 Mbit/s
+link, on a temporary core with twelve bots. On 2026-10-11 in this Linux
 container, medians of five against `origin/main` at `4762402b`: first visit
 164 ms before and 110 ms after, return visit 55 ms and 32 ms. The rest of a
 first visit is rendering.
@@ -758,7 +791,7 @@ and 750 kbit/s up (`Network.emulateNetworkConditions`).
 Of the 19 requests after the change, 9 are scripts: the entry, the runtime,
 the `boot` chunk, the catalogue, the phone navigation the boot screen waits
 for outside the shell with a module it shares, the dictation button with its
-recorder, and the interaction experiments; the rest are styles, the two
+recorder, and the pointer interactions; the rest are styles, the two
 fonts, the manifest and the icons. The slow link's runs vary by under 260 ms.
 Without throttling both builds reach ready in 148 to 547 ms on this machine,
 a spread wider than any difference between them, and the idle prefetch starts
@@ -914,8 +947,10 @@ limits expensive work while streaming, typing and scrolling:
 - Wheel listeners are passive: they release bottom following without
   cancelling browser scrolling. `MessageList.test.ts` guards the listener
   options.
-- Icon shapes and locale date formatters are reused. Markdown links are found
-  in one pass over a line, however many `[` it holds. Finished Markdown markup
+- Icon shapes and locale date formatters are reused. The Markdown regression
+  suite checks malformed links on lines of 32,000 characters. Inline link
+  lookahead skips unfinished labels when no closing bracket or destination
+  parenthesis remains. Finished Markdown markup
   has a four-million-character cache bound, highlighted code a
   two-million-character one shared by every view of the same text. A diff
   document's rows are computed once per whitespace mode and kept with it.
@@ -929,7 +964,42 @@ limits expensive work while streaming, typing and scrolling:
   E2E captures wait through `settleAnimations()`, which ignores it. The "phone
   streaming behind list" scenario measures it.
 
+### Composer synchronization
+
+The core persists changed composer records independently of message history.
+Typing coalesces over 400 ms; attachment bytes upload separately once, and
+subsequent puts and broadcasts contain metadata only. Asset validation reads
+stored kind, MIME type, name and byte count without loading the body. Queue
+wakeups use an index of records with pending prompts, targeted by thread.
+
+On 2026-10-27, `bun test tests/e2e/composer-persistence.test.ts
+tests/e2e/chat-steering.test.ts` passed both production-UI scenarios. The first
+used a real core, desktop browser and paired phone-width browser. Adding a
+1 MiB file and making 100 text edits at 10 ms intervals sent one asset upload
+and five composer puts containing 2,000 bytes total. None of those puts carried
+attachment bytes. Scheduling can change the put count; this measures wire
+payload, not network framing or a before/after latency comparison. The same
+test verifies that queues drain with both browsers closed and that drafts and
+consumed state survive a core restart.
+
 ### A long turn is many rows
+
+Inline view placement keeps the same timeline array when streamed text leaves
+the message order unchanged. Checking a new placement line still happens as
+the answer grows, but downstream row and scroll effects do not rerun merely
+because a view exists. A changed placement, turn status, or republished page
+still reaches the timeline. The sidebar also uses its row index for full
+thread updates, including provider progress heartbeats, as it does for load
+samples.
+
+`bun run --cwd packages/ui test src/components/MessageList.test.ts -t 'four hundred messages'`
+covers 400 messages and 200 deltas both with and without an inline view. Before
+the change on 2026-10-25, the view case made 400 height reads during the deltas
+and failed the existing layout budget; the case without a view passed.
+`src/lib/store-thread-index.test.ts` covers progress updates as well as load
+samples, and `src/lib/inline-view.test.ts` checks placement changes and
+replacement message objects. These checks do not measure native WebView2
+frame times or establish an improvement in whole-machine CPU use.
 
 A long agent session leaves a thread whose weight is tool calls: four real
 ones of 15 to 23 MB read on 2026-10-07 held 4,000 to 6,200 calls, and one

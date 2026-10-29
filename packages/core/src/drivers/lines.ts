@@ -1,6 +1,6 @@
 /**
  * The one line splitter every stdio driver reads its agent through: pi, Muse,
- * Codex, agy and the ACP stdout filter, and `stderrLines` for every child's
+ * Codex and the ACP stdout filter, and `stderrLines` for every child's
  * stderr.
  *
  * It splits on `\n` only. `U+2028` and `U+2029` are valid inside a JSON string,

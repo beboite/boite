@@ -1,4 +1,6 @@
 import { errorText } from '../errors';
+import { isSyncKey, RpcErrorCode, type AgentCommand, type SyncKey } from '@boite/contracts';
+import { RpcFailure } from '../client';
 import type {
   KeybindingCommand,
   Keybindings,
@@ -12,8 +14,32 @@ import { chordLabel, commandForKey, isMac, resolveBindings, type BindingTable, t
 import { strings } from '../strings';
 import type { StoreContext } from './context';
 
+/** `kept` with `keys` added, or null when it holds them all already. */
+function adding(kept: readonly string[], keys: readonly string[]): string[] | null {
+  const added = keys.filter((key) => !kept.includes(key));
+  return added.length === 0 ? null : [...kept, ...added];
+}
+
 /** What the core keeps for the whole machine: its settings, the scheduler, the keybindings file and telemetry. */
 export class CoreSettings {
+  brainCommands = $state.raw<AgentCommand[]>([]);
+  #brainRead = 0;
+
+  /** Read when the slash menu opens, so edits on the host appear without a poll. */
+  async loadBrainCommands(): Promise<void> {
+    const client = this.ctx.client, generation = this.ctx.clientGeneration;
+    const read = ++this.#brainRead;
+    if (!client) return;
+    try {
+      const commands = await client.call('brain.commands', {});
+      if (this.ctx.client === client && this.ctx.clientGeneration === generation && this.#brainRead === read) this.brainCommands = commands;
+    } catch (error) {
+      if (this.ctx.client !== client || this.ctx.clientGeneration !== generation || this.#brainRead !== read) return;
+      this.brainCommands = [];
+      if (!(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) this.ctx.fail(error);
+    }
+  }
+
   scheduler = $state<SchedulerState | null>(null);
   #settings = $state<Settings | null>(null);
   get settings(): Settings | null { return this.#settings; }
@@ -29,10 +55,68 @@ export class CoreSettings {
 
   constructor(private readonly ctx: StoreContext) {}
 
-  /** False when nothing was saved, so a caller never reports a save the core refused. */
-  async saveSettings(patch: Partial<Settings>): Promise<boolean> {
+  /**
+   * False when nothing was saved, so a caller never reports a save the core
+   * refused. On a machine that follows its group's settings home, a synced
+   * setting changed here stays here: the same save marks it kept.
+   */
+  saveSettings(patch: Partial<Settings>): Promise<boolean> {
+    const keys = Object.keys(patch).filter(isSyncKey);
+    return this.#save(patch, patch.syncOverrides === undefined && keys.length > 0 ? (kept) => adding(kept, keys) : null);
+  }
+
+  /** The member whose settings this machine follows, as its own core reports the group; null when it follows none. */
+  get settingsHome(): string | null {
+    const group = this.ctx.store.group;
+    const home = group?.settingsHome;
+    return home && home !== group.self && group.cores.some((core) => core.coreId === home) ? home : null;
+  }
+
+  /** What this machine keeps for itself while it follows a home. */
+  kept(key: SyncKey): boolean {
+    return this.settingsHome !== null && (this.settings?.syncOverrides ?? []).includes(key);
+  }
+
+  /** Marks what a change made elsewhere than `settings.set` keeps here: a chord, a brain switch. */
+  async keep(keys: readonly SyncKey[]): Promise<void> {
+    if (keys.length === 0 || this.settingsHome === null) return;
+    await this.#save({}, (kept) => adding(kept, keys));
+  }
+
+  /** Gives `key` back to the home: the next copy writes the home's value over it. */
+  followHome(key: SyncKey): Promise<boolean> {
+    return this.#save({}, (kept) => kept.includes(key) ? kept.filter((entry) => entry !== key) : null, true);
+  }
+
+  /** Saves that change the kept list, one after the other, each from the list the one before left. */
+  #keeping: Promise<unknown> = Promise.resolve();
+
+  /**
+   * `change` turns the kept list into the next one, or null to leave it. It
+   * runs only on a machine that follows a home, `always` aside, on the list
+   * the core holds now: the copy from the home may have just replaced the one
+   * this store shows.
+   */
+  #save(patch: Partial<Settings>, change: ((kept: string[]) => string[] | null) | null, always = false): Promise<boolean> {
     const client = this.ctx.client;
-    if (!client) return false;
+    if (!client) return Promise.resolve(false);
+    if (change === null || (!always && this.settingsHome === null)) return Object.keys(patch).length === 0 ? Promise.resolve(true) : this.#send(client, patch);
+    const turn = this.#keeping.then(async () => {
+      let next: string[] | null;
+      try {
+        next = change((await client.call('settings.get', {})).syncOverrides ?? []);
+      } catch (error) {
+        this.ctx.fail(error);
+        return false;
+      }
+      if (next === null) return Object.keys(patch).length === 0 ? true : this.#send(client, patch);
+      return this.#send(client, { ...patch, syncOverrides: next });
+    });
+    this.#keeping = turn.catch(() => undefined);
+    return turn;
+  }
+
+  async #send(client: NonNullable<StoreContext['client']>, patch: Partial<Settings>): Promise<boolean> {
     try {
       this.settings = await client.call('settings.set', patch);
       return true;
@@ -81,22 +165,27 @@ export class CoreSettings {
       this.keybindings = chord === 'default'
         ? await client.call('keybindings.reset', { command: id })
         : await client.call('keybindings.set', { command: id, chord });
-      return null;
     } catch (error) {
       return errorText(error);
     }
+    await this.keep([`keybinding:${id}`]);
+    return null;
   }
 
-  /** Every command back on its default. */
+  /** Every command back on its default. A machine that follows a home keeps the ones that changed. */
   async resetKeybindings(): Promise<string | null> {
     const client = this.ctx.client;
     if (!client) return strings.connection.unavailable;
+    let changed: KeybindingCommand[] = [];
     try {
+      // What the reset changes is what the file names now, read from the core: this store may not have read it yet.
+      if (this.settingsHome !== null) changed = Object.keys((await client.call('keybindings.get', {})).bindings) as KeybindingCommand[];
       this.keybindings = await client.call('keybindings.reset', {});
-      return null;
     } catch (error) {
       return errorText(error);
     }
+    await this.keep(changed.map((command) => `keybinding:${command}` as const));
+    return null;
   }
 
   /** ` (Ctrl+N)` for a tooltip, or nothing while the command has no key. */
@@ -113,8 +202,8 @@ export class CoreSettings {
     return this.#telemetryCall('telemetry.state', {});
   }
 
-  configureTelemetry(mode: TelemetryState['mode']): Promise<TelemetryState> {
-    return this.#telemetryCall('telemetry.configure', { mode });
+  configureTelemetry(mode: TelemetryState['mode'], countChoice = true): Promise<TelemetryState> {
+    return this.#telemetryCall('telemetry.configure', { mode, countChoice });
   }
 
   retryTelemetryDeletion(): Promise<TelemetryState> {

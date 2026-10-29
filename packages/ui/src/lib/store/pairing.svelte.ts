@@ -136,6 +136,11 @@ export class Pairing {
     return this.#change((client) => client.call('group.rename', { name }));
   }
 
+  /** The member the group's other machines take their settings from, or null for none. */
+  setSettingsHome(coreId: string | null): Promise<boolean> {
+    return this.#change((client) => client.call('group.settingsHome', { coreId }));
+  }
+
   leaveGroup(): Promise<boolean> {
     return this.#change(async (client) => {
       await client.call('group.leave', {});

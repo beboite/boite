@@ -22,8 +22,8 @@ export function initialHarnessUpdates(): HarnessUpdate[] {
     { providerId: 'claude', name: 'Claude Code', route: 'self', current: '2.1.267', latest: '2.1.278', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
     { providerId: 'codex', name: 'Codex', route: 'managed', current: '0.154.0', latest: '0.155.1', pending: true, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
     { providerId: 'opencode', name: 'OpenCode', route: 'self', current: '1.18.31', latest: '1.18.31', pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() },
-    // No way to name its newest release: the row that offers the updater itself.
-    { providerId: 'antigravity-cli', name: 'Antigravity CLI', route: 'self', current: '1.2.7', latest: null, pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
+    // Its check named no newest release: the row that offers the updater itself.
+    { providerId: 'grok', name: 'Grok', route: 'self', current: '0.1.210', latest: null, pending: false, skipped: null, state: 'idle', message: null, checkedAt: Date.now() }
   ] satisfies HarnessUpdate[]).map((update) => (quietUpdates() ? { ...update, current: update.latest ?? update.current, pending: false } : update));
 }
 
@@ -217,6 +217,8 @@ export function providerInstallMethods(ctx: FakeContext) {
       return uninstall(ctx, params.providerId);
     },
     'providers.updates': async (params) => {
+      // As the real core: a check stamps every agent it read.
+      if (params.refresh === true) for (const update of ctx.harnessUpdates) if (update.state === 'idle') update.checkedAt = Date.now();
       return structuredClone(ctx.harnessUpdates);
     },
     'providers.update': async (params) => {

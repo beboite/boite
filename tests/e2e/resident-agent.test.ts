@@ -26,7 +26,7 @@ test('an agent entrusted with a project shows on its header and on its threads, 
     const first = (await store.client.call('agents.snapshot', {})).profiles.find(agent => agent.status === 'active');
     const agent = first?.projectIds?.includes('p-boite') ? first
       : await store.client.call('agents.profile.save', { value: first ? { ...first, projectIds: [...(first.projectIds ?? []), 'p-boite'] }
-        : { name: 'Mira', domain: 'Looks after boite', instructions: '', avatar: '', status: 'active', tools: [], projectIds: ['p-boite'],
+        : { name: 'Mira', domain: 'Looks after boite', instructions: '', avatar: '', status: 'active', projectIds: ['p-boite'],
           selection: { providerId: 'claude', accountId: 'a-claude-main', model: null, effort: null, permissionMode: 'default' } } });
     const thread = store.threads.find(t => t.projectId === 'p-boite' && !t.archived && !t.agentSessionId && !t.parentThreadId);
     await window.__boiteTest.workspace.select(store, thread.id);
@@ -53,5 +53,5 @@ test('an agent entrusted with a project shows on its header and on its threads, 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('${chip}')?.getBoundingClientRect().width > 0`);
   await page.click(chip);
-  await page.waitFor(`window.__boiteTest.workspace.active.page === 'agents' && document.querySelector('.agents-identity')?.textContent.includes(${JSON.stringify(ids.name)})`);
+  await page.waitFor(`window.__boiteTest.workspace.active.page === 'agents' && document.querySelector('[data-testid="agent-header"]')?.textContent.includes(${JSON.stringify(ids.name)})`);
 }, 60000);

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRightToLine, ChevronLeft, ChevronRight, ListX, Maximize2, Minimize2, Plus, SquareX, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -22,14 +22,17 @@
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import DeviceSurface from './DeviceSurface.svelte';
+  import WindowSurface from './WindowSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
   import PanelResizeHandle from './PanelResizeHandle.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
+  import { surfaceGlyph } from '../lib/surface-glyphs';
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
+  import AgentDesk from './agents/AgentDesk.svelte';
 
   let {
     store,
@@ -47,6 +50,7 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const phone = $derived((innerWidth.current ?? window.innerWidth) <= 720);
   /**
    * The docked width: the one asked for, within the room the chat keeps once
    * the thread list and the contacts column take theirs. The asked width stays
@@ -117,6 +121,17 @@
     const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
     const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
     overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, untrack(() => overflowing));
+    readEdges();
+  }
+
+  /** Which ends of the strip hide a tab: that end fades instead of cutting a label in half, and its chevron rests. */
+  let hiddenStart = $state(false);
+  let hiddenEnd = $state(false);
+  function readEdges(): void {
+    const node = tabs;
+    if (!node) return;
+    hiddenStart = node.scrollLeft > 1;
+    hiddenEnd = node.scrollLeft < node.scrollWidth - node.clientWidth - 1;
   }
 
   $effect(() => {
@@ -141,14 +156,22 @@
     };
   });
 
-  // The tab that is showing is always the one in view.
+  // The tab that is showing is always the one in view, also once the chevrons
+  // that an overflow brings have narrowed the strip under it.
   $effect(() => {
     const id = panel.activeSurfaceId;
+    void overflowing;
     if (!id || !tabs) return;
     const tab = tabs.querySelector<HTMLElement>(`[data-surface-id="${CSS.escape(id)}"]`);
     // jsdom has no layout, so it has no `scrollIntoView` either.
     tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   });
+
+  /** The X shuts the panel and hands the keys to the title bar's toggle that opens it again; clicked, it left them on the page. */
+  function shut(): void {
+    panel.hide();
+    if (!phone) document.querySelector<HTMLElement>('[data-testid="panel-toggle"]')?.focus({ preventScroll: true });
+  }
 
   function scrollBy(direction: -1 | 1): void {
     const node = tabs;
@@ -169,15 +192,16 @@
     contextMenu.open(
       event,
       [
-        { id: 'close', label: strings.common.close },
-        { id: 'others', label: strings.rightPanel.closeOthers, disabled: surfaces.length < 2 },
+        { id: 'close', label: strings.common.close, glyph: X },
+        { id: 'others', label: strings.rightPanel.closeOthers, glyph: ListX, disabled: surfaces.length < 2 },
         {
           id: 'right',
           label: strings.rightPanel.closeToRight,
+          glyph: ArrowRightToLine,
           disabled: index < 0 || index === surfaces.length - 1
         },
         separator(),
-        { id: 'all', label: strings.rightPanel.closeAll }
+        { id: 'all', label: strings.rightPanel.closeAll, glyph: SquareX }
       ],
       (action) => {
         if (action === 'close' || action === 'others' || action === 'right' || action === 'all') {
@@ -240,10 +264,14 @@
   }
 
 
+  /** A persistent agent's own thread has a desk, offered first. */
+  const agentThread = $derived(!!store.openThread?.agentSessionId);
   let menuItems = $derived([
+    ...(agentThread ? [{ id: 'desk', label: kindName('desk'), glyph: surfaceGlyph('desk') }] : []),
     ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
+      glyph: surfaceGlyph(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable() })
     })),
@@ -304,6 +332,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollLeft}
         aria-label={strings.rightPanel.scrollLeft}
+        disabled={!hiddenStart}
         onclick={() => scrollBy(-1)}
       >
         <ChevronLeft size={14} strokeWidth={1.75} />
@@ -312,10 +341,13 @@
 
     <div
       class="tabs"
+      class:hidden-start={overflowing && hiddenStart}
+      class:hidden-end={overflowing && hiddenEnd}
       role="tablist"
       tabindex="-1"
       bind:this={tabs}
       {onwheel}
+      onscroll={readEdges}
       onkeydown={onTabsKey}
       data-testid="panel-tabs"
     >
@@ -363,6 +395,7 @@
         class="ghost small icon chev"
         title={strings.rightPanel.scrollRight}
         aria-label={strings.rightPanel.scrollRight}
+        disabled={!hiddenEnd}
         onclick={() => scrollBy(1)}
       >
         <ChevronRight size={14} strokeWidth={1.75} />
@@ -410,13 +443,17 @@
     </button>
     <button
       type="button"
-      class="ghost small icon"
-      title={strings.common.close}
-      aria-label={strings.common.close}
+      class="ghost small icon panel-close"
+      title={phone ? strings.rightPanel.backToChat : strings.common.close}
+      aria-label={phone ? strings.rightPanel.backToChat : strings.common.close}
       data-testid="panel-close"
-      onclick={() => panel.toggle()}
+      onclick={shut}
     >
-      <X size={14} strokeWidth={1.75} />
+      {#if phone}
+        <ArrowLeft size={16} strokeWidth={1.75} /><span class="ui-label">{strings.rightPanel.chat}</span>
+      {:else}
+        <X size={14} strokeWidth={1.75} />
+      {/if}
     </button>
   </header>
 
@@ -425,7 +462,11 @@
          than swapping it in one frame, the way a settings page arrives. -->
     {#key active?.id}
     <div class="surface" use:arrive>
-    {#if active?.kind === 'agents'}
+    {#if active?.kind === 'desk'}
+      {#if store.openThread?.agentSessionId}
+        {#key store.threadKey(store.openThread.id)}<AgentDesk {store} />{/key}
+      {/if}
+    {:else if active?.kind === 'agents'}
       <DelegationSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'messages'}
       <AgentMessagesSurface {store} surface={active} {panel} />
@@ -442,12 +483,17 @@
     {:else if active?.kind === 'files'}
       <FilesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'file'}
-      {#key active.id}
+      <!-- One editor per document: the same path open in another thread is another file's tab. -->
+      {#key `${panel.threadId}\n${active.id}`}
         <FileSurface {store} surface={active} {panel} />
       {/key}
     {:else if active?.kind === 'device'}
       {#if store.openThread}
         {#key store.threadKey(store.openThread.id)}<DeviceSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
+    {:else if active?.kind === 'window'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<WindowSurface {store} threadId={store.openThread.id} />{/key}
       {/if}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
@@ -541,11 +587,17 @@
     overflow-y: hidden;
     scrollbar-width: none;
     scroll-behavior: smooth;
+    /* A tab brought into view clears the end fade too, not only the edge. */
+    scroll-padding-inline: 28px;
   }
 
   .tabs::-webkit-scrollbar {
     display: none;
   }
+
+  .tabs.hidden-start { mask-image: linear-gradient(to right, transparent, black 24px); }
+  .tabs.hidden-end { mask-image: linear-gradient(to left, transparent, black 24px); }
+  .tabs.hidden-start.hidden-end { mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent); }
 
   .tab {
     display: flex;
@@ -618,6 +670,11 @@
 
   .cross {
     display: none;
+  }
+
+  /* Flex, not inline: an inline span set the icon on the text's baseline, 2.5 px above the label's centre. */
+  .glyph {
+    display: inline-flex;
   }
 
   .glyph,
@@ -723,6 +780,8 @@
   }
 
   @media (max-width: 720px) {
+    .strip button.small.icon.panel-close { order: -1; width: auto; padding: 0 8px; gap: 6px; }
+
     .panel,
     .panel.maximized {
       position: fixed;
@@ -730,10 +789,17 @@
       width: auto;
       min-width: 0;
       background: var(--color-surface);
-      box-shadow: none;
+      box-shadow: var(--shadow-screen);
       /* The sheet covers the whole screen, the status bar and the home indicator included. */
       box-sizing: border-box;
       padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      /* A screen of its own: it slides in over the conversation and back out, opaque all the way, as the conversation does over the list. */
+      animation: screen-in var(--dur-3) var(--ease-slide);
+    }
+
+    .panel.closing,
+    .panel.maximized.closing {
+      animation: screen-out var(--dur-3) var(--ease-slide);
     }
 
     .sheet-scrim {

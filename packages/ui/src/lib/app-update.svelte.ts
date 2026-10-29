@@ -1,5 +1,6 @@
 import { errorText } from './errors';
 import { strings } from './strings';
+import { updateStale } from './update-freshness';
 
 export type UpdateChannel = 'stable' | 'nightly';
 
@@ -33,6 +34,11 @@ export interface AppUpdateBackend {
   check(channel: UpdateChannel): Promise<UpdateSnapshot>;
   download(): Promise<UpdateSnapshot>;
   install(): Promise<void>;
+  /**
+   * The automatic install: only while the window is in the tray and the core
+   * grants an idle stop. False when it is not the moment; the release stays ready.
+   */
+  installQuietly?(): Promise<boolean>;
   cancelInstall?(): Promise<boolean>;
   listen(handler: (snapshot: UpdateSnapshot) => void): Promise<() => void>;
 }
@@ -91,6 +97,7 @@ function tauriBackend(): AppUpdateBackend {
     check: (channel) => invoke<UpdateSnapshot>('app_update_check', { channel }),
     download: () => invoke<UpdateSnapshot>('app_update_download'),
     install: () => invoke<void>('app_update_install'),
+    installQuietly: () => invoke<boolean>('app_update_install_quietly'),
     cancelInstall: () => invoke<boolean>('app_update_cancel_install'),
     listen: async (handler) => {
       const { listen } = await import('@tauri-apps/api/event');
@@ -124,6 +131,11 @@ function testBackend(fixture: AppUpdateTestFixture): AppUpdateBackend {
       } else {
         publish({ ...current, phase: 'installing', error: null });
       }
+    },
+    installQuietly: async () => {
+      if (fixture.waitForIdle) return false;
+      publish({ ...current, phase: 'installing', error: null });
+      return true;
     },
     cancelInstall: async () => {
       if (current.phase !== 'waiting') return false;
@@ -180,6 +192,8 @@ export class AppUpdater {
   snapshot = $state.raw<UpdateSnapshot>({ ...idleSnapshot });
   lastCheckedAt = $state<number | null>(null);
   cancelling = $state(false);
+  /** This computer's `autoInstallUpdates`, kept current by App: the timer's release installs by itself. */
+  autoInstall = $state(false);
   #dismissedUpdate = $state<string | null>(readDismissedUpdate());
 
   #backend: AppUpdateBackend;
@@ -277,6 +291,16 @@ export class AppUpdater {
     this.#pump(this.#generation);
   }
 
+  /**
+   * The window is shown again: checks now when the last check is stale,
+   * rather than waiting up to six hours for the timer. Before the first
+   * check the startup timer still decides.
+   */
+  checkIfStale(now = Date.now()): void {
+    if (!this.#started || this.#firstCheck !== null || this.lastCheckedAt === null || !updateStale(this.lastCheckedAt, now)) return;
+    this.#scheduledCheck();
+  }
+
   download(): void {
     if (!this.snapshot.supported || this.snapshot.phase !== 'available') return;
     this.#downloadRequested = true;
@@ -357,8 +381,39 @@ export class AppUpdater {
 
   #scheduledCheck(): void {
     if (!this.snapshot.supported) return;
+    // A release already found, or kept ready by a busy machine, is tried again on each tick.
+    if (this.autoInstall && ['available', 'ready'].includes(this.snapshot.phase)) {
+      void this.installByItself();
+      return;
+    }
     if (['checking', 'downloading', 'ready', 'waiting', 'installing'].includes(this.snapshot.phase)) return;
     this.check(this.snapshot.channel);
+    if (this.autoInstall) void this.installByItself();
+  }
+
+  /**
+   * With `autoInstall`, what the timer does after its check: downloads the
+   * release found and installs it quietly. Nothing happens unless the window
+   * is in the tray and the core is idle; the next tick tries again. Resolves
+   * whether the install started.
+   */
+  async installByItself(): Promise<boolean> {
+    const generation = this.#generation;
+    const still = () => this.autoInstall && generation === this.#generation;
+    await this.settled();
+    if (!still() || !['available', 'ready'].includes(this.snapshot.phase)) return false;
+    if (!await this.prepare() || !still() || !this.ready || this.#active || !this.#backend.installQuietly) return false;
+    let started = false;
+    const active = this.#backend.installQuietly()
+      .then((value) => { started = value; }, (error) => this.#fail(error, generation))
+      .finally(() => {
+        if (generation !== this.#generation) return;
+        this.#active = null;
+        this.#pump(generation);
+      });
+    this.#active = active;
+    await active;
+    return started;
   }
 
   /**

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, LoaderCircle, Mic, MicOff, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import type { PermissionMode, ProviderSummary } from '@boite/contracts';
+  import { effectiveCompaction, type PermissionMode, type ProviderSummary } from '@boite/contracts';
   import { formatTokens, providerName } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
@@ -21,19 +21,26 @@
   import { keepFocus } from '../lib/focus';
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
+  import type { ComposerTarget } from '../lib/composer-target';
+  import { desktopSettings } from '../lib/settings-tabs';
 
   /**
    * The row under the composer's box: the model, effort, worktree and mode
    * chips (folded into Options on a phone), then stop, attach, dictation and
    * send. A pick on a thread is saved at once, after the switch warnings; on a
    * draft the whole choice is remembered. `choice`, `picking` and `dictating`
-   * are the composer's, bound here.
+   * are the composer's, bound here. An agent's box (`target`) keeps stop,
+   * attach, dictation and send; its model chips save the agent's own setting,
+   * and a group's box shows its recipients in their place.
    */
   let {
     store,
     key,
+    target = null,
+    bot = null,
     provider,
     canSend,
+    waiting = false,
     answering = false,
     sendLabel = strings.composer.send,
     choice = $bindable(),
@@ -47,8 +54,13 @@
     store: Store;
     /** The open thread's id, or the draft's stash key. */
     key: string;
+    target?: ComposerTarget | null;
+    /** The persistent agent this box writes to, by name: its model, effort and mode are its settings, so the bar shows no chips. */
+    bot?: string | null;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    /** Send was pressed while files were still being read: it goes once they are ready. */
+    waiting?: boolean;
     answering?: boolean;
     /** What Send does, when it answers a question rather than sending a message. */
     sendLabel?: string;
@@ -64,11 +76,11 @@
   let picker = $state<HTMLInputElement | undefined>(undefined);
   let bar = $state<HTMLDivElement | undefined>(undefined);
 
-  let bound = $derived(store.openThread !== null);
+  let bound = $derived(!target && store.openThread !== null);
   // Keep the stored visibility preference and reveal a nearly full context.
-  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context, store.settings ? effectiveCompaction(store.settings, store.openThread).autoCompact : null) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
-  let canAttach = $derived(provider !== null && provider !== undefined);
+  let canAttach = $derived(!!target || (provider !== null && provider !== undefined));
 
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
@@ -84,7 +96,7 @@
   });
   /** The open thread's provider was turned off in Providers: the core refuses its next turn. */
   let providerOff = $derived.by(() => {
-    const entry = store.openThread ? store.providerOf(store.openThread.providerId) : null;
+    const entry = !target && store.openThread ? store.providerOf(store.openThread.providerId) : null;
     return entry && !store.providerOn(entry.id) ? entry : null;
   });
   /**
@@ -93,12 +105,12 @@
    * nowhere, and the sentence behind it is the one a send would answer with.
    */
   const phoneWidth = new MediaQuery('(max-width: 720px)');
-  let providersReachable = $derived(store.owner && (!phoneWidth.current || window.__TAURI_INTERNALS__ !== undefined));
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   /**
    * The thread names an account that was removed and its agent has no other
    * account to move to on the next send: it sends again once another one is picked.
    */
-  let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null
+  let accountRemoved = $derived(!target && store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null
     && store.usableAccountOf(store.openThread.providerId, store.openThread.accountId) === null);
   let modeItems = $derived(
     modes.map((mode) => ({
@@ -114,13 +126,14 @@
   // folder the core found a `.git` in. No answer yet, or an older core that
   // never gives one, is no repository: a switch the core would refuse is noise.
   let draftRepository = $derived(
-    work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository === true : false
+    !target && work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository === true : false
   );
 
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
-  let speedOptions = $derived(speedControl(choice ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
+  // An agent keeps no speed of its own: its chips offer none.
+  let speedOptions = $derived(speedControl(choice && !target ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
   let speeds = $derived(speedOptions.speeds);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
   /** The model has a scale but no default: its agent picks the level until the user does. */
@@ -140,6 +153,14 @@
   /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
   async function pick(patch: PickPatch) {
     if (!choice || picking) return;
+    if (target?.selection) {
+      // Another model runs on its own scale, at its default level until one is picked.
+      const changedModel = patch.model !== undefined || patch.accountId !== undefined;
+      const next = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort };
+      picking = true;
+      try { await target.selection.save(next); } finally { picking = false; }
+      return;
+    }
     const thread = store.openThread;
 
     if (thread) {
@@ -185,8 +206,8 @@
     }
 
     // Another model runs on its own scale, so the effort goes back to that model's default.
-    const target = { ...choice, ...patch };
-    choice = { ...target, effort: store.defaultEffortOf(target.providerId, target.accountId, target.model), speed: null };
+    const picked = { ...choice, ...patch };
+    choice = { ...picked, effort: store.defaultEffortOf(picked.providerId, picked.accountId, picked.model), speed: null };
     store.remember(choice);
   }
 
@@ -197,6 +218,11 @@
   function pickMode(id: string) {
     const mode = id as PermissionMode;
     if (!choice || picking) return;
+    if (target?.selection) {
+      picking = true;
+      void target.selection.save({ ...choice, permissionMode: mode }).finally(() => { picking = false; });
+      return;
+    }
     choice = { ...choice, permissionMode: mode };
     if (bound) void store.setPermissionMode(mode);
     else store.remember(choice);
@@ -221,8 +247,17 @@
 
 <svelte:window onstorage={(event) => { if (event.key === VOICE_STORAGE_KEY || event.key === null) voice.load(); }} />
 
-<div class="bar" class:answering bind:this={bar}>
-  {#if !answering}
+<div class="bar" class:answering class:direct={!!target} bind:this={bar}>
+  {#if target && !target.selection}
+  <div class="chips">{#if target.chips}{@render target.chips()}{/if}</div>
+  {:else if bot !== null && !answering}
+  <!-- A bot's box: the phone's options keep the attachment, nothing else to pick here. -->
+  {#key `${key}:${store.draft?.projectId ?? ''}`}
+  <ComposerOptions busy={picking} levels={[]} effort={null} agentDefault={false} speeds={[]} speed={null} modes={[]} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => {}} />
+  {/key}
+  <!-- The chips' room, empty, so the tools keep their place at the end of the row on both widths. -->
+  <div class="chips" aria-hidden="true"></div>
+  {:else if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {agentDefault} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
   {/key}
@@ -249,7 +284,7 @@
     {/if}
 
     <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-    {#if store.draft && draftRepository}
+    {#if !target && store.draft && draftRepository}
       <button
         type="button"
         class="chip worktree"
@@ -279,8 +314,8 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
   {/if}
-  {#if store.busy}
-    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => void store.stop()}>
+  {#if target ? target.busy && target.stop : store.busy}
+    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => { if (target) target.stop?.(); else void store.stop(); }}>
       <Square size={12} strokeWidth={2.5} />
     </button>
   {/if}
@@ -325,13 +360,14 @@
     type="button"
     class="primary icon send"
     data-testid="composer-send"
-    title={sendLabel}
-    aria-label={sendLabel}
+    data-waiting={waiting || undefined}
+    title={waiting ? strings.composer.sendWhenLoaded : sendLabel}
+    aria-label={waiting ? strings.composer.sendWhenLoaded : sendLabel}
     disabled={!canSend}
     onmousedown={keepFocus}
     onclick={() => onsubmit()}
   >
-    <ArrowUp size={16} strokeWidth={2.25} />
+    {#if waiting}<LoaderCircle size={16} strokeWidth={2.25} class="spinner" />{:else}<ArrowUp size={16} strokeWidth={2.25} />{/if}
     {#if answering}<span class="ui-label">{sendLabel}</span>{/if}
   </button>
 </div>
@@ -356,9 +392,11 @@
     color: var(--color-foreground);
   }
 
+  /* Every child is one control high, so the end is the centre on one row; on a
+     composer too narrow for one, the tools sit on the chips' last row. */
   .bar {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     padding: var(--composer-bar-padding, 4px 8px 8px 10px);
   }
@@ -424,14 +462,29 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  .send :global(.spinner) { animation: spin 1s linear infinite var(--loops); }
+  @media (prefers-reduced-motion: reduce) { .send :global(.spinner) { animation: none; } }
   /* No chips to fill the row: the tools sit beside the send button on the right. */
   .answering { justify-content: flex-end; }
   .answering .stop, .answering .send { margin-left: 0; }
   .answering .send { width: auto; padding-inline: 12px; border-radius: var(--radius-md); }
-  .answering .attach { display: inline-flex; }
+  .answering .attach, .direct .attach { display: inline-flex; }
 
   .stop {
     color: var(--color-foreground);
+  }
+
+  /* A composer the side panel narrowed keeps its tools on one row: the account
+     goes first, then the effort, worktree and mode chips keep only their icons and
+     tooltips. */
+  @container composer (max-width: 600px) {
+    .chips :global(.picker) { min-width: 0; }
+    .chips :global(.picker > .trigger .account-name) { display: none; }
+  }
+  @container composer (max-width: 480px) {
+    .bar { gap: 6px; }
+    .desktop-options :global(.trigger > .ui-label), .desktop-options .worktree > .ui-label { display: none; }
+    .desktop-options :global(.trigger), .desktop-options .worktree { padding: 0 9px; }
   }
 
   @media (max-width: 720px) {

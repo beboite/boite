@@ -10,15 +10,15 @@
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
-import type { TraceCapability } from '@boite/contracts';
+import { KILL_EXIT_CODE, type TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
-import { workerEntry } from './worker-entry.ts';
+import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { StartupPriority } from './startup-priority.ts';
-import {
-  applyCpuCap, applyMemoryLimit, CLASS_CPU_RATE_CONTROL, CLASS_EXTENDED_LIMIT,
-  EXTENDED_LIMIT_SIZE, OFF_JOB_MEMORY_LIMIT, OFF_LIMIT_FLAGS, OFF_PRIORITY_CLASS,
-} from './job-limits.ts';
+import { processEventDiagnostic } from '../../process-event-diagnostics.ts';
+import { listJobPids } from './jobs-packets.ts';
+import { applyCpuCap, applyMemoryLimit, cpuRateOfJob, memoryLimitOfJob as readMemoryLimit,
+  OFF_TOTAL_USER_TIME, OFF_TOTAL_KERNEL_TIME, OFF_ACTIVE_PROCESSES, ACCOUNTING_SIZE } from './job-limits.ts';
 import {
   commandLineOf,
   consoleHost,
@@ -26,9 +26,11 @@ import {
   createdAtOfPid,
   creationIdentityOf,
   exitCodeOf,
+  exitStatusOf,
   imageNameOf,
   ioBytesOf,
   parentPidOf,
+  peakMemoryOf,
   startedAs,
   whenCommandLineReads,
   workingSetOf,
@@ -41,7 +43,6 @@ import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventS
 const BELOW_NORMAL_PRIORITY_CLASS = 0x4000;
 const NORMAL_PRIORITY_CLASS = 0x20;
 
-const CLASS_BASIC_PROCESS_ID_LIST = 3;
 const CLASS_ASSOCIATE_COMPLETION_PORT = 7;
 const CLASS_BASIC_AND_IO_ACCOUNTING = 8;
 
@@ -61,16 +62,6 @@ const PROCESS_QUERY_INFORMATION = 0x400;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const STILL_ACTIVE = 259;
-const KILL_EXIT_CODE = 9;
-
-/** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
-const OFF_TOTAL_USER_TIME = 0;
-/** ...TotalKernelTime. */
-const OFF_TOTAL_KERNEL_TIME = 8;
-/** ...ActiveProcesses. */
-const OFF_ACTIVE_PROCESSES = 40;
-/** The accounting struct plus its IO_COUNTERS tail. */
-const ACCOUNTING_SIZE = 96;
 
 const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
 const INFINITE = 0xffffffff;
@@ -298,22 +289,26 @@ export function setProcessLimits(next: ProcessLimits): void {
 
 /** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
 export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
-  const api = native;
-  if (api === null || globalJob === 0) return null;
-  const buffer = new Uint8Array(8);
-  if (!api.queryJobInfo(globalJob, CLASS_CPU_RATE_CONTROL, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(0, true), rate: view.getUint32(4, true) };
+  return native === null || globalJob === 0 ? null : cpuRateOfJob(native, globalJob);
 }
 
 /** The kernel's memory limit and flags. Null selects the global job; read by tests only. */
 export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number; priority: number } | null {
   const handle = threadId === null ? globalJob : threadJobs.get(threadId)?.handle;
-  if (native === null || !handle) return null;
-  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
-  if (!native.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)), priority: view.getUint32(OFF_PRIORITY_CLASS, true) };
+  return native === null || !handle ? null : readMemoryLimit(native, handle);
+}
+
+/** Publication must observe native membership before delayed completion-port callbacks. */
+export function threadJobHasProcesses(threadId: string): boolean {
+  const job = threadJobs.get(threadId);
+  if (job === undefined) return false;
+  const api = ensureNative();
+  const members = api === null ? null : listJobPids(api, job.handle);
+  processEventDiagnostic('jobs.publication-membership', {threadId, members: members?.size ?? null, capturedPids: [...job.pids].filter(pid => tracked.get(pid)?.threadId === threadId).join(','),
+    pids: members === null ? null : [...members].join(','), ignoredPids: members === null ? null : [...members].filter(pid => ignored.has(pid)).join(',')});
+  if (members === null || members.size > 0) return true;
+  for (const pid of [...job.pids]) onProcessExited(threadId, pid);
+  return false;
 }
 
 export function jobsCapability(): TraceCapability {
@@ -461,15 +456,27 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
 
   let memoryBytes = 0;
   const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
+  const ended: [number, TrackedProcess][] = [];
   for (const pid of job.pids) {
     const entry = tracked.get(pid);
     if (entry === undefined || entry.threadId !== threadId) continue;
+    const status = exitStatusOf(api, entry.handle);
+    if (process.env.BOITE_DIAGNOSE_JOB_EVENTS === '1') processEventDiagnostic('jobs.sample-held', {threadId, pid,
+      startedAt: entry.identity?.startedAt ?? null, incarnation: entry.identity?.incarnation ?? null,
+      ...status, activeProcesses: view.getUint32(OFF_ACTIVE_PROCESSES, true)});
+    // A job nested in this one and ended by TerminateJobObject (a test suite's
+    // core ending its CLIs) posts no exit here, and the port promises none anyway.
+    if (status.read && status.code !== STILL_ACTIVE) { ended.push([pid, entry]); continue; }
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
     workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
+  // Reported once the registry's sample, which reads its entries, is done. A late packet matches no live record.
+  if (ended.length > 0) queueMicrotask(() => {
+    for (const [pid, entry] of ended) if (tracked.get(pid)?.handle === entry.handle) onProcessExited(threadId, pid);
+  });
 
   return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
     cpuMeasured, memoryMeasured: workingSets.length > 0 };
@@ -557,7 +564,7 @@ function ensureWorker(port: number): void {
     };
     // No timeout: the Worker sleeps in the kernel until a packet comes, and
     // teardown posts one of its own to wake it.
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY };
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE, inspectAccess: INSPECT_ACCESS, globalKey: GLOBAL_JOB_KEY, workerId: crypto.randomUUID() };
     created.postMessage(start);
     // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
     (created as { unref?: () => void }).unref?.();
@@ -567,19 +574,13 @@ function ensureWorker(port: number): void {
   }
 }
 
-function describeWorkerError(event: unknown): string {
-  if (event instanceof Error) return event.message;
-  if (typeof event === 'object' && event !== null && 'message' in event) {
-    return String((event as { message: unknown }).message);
-  }
-  return 'worker error';
-}
 
 function failWorker(reason: string): void {
   if (workerFailure !== null) return;
   workerFailure = reason;
   worker = null;
   startPolling();
+  processEventDiagnostic('main.polling-started', {workerFailed: true, armed: pollTimer !== null});
 }
 
 function cancelIdle(): void {
@@ -646,6 +647,8 @@ function retireWorker(): void {
 function onWorkerMessage(message: JobsWorkerMessage): void {
   switch (message.kind) {
     case 'packet':
+      processEventDiagnostic('main.packet', {workerId: message.workerId ?? null, sequence: message.sequence ?? null, message: message.message,
+        key: message.key, pid: message.pid, captured: message.handle !== 0, threadId: threadsByKey.get(message.key) ?? null});
       onJobPacket(message.message, message.key, message.pid, message.handle);
       return;
     case 'failed':
@@ -713,19 +716,6 @@ function startPolling(): void {
   pollTimer = timer;
 }
 
-function listJobPids(api: Native, job: number): Set<number> | null {
-  const capacity = 256;
-  const buffer = new Uint8Array(8 + capacity * 8);
-  if (!api.queryJobInfo(job, CLASS_BASIC_PROCESS_ID_LIST, buffer)) return null;
-  const view = new DataView(buffer.buffer);
-  const count = Math.min(view.getUint32(4, true), capacity);
-  const pids = new Set<number>();
-  for (let index = 0; index < count; index += 1) pids.add(Number(view.getBigUint64(8 + index * 8, true)));
-  return pids;
-}
-
-// -- per process reads ------------------------------------------------------
-
 /**
  * `opened` is the handle the Worker took the moment the packet came, 0 when it
  * had none. Opening it here instead waits for this thread's event loop, and a
@@ -734,7 +724,7 @@ function listJobPids(api: Native, job: number): Set<number> | null {
  */
 function onProcessStarted(threadId: string, pid: number, opened = 0): void {
   const api = ensureNative();
-  if (pid <= 0 || tracked.has(pid) || ignored.has(pid) || api === null) {
+  if (pid <= 0 || tracked.has(pid) || api === null) {
     if (opened !== 0) api?.close(opened);
     return;
   }
@@ -747,25 +737,37 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     // child killed within a millisecond of its start: there is no name, no
     // parent and no true start time to record. Its exit is swallowed the same
     // way as a console host's; its CPU stays in the job totals.
-    if (api.lastError() === ERROR_INVALID_PARAMETER) {
+    const error = api.lastError();
+    processEventDiagnostic('jobs.start-unopened', {threadId, pid, error});
+    if (error === ERROR_INVALID_PARAMETER) {
       ignored.add(pid);
       return;
     }
     sink?.started(threadId, pid, { exe: 'unknown', commandLine: null, parentPid: null });
     return;
   }
+  // A new start can reuse an ignored PID whose exit packet never arrived.
+  // Classify its captured handle again; the earlier process owned no handle here.
+  ignored.delete(pid);
   const exe = imageNameOf(api, handle);
   const commandLine = commandLineOf(api, handle);
   // A console host stays out of the trace, and so does its exit.
-  const ignore = (): void => { tracked.delete(pid); ignored.add(pid); api.close(handle); };
+  const ignore = (): void => {
+    processEventDiagnostic('jobs.start-console', {threadId, pid});
+    tracked.delete(pid); ignored.add(pid); api.close(handle);
+  };
   if (consoleHost(exe, commandLine)) return ignore();
   const identity = creationIdentityOf(api, handle);
+  processEventDiagnostic('jobs.start-captured', {threadId, pid, startedAt: identity?.startedAt ?? null,
+    incarnation: identity?.incarnation ?? null, awaitingCommandLine: commandLine === null && api.hasNt});
   tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   const record = { parentPid: parentPidOf(api, handle), ...identity };
   const waiting = whenCommandLineReads(api, handle, commandLine, (line) => {
     awaitingCommandLine.delete(pid);
     const name = startedAs(api, handle, exe, line);
     if (name === null) return ignore();
+    processEventDiagnostic('jobs.start-emitted', {threadId, pid, startedAt: identity?.startedAt ?? null,
+      incarnation: identity?.incarnation ?? null});
     sink?.started(threadId, pid, { ...record, exe: name, commandLine: line });
   });
   if (waiting !== null) awaitingCommandLine.set(pid, waiting);
@@ -780,6 +782,7 @@ function onProcessExited(threadId: string, pid: number): void {
 
 function reportExit(threadId: string, pid: number): void {
   const entry = tracked.get(pid);
+  processEventDiagnostic('jobs.exit-received', {threadId, pid, owner: entry?.threadId ?? null, ignored: ignored.has(pid)});
   if (entry !== undefined && entry.threadId !== threadId) return;
   const api = ensureNative();
   if (entry !== undefined && api !== null) {
@@ -787,11 +790,15 @@ function reportExit(threadId: string, pid: number): void {
     // A late pid-only exit/empty-job packet cannot retire a replacement whose
     // captured handle proves it is still running. Failed reads retain the
     // notification path, with the already captured creation identity.
-    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) return;
+    const read = api.exitCode(entry.handle, code);
+    processEventDiagnostic('jobs.exit-read', {threadId, pid, read, code: read ? code[0]! : null,
+      error: read ? 0 : api.lastError(), startedAt: entry.identity?.startedAt ?? null, incarnation: entry.identity?.incarnation ?? null});
+    if (read && code[0] === STILL_ACTIVE) return;
   }
   threadJobs.get(threadId)?.pids.delete(pid);
   if (ignored.delete(pid)) return;
   if (entry === undefined || api === null) {
+    processEventDiagnostic('jobs.exit-pid-only', {threadId, pid});
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
@@ -807,15 +814,10 @@ function reportExit(threadId: string, pid: number): void {
     ioBytes: ioBytesOf(api, entry.handle),
   };
   api.close(entry.handle);
+  processEventDiagnostic('jobs.exit-emitted', {threadId, pid, startedAt: exit.startedAt ?? null,
+    incarnation: exit.incarnation ?? null, code: exit.exitCode});
   sink?.exited(threadId, pid, exit);
 }
-
-function peakMemoryOf(api: Native, entry: TrackedProcess): number | null {
-  const memory = workingSetOf(api, entry.handle);
-  const peak = Math.max(memory?.peak ?? 0, entry.peakMemoryBytes);
-  return peak > 0 ? peak : null;
-}
-
 
 // -- teardown ---------------------------------------------------------------
 

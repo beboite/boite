@@ -10,6 +10,8 @@
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, sectionRows, type PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import { workspace, type Machine } from '../lib/workspace.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -29,6 +31,7 @@
   let previous: HTMLElement | null = null;
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
   const now = $derived(minuteClock.now);
 
   $effect(() => {
@@ -101,7 +104,7 @@
     return { items, places };
   });
 
-  let commandItems = $derived.by((): PaletteItem[] => appCommands(store, inShell));
+  let commandItems = $derived.by((): PaletteItem[] => appCommands(store, !desktopSettings(phoneWidth.current)));
 
   const snapshot = { rows: [] as PaletteItem[] };
   /** The ranked rows, a project's threads, the projects and the commands mixed until `sections` cuts them. */
@@ -147,9 +150,8 @@
   function pick(item: PaletteItem) {
     close();
     if (item.kind === 'thread') {
-      store.showChat();
       if (workspace.machines.length) void workspace.openNotification(item.id.slice('thread:'.length));
-      else void store.open(item.id.slice('thread:'.length));
+      else { store.showChat(); void store.open(item.id.slice('thread:'.length)); }
       return;
     }
     if (item.kind === 'project') {
@@ -238,7 +240,7 @@
           spellcheck="false"
           data-testid="palette-input"
         />
-        <span class="kbd ui-label">Esc</span>
+        <span class="kbd ui-label-box"><span class="ui-label">Esc</span></span>
       </label>
       <div class="list" role="listbox" bind:this={list} data-testid="palette-list">
         {#each sections as section, at (section.id)}
@@ -280,7 +282,7 @@
                 {:else if item.kind === 'project' && place}
                   <span class="meta ui-label">{#if several}<MachineIcon icon={place.machine.icon} os={place.machine.store.core?.os} size={12} />{place.machine.label}{' · '}{/if}{strings.palette.newThread}</span>
                 {:else if item.hint}
-                  <span class="kbd ui-label">{item.hint}</span>
+                  <span class="kbd ui-label-box"><span class="ui-label">{item.hint}</span></span>
                 {/if}
                 <span class="enter" aria-hidden="true"><CornerDownLeft size={13} strokeWidth={2} /></span>
               </button>
@@ -291,7 +293,8 @@
           <p class="empty subtle">{strings.palette.empty}</p>
         {/if}
       </div>
-      <div class="foot subtle">{strings.palette.hint}</div>
+      <!-- With nothing to open, Enter does nothing: the foot names only the way out. -->
+      <div class="foot subtle">{rows.length === 0 ? strings.palette.hintEmpty : strings.palette.hint}</div>
     </div>
   </div>
 {/if}

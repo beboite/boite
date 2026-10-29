@@ -4,7 +4,8 @@ import type { ProviderDescriptor } from './index.ts';
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 type Refusal = { message: string; data?: Record<string, unknown> };
 function refused(message: string, data?: Record<string, unknown>): Refusal { return { message, ...(data ? { data } : {}) }; }
-function decodedBytes(data: string): number {
+/** The bytes a base64 string decodes to. */
+export function decodedBytes(data: string): number {
   const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
   return Math.floor(data.length * 3 / 4) - padding;
 }

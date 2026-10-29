@@ -9,8 +9,9 @@ import { mobileAction } from './lib/mobile.ts';
 import { ensureProductionUi } from './lib/prod-ui.ts';
 
 // The whole path on a real core: the core starts its own headless Chromium for
-// the conversation, the owner's desktop and a paired phone show it covered,
-// then live, and a tap on the frame reaches the real page.
+// the conversation. The desktop opens its viewer automatically; a paired
+// phone chooses when to show it. Both start covered, then a tap on the live
+// frame reaches the real page. Returning to chat leaves the agent's page alive.
 const id = (name: string) => `[data-testid="${name}"]`;
 const artifacts = join(import.meta.dir, '.artifacts');
 const real = findChromium().path ? test : test.skip;
@@ -73,8 +74,15 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
       await page.waitFor(`document.querySelector('${row}')`);
       await page.click(row);
       await Bun.sleep(1000);
-      // The agent opens a page while the conversation is on screen: the panel comes forward, covered.
+      // The agent opens a page while the conversation is on screen. Only the
+      // desktop brings the panel forward; the phone chooses its Browser button.
       const { tabId } = await owner.call('browser.command', { threadId: thread.id, action: { kind: 'open', url: site.url.href } });
+      if (phone) {
+        await page.settleAnimations();
+        expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
+        await capture(page, 'agent-browser-core-chat-phone.png');
+        await page.click(id('phone-browser-toggle'));
+      }
       await page.waitFor(`document.querySelector('${id('agent-browser-cover-text')}')?.getBoundingClientRect().width > 0`, 20_000);
       expect(await page.text(id('agent-browser-cover-text'))).toMatch(/^This agent controls a browser on .+/);
       await page.waitFor(`document.querySelector('${id('agent-browser-cover')}').textContent.includes('Counter')`);
@@ -91,7 +99,31 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
       await Bun.sleep(1500);
       await capture(page, `agent-browser-core-live-${phone ? 'phone' : 'desktop'}.png`);
       // The phone keeps its text field and keys under the page.
-      if (phone) { expect(await page.evaluate<number>(`document.querySelectorAll('${id('remote-browser-text')}, ${id('remote-browser-copy')}').length`)).toBe(2); continue; }
+      if (phone) {
+        expect(await page.evaluate<number>(`document.querySelectorAll('${id('remote-browser-text')}, ${id('remote-browser-copy')}').length`)).toBe(2);
+        await page.click(id('panel-close'));
+        await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
+        expect(await button(tabId)).not.toBe(before);
+        // The CLI's browse path also leaves the phone in chat. The owner can
+        // still evaluate the original page after the phone reopens and hides it.
+        await owner.call('panel.open', { threadId: thread.id, surface: { kind: 'browser', url: site.url.href } });
+        await page.settleAnimations();
+        expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
+        await page.click(id('phone-browser-toggle'));
+        await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 3`);
+        // Both viewers may fit this new tab at once. Either viewport is valid;
+        // the phone must have a decoded, usable frame and drive the new page.
+        await page.waitFor(`(() => { const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && image.naturalWidth > 100 && !image.closest('button').disabled; })()`, 20_000);
+        const nextBefore = await button();
+        await tapFrame(page, true);
+        const nextDeadline = Date.now() + 10_000;
+        while (await button() === nextBefore && Date.now() < nextDeadline) await Bun.sleep(100);
+        expect(await button()).not.toBe(nextBefore);
+        await page.evaluate('history.back()');
+        await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
+        expect(await button(tabId)).not.toBe(before);
+        continue;
+      }
       // A computer has no text field under the page: a click, then its own keyboard and clipboard.
       expect(await page.evaluate<number>(`document.querySelectorAll('${id('remote-browser-text')}').length`)).toBe(0);
       const remote = async (expression: string) => (await owner.call('browser.command', { threadId: thread.id, tabId, action: { kind: 'evaluate', expression } })).value;

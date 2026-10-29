@@ -4,11 +4,11 @@ import { join } from 'node:path';
 import type { TelemetryState, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams as invalid } from './errors.ts';
-import { enhancedDetails, publicOsVersion, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
+import { enhancedDetails, publicOsVersion, subagentDetails, type EnhancedDetails } from '../../contracts/src/telemetry.ts';
 
-const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
+const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished', 'subagent_started'] as const;
 type EventName = typeof EVENTS[number];
-const PROVIDERS = ['claude', 'codex', 'opencode', 'opencode-v2', 'pi', 'grok', 'antigravity', 'antigravity-cli', 'muse'];
+const PROVIDERS = ['claude', 'codex', 'opencode', 'opencode-v2', 'pi', 'grok', 'antigravity', 'muse'];
 const MODES = ['off', 'basic', 'enhanced'] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTERVAL = 300_000;
@@ -67,6 +67,12 @@ export function osVersion(): string {
   return detectedOsVersion;
 }
 
+interface ChoiceReceipt {
+  mode: TelemetryState['mode'];
+  uuid: string;
+  pending: boolean;
+}
+
 interface Consent {
   mode: TelemetryState['mode'];
   anonymousId: string;
@@ -74,6 +80,7 @@ interface Consent {
   forget: string[];
   firstRun: boolean;
   pingDay: string;
+  choice?: ChoiceReceipt;
 }
 export interface TelemetryEvent extends EnhancedDetails {
   name: EventName;
@@ -97,7 +104,7 @@ export function telemetryEvent(name: EventName, version: string, fields: Record<
     arch: ['x64', 'arm64', 'ia32'].includes(process.arch) ? process.arch : 'other',
     client_ts: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };
-  if (name === 'thread_spawned' || name === 'turn_finished') {
+  if (name === 'thread_spawned' || name === 'turn_finished' || name === 'subagent_started') {
     event.provider = PROVIDERS.includes(String(fields.provider)) ? String(fields.provider) : 'other';
   }
   if (name === 'turn_finished') {
@@ -118,6 +125,8 @@ export class Telemetry {
   private inFlight: Promise<void> | null = null;
   private controller: AbortController | null = null;
   private revision = 0;
+  private uploadRevision = 0;
+  private launchPending = false;
   private failures = 0;
   private closed = false;
   private closing = false;
@@ -145,7 +154,9 @@ export class Telemetry {
             (saved.installId !== null && !UUID.test(saved.installId)) ||
             !Array.isArray(saved.forget) || saved.forget.some(id => !UUID.test(id)) ||
             typeof saved.firstRun !== 'boolean' || typeof saved.pingDay !== 'string' ||
-            (saved.mode === 'enhanced' && !saved.installId)) throw invalid('telemetry.json: expected valid consent and UUID identifiers');
+            (saved.mode === 'enhanced' && !saved.installId) ||
+            (saved.choice !== undefined && (!saved.choice || !MODES.includes(saved.choice.mode) ||
+              !UUID.test(saved.choice.uuid) || typeof saved.choice.pending !== 'boolean'))) throw invalid('telemetry.json: expected valid consent and UUID identifiers');
         this.consent = saved;
       } catch {
         // Never overwrite an unreadable deletion ledger with fresh consent.
@@ -155,6 +166,13 @@ export class Telemetry {
     this.unsubscribe = core.bus.onAny((name, payload) => {
       if (name === 'project.added') this.track('project_added');
       if (name === 'thread.created') this.track('thread_spawned', { provider: (payload as { providerId: string }).providerId });
+      if (name === 'turn.started' && this.consent.mode === 'enhanced') {
+        const turn = payload as Turn;
+        const execution = turn.execution;
+        if (execution && execution.operation !== 'compact' && execution.operation !== 'keepalive' && core.journal.getThread(turn.threadId)?.parentThreadId) {
+          this.track('subagent_started', { provider: execution.providerId, model: execution.model, effort: execution.effort, speed: execution.speed });
+        }
+      }
       if (name === 'turn.finished') {
         const turn = payload as Turn;
         this.track('turn_finished', {
@@ -176,28 +194,36 @@ export class Telemetry {
     return { mode: this.consent.mode, configured: !!this.endpoint, pendingDeletion: this.consent.forget.length > 0 };
   }
 
-  configure(mode: TelemetryState['mode']): Promise<TelemetryState> {
+  configure(mode: TelemetryState['mode'], countChoice = false): Promise<TelemetryState> {
     if (!MODES.includes(mode)) return Promise.reject(invalid('mode: expected off, basic or enhanced'));
-    const next = this.mutation.then(async () => {
-      if (mode === this.consent.mode) return this.state();
-      this.revision++;
-      this.queue = [];
-      this.controller?.abort();
-      await this.inFlight;
+    if (typeof countChoice !== 'boolean') return Promise.reject(invalid('countChoice: expected a boolean'));
+    const next = this.mutation.then(() => {
       const old = this.consent;
-      this.consent = { ...old, mode, forget: [...old.forget] };
-      // Events accepted while the aborted upload settled belong to the old consent.
-      this.queue = [];
-      if (old.mode === 'enhanced' && old.installId) {
-        this.consent.forget.push(old.installId);
-        this.consent.installId = null;
+      const changed = mode !== old.mode;
+      // No relay means no consent notice and no choice to report later.
+      const reporting = countChoice && !!this.endpoint;
+      const report = reporting && old.choice?.mode !== mode;
+      if (!changed && !report) return this.state();
+      const updated: Consent = { ...old, mode, forget: [...old.forget] };
+      if (changed) {
+        if (old.mode === 'enhanced' && old.installId) updated.forget.push(old.installId);
+        // An opt-in never revives an identity queued for deletion.
+        updated.installId = mode === 'enhanced' ? crypto.randomUUID() : null;
+        // A selection without reporting supersedes any still-unsent choice.
+        if (!reporting && old.choice?.pending) delete updated.choice;
       }
-      // A fresh opt-in never revives an identity queued for deletion. Uploads
-      // still wait for forgetPending; the user's choice does not have to.
-      if (mode === 'enhanced') this.consent.installId = crypto.randomUUID();
-      try { this.save(); } catch (error) { this.consent = old; throw error; }
+      if (report) updated.choice = { mode, uuid: crypto.randomUUID(), pending: true };
+      // Consent, choice and deletion ledger share one durable atomic write.
+      // Never wait for the network: stale responses check the receipt UUID.
+      this.save(updated);
+      this.consent = updated;
+      if (changed) {
+        this.revision++;
+        this.queue = [];
+        this.controller?.abort();
+        this.launch();
+      }
       this.failures = 0;
-      this.launch();
       this.schedule(20_000);
       return this.state();
     });
@@ -205,13 +231,18 @@ export class Telemetry {
     return next;
   }
 
-  private save(): void {
-    writeFileSync(`${this.file}.tmp`, JSON.stringify(this.consent), { mode: 0o600 });
+  private save(consent = this.consent): void {
+    writeFileSync(`${this.file}.tmp`, JSON.stringify(consent), { mode: 0o600 });
     renameSync(`${this.file}.tmp`, this.file);
   }
 
   private launch(): void {
+    this.launchPending = false;
     if (!this.endpoint || this.consent.mode === 'off') return;
+    if (this.inFlight && this.uploadRevision !== this.revision) {
+      this.launchPending = true;
+      return;
+    }
     if (!this.consent.firstRun) { this.track('first_run'); this.consent.firstRun = true; }
     this.track('app_launched', { duration_ms: Date.now() - this.core.startedAt });
     this.ping();
@@ -228,8 +259,12 @@ export class Telemetry {
 
   track(name: EventName, fields: Record<string, unknown> = {}): void {
     if (this.closed || !this.endpoint || this.consent.mode === 'off' || !EVENTS.includes(name)) return;
+    // An aborted upload may ignore its signal; discard events until it settles.
+    if (this.inFlight && this.uploadRevision !== this.revision) return;
+    if (name === 'subagent_started' && this.consent.mode !== 'enhanced') return;
     const event = telemetryEvent(name, this.core.version, fields);
     if (this.consent.mode === 'enhanced' && name === 'turn_finished') Object.assign(event, enhancedDetails(fields));
+    if (name === 'subagent_started') Object.assign(event, subagentDetails(fields));
     this.queue.push(event);
     if (this.queue.length > 200) this.queue.shift();
   }
@@ -256,12 +291,17 @@ export class Telemetry {
     if (this.inFlight) return this.inFlight;
     if (!this.endpoint || this.closed) return Promise.resolve();
     const revision = this.revision;
+    this.uploadRevision = revision;
     this.controller = new AbortController();
     this.inFlight = (async () => {
       try {
+        // A deletion backlog must never suppress this independent anonymous receipt.
+        let choiceFailed = false;
+        try { await this.reportChoice(); } catch { choiceFailed = true; }
         await this.forgetPending();
         if (this.consent.mode === 'off' || revision !== this.revision) {
-          this.queue = [];
+          if (choiceFailed) throw new Error('telemetry: choice is still pending');
+          this.failures = 0;
           return;
         }
         this.ping();
@@ -276,23 +316,38 @@ export class Telemetry {
             throw error;
           }
         }
+        if (choiceFailed) throw new Error('telemetry: choice is still pending');
         this.failures = 0;
       } catch {
         this.failures++;
       } finally {
         this.controller = null;
         this.inFlight = null;
+        if (this.launchPending) {
+          try { this.launch(); } catch { this.failures++; }
+        }
         this.schedule(Math.min(3_600_000, INTERVAL * 2 ** Math.min(this.failures, 4)));
       }
     })();
     return this.inFlight;
   }
 
+  private async reportChoice(): Promise<void> {
+    const choice = this.consent.choice;
+    if (!choice?.pending) return;
+    await this.post('consent', { mode: choice.mode, receipt_id: choice.uuid });
+    if (this.consent.choice?.uuid !== choice.uuid) return;
+    const updated = { ...this.consent, choice: { ...choice, pending: false } };
+    this.save(updated);
+    this.consent = updated;
+  }
+
   private async forgetPending(): Promise<void> {
     for (const id of [...this.consent.forget]) {
       await this.post('forget', { install_id: id });
-      this.consent.forget = this.consent.forget.filter(value => value !== id);
-      this.save();
+      const updated = { ...this.consent, forget: this.consent.forget.filter(value => value !== id) };
+      this.save(updated);
+      this.consent = updated;
     }
   }
 
@@ -330,7 +385,7 @@ export class Telemetry {
 export function registerTelemetry(core: Core): void {
   // Owner-only by absence from DEVICE_METHODS and AGENT_METHODS.
   core.router.register('telemetry.state', () => core.telemetry.state());
-  core.router.register('telemetry.configure', params => core.telemetry.configure(params.mode));
+  core.router.register('telemetry.configure', params => core.telemetry.configure(params.mode, params.countChoice));
   core.router.register('telemetry.export', () => core.telemetry.export());
   core.router.register('telemetry.retryForget', () => core.telemetry.retryForget());
 }

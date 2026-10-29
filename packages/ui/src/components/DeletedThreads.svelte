@@ -5,6 +5,7 @@
   import { exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import SyncMark from './SyncMark.svelte';
   import InfoTip from './InfoTip.svelte';
 
   let { store, eager = false }: { store: Store; eager?: boolean } = $props();
@@ -72,7 +73,7 @@
   <section class="card" data-testid="deleted-threads">
     <h2>{strings.settings.deleted.heading}</h2>
     <form class="retention" onsubmit={(event) => { event.preventDefault(); void saveRetention(); }}>
-      <label class="ui-label-box" for="{uid}-days"><span class="ui-label">{strings.settings.deleted.retentionLabel}</span><InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
+      <label class="ui-label-box" for="{uid}-days"><span class="ui-label">{strings.settings.deleted.retentionLabel}</span><InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /><SyncMark {store} key="threadDeletionRetentionDays" /></label>
       <div class="retention-actions">
         <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`} data-testid="deleted-retention-days" />
         <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save"><span class="ui-label">{strings.common.save}</span></button>
@@ -109,7 +110,8 @@
 <style>
   ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   .retention { margin-bottom: 16px; }
-  .retention label { display: block; font-size: var(--text-sm); margin-bottom: 6px; }
+  /* As DoneRetentionSetting's label: the "i" stays beside the text instead of dropping under it. */
+  .retention label { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); margin-bottom: 6px; }
   .retention-actions { display: flex; gap: 8px; align-items: center; }
   .retention input { width: 100px; }
   .retention p { margin: 6px 0 0; }

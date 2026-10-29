@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { forgetWhich } from './which.ts';
 import {
   threadActive,
@@ -21,7 +21,6 @@ import { attachVersions, loadVersions, readVersion, versionsSettled } from './ve
 import { programName } from '../threads/provider-process-log.ts';
 import { invalidParams, notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
-import antigravityCliShipped from './shipped/antigravity-cli.json';
 import claudeShipped from './shipped/claude.json';
 import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
@@ -31,6 +30,7 @@ import opencodeV2Shipped from './shipped/opencode-v2.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
 import { detectionLogger, installLogger } from './install-log.ts';
+import { registerLocalCommands } from './local-command.ts';
 
 /**
  * Echo is the fake agent the tests and the bench drive: no CLI, it repeats the
@@ -44,7 +44,6 @@ export function echoEnabled(): boolean {
 
 const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = [
   { file: 'shipped/antigravity.json', raw: antigravityShipped },
-  { file: 'shipped/antigravity-cli.json', raw: antigravityCliShipped },
   { file: 'shipped/claude.json', raw: claudeShipped },
   { file: 'shipped/codex.json', raw: codexShipped },
   { file: 'shipped/grok.json', raw: grokShipped },
@@ -90,9 +89,18 @@ export function summarize(
   const profile = profileFor(entry.descriptor);
   // A provider that is turned off is listed from what is already known: asking its program its version would start it.
   const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
+  const current = installs.currentDir(entry.descriptor.id);
+  // A program found in the managed release counts once that release is whole: an update cut off and not yet settled leaves its files without the record.
+  const inRelease = (path: string): boolean => {
+    const rest = relative(current, path);
+    return rest !== '' && rest !== '..' && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+  };
+  const fromRelease = install !== undefined && profile !== undefined &&
+    (profile.detect.file?.includes('{agentsDir}') === true || (executable !== null && inRelease(executable)));
   const available =
     profile !== undefined &&
-    detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&
+    (!fromRelease || installs.installedVersion(entry.descriptor.id) !== null) &&
+    detectResolves(profile, current, dataDir) &&
     (profile.executable.length === 0 || executable !== null);
   return {
     id: entry.descriptor.id,
@@ -388,6 +396,12 @@ export class ProviderRegistry {
     return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry), this.installBlock(id));
   }
 
+  /** The file a user descriptor was read from; undefined for a shipped or unknown provider. */
+  userFile(id: ProviderId): string | undefined {
+    const entry = this.entries.get(id);
+    return entry?.source === 'user' ? entry.file : undefined;
+  }
+
   /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */
   launcherScriptOnly(id: ProviderId): string | null {
     const descriptor = this.entries.get(id)?.descriptor;
@@ -571,7 +585,7 @@ export function registerProviderMethods(core: Core): void {
       logDetection(first.loaded, first.rejected.length);
     } catch { /* the next list is logged */ }
   }, () => { settledOnce = true; });
-  core.router.register('providers.reload', async () => {
+  const reload = async (): Promise<ProviderLoadResult> => {
     const before = fingerprint(core.providers.list());
     core.providers.load();
     const result = await settledList();
@@ -579,7 +593,9 @@ export function registerProviderMethods(core: Core): void {
     noteListed(result);
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
-  });
+  };
+  core.router.register('providers.reload', reload);
+  registerLocalCommands(core, reload);
   core.router.register('providers.install', async (params) => {
     const id = core.providers.require(params.providerId).id;
     // An install fetches the newest release, read again unless it was read in the last minute.

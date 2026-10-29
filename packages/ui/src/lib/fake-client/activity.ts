@@ -256,7 +256,6 @@ function updateLoopClock(activity: ThreadActivity, params: ActivityControl): voi
 export function activityMethods(ctx: FakeContext) {
   return {
     'threads.activity.set': async (params) => {
-      if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions use missions instead of conversation loops');
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
       const attachments = activityAttachments(ctx, thread, params);

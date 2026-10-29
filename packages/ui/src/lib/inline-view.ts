@@ -7,6 +7,7 @@
 import { VIEW_TOKENS, type InlineView, type Message, type MessagePart, type Turn, type ViewHostMessage, type ViewTheme } from '@boite/contracts';
 import { glides } from './motion';
 import { paragraphBlocks, visibleAnswer } from './message-display';
+import { FenceScan } from './fences';
 
 export type ViewPart = Extract<MessagePart, { type: 'artifact' }> & { view: InlineView };
 
@@ -24,7 +25,6 @@ const sourceOf = (part: ViewPart) => part.view.source ?? part.name;
  * bracket form takes a path with spaces.
  */
 const PLACE = /^ {0,3}!\[[^\]\r\n]*\]\([\t ]*(?:<([^>\r\n]+)>|([^\s()]+))[\t ]*\)[\t ]*$/;
-const FENCE = /^(?:`{3,}|~{3,})/;
 
 /** The path a line places, or null for any other line. */
 export function placedPath(line: string): string | null {
@@ -49,7 +49,7 @@ export function answerPieces(blocks: readonly string[]): AnswerPiece[] | null {
   blocks.forEach((block, index) => {
     if (!block.includes('](')) { pieces.push({ kind: 'text', key: String(index), block }); return; }
     const lines = block.split('\n');
-    let fence = '';
+    const fences = new FenceScan();
     let from = 0;
     let piece = 0;
     const text = (to: number) => {
@@ -58,17 +58,11 @@ export function answerPieces(blocks: readonly string[]): AnswerPiece[] | null {
       piece += 1;
     };
     lines.forEach((line, at) => {
-      const trimmed = line.trim();
-      const marker = FENCE.exec(trimmed)?.[0];
-      if (marker) {
-        if (!fence) fence = marker;
-        else if (marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
-        return;
-      }
-      const path = fence ? null : placedPath(line);
+      if (fences.line(line)) return;
+      const path = fences.inside ? null : placedPath(line);
       if (path === null) return;
       text(at);
-      pieces.push({ kind: 'view', key: `${index}.${piece}`, path, line: trimmed });
+      pieces.push({ kind: 'view', key: `${index}.${piece}`, path, line: line.trim() });
       piece += 1;
       placed = true;
       from = at + 1;
@@ -193,6 +187,21 @@ export function placeViews(timeline: Message[], turns: readonly Pick<Turn, 'id' 
     if (lastOther.get(turn) === index && !running(turn)) placed.push(...after(turn));
   });
   return placed;
+}
+
+/**
+ * A token can add a line placing a view without moving any messages. Keep
+ * the placed array until its order changes, so downstream windowing and
+ * scroll effects do not run again on every character of that answer.
+ */
+export class ViewPlacement {
+  #previous: Message[] | undefined;
+
+  build(timeline: Message[], turns: readonly Pick<Turn, 'id' | 'status'>[], views = turnViews(timeline)): Message[] {
+    const next = placeViews(timeline, turns, views);
+    if (this.#previous?.length === next.length && next.every((message, index) => message === this.#previous![index])) return this.#previous;
+    return this.#previous = next;
+  }
 }
 
 /** The height each view last reported, so a row that left the window comes back at its size. The newest 500. */

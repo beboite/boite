@@ -283,14 +283,21 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
 }
 
-async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
+/**
+ * Waits for the core the shell `shellPid` started or adopted. A core that never
+ * answers fails with the shell's log tail and process tree (`describeShell`),
+ * whose `shell.core.*` records say whether it spawned, adopted or lost a core.
+ */
+async function waitForHealthyCore(ownDataDir: string, shellPid: number): Promise<CoreFile> {
   const corePath = join(ownDataDir, 'core.json');
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
     const file = readCoreFile(corePath);
     if (file !== undefined && (await healthy(file.port))) return file;
     if (Date.now() > deadline) {
-      throw new Error(`no core answered /health from ${corePath} within ${READY_TIMEOUT_MS / 1000} s`);
+      const failure = `no core answered /health from ${corePath} within ${READY_TIMEOUT_MS / 1000} s (core.json: ${file === undefined ? 'absent' : `pid ${file.pid} port ${file.port}`})`;
+      const diagnosis = await describeShell(ownDataDir, shellPid, failure).catch((error: unknown) => `The diagnosis failed: ${String(error)}`);
+      throw new Error(`${failure}\n${diagnosis}`);
     }
     await Bun.sleep(POLL_MS);
   }
@@ -326,15 +333,19 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
   let client: Awaited<ReturnType<typeof connect>> | undefined;
   try {
     const port = await freePort(); shellPid = spawnHiddenShell(ownDataDir, port, true);
-    found = await waitForHealthyCore(ownDataDir);
+    found = await waitForHealthyCore(ownDataDir, shellPid);
     client = await connect(`http://127.0.0.1:${found.port}`, found.token);
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
-    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    // A new agent's introduction runs first; the turn under test is the next one on its thread.
+    const introduced = client.next('turn.finished', turn => turn.execution?.operation === 'event', 30000);
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    const { threadId } = await client.call('agents.open', { agentId: agent.id });
+    await introduced;
     ownPage = await attachShell(port, ownDataDir, shellPid); await shellReady(ownPage);
     await ownPage.waitFor(`document.querySelector('.app.ready') && document.querySelector('[data-testid=titlebar] .close')`);
-    const started = client.next('turn.started', () => true, 10000);
-    const finished = client.next('turn.finished', () => true, 30000);
-    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:12000] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
+    const started = client.next('turn.started', turn => turn.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 30000);
+    await client.call('turns.start', { threadId, prompt: '[sleep:12000] finish after closing the window' });
     await started;
     await ownPage.waitFor(`document.querySelector('[data-testid=titlebar] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid=titlebar] .close').click()`);
@@ -360,12 +371,12 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     expect(pidAlive(shellPid)).toBe(false);
     expect(await healthy(found.port)).toBe(true);
     expect((await finished).status).toBe('done');
-    expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
+    expect((await client.call('agents.snapshot', {})).status.find(status => status.agentId === agent.id)?.state).toBe('idle');
     await ownPage.close(); ownPage = undefined;
     const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
     ownPage = await attachShell(secondPort, ownDataDir, shellPid); await shellReady(ownPage);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
-    expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
+    expect((await waitForHealthyCore(ownDataDir, shellPid)).pid).toBe(found.pid);
     expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
     await waitUntil(() => !pidAlive(found!.pid), RESIDENT_SHUTDOWN_TIMEOUT_MS);
     expect(pidAlive(found.pid)).toBe(false);
@@ -385,7 +396,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
   let popup: BrowserPage | undefined;
   try {
     const port = await freePort(); ownPid = spawnHiddenShell(ownDataDir, port);
-    ownCore = await waitForHealthyCore(ownDataDir);
+    ownCore = await waitForHealthyCore(ownDataDir, ownPid);
     ownPage = await attachShell(port, ownDataDir, ownPid);
     await shellReady(ownPage);
     // A first launch opens centred in the work area, not at Windows' cascade spot.
@@ -411,7 +422,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.close(); ownPage = undefined;
 
     const secondPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, secondPort);
-    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await attachShell(secondPort, ownDataDir, ownPid);
+    ownCore = await waitForHealthyCore(ownDataDir, ownPid); ownPage = await attachShell(secondPort, ownDataDir, ownPid);
     await ownPage.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
     await ownPage.click('[data-testid="nav-settings"]');
     // Settings open on Home; the window's own switches live under General.
@@ -518,7 +529,7 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.close(); ownPage = undefined;
 
     const thirdPort = await freePort(); ownPid = spawnHiddenShell(ownDataDir, thirdPort);
-    ownCore = await waitForHealthyCore(ownDataDir); ownPage = await attachShell(thirdPort, ownDataDir, ownPid);
+    ownCore = await waitForHealthyCore(ownDataDir, ownPid); ownPage = await attachShell(thirdPort, ownDataDir, ownPid);
     await shellReady(ownPage);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(true);
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior', {enabled:false})`);
@@ -567,7 +578,7 @@ beforeAll(async () => {
   const startedAt = performance.now();
   shellPid = spawnHiddenShell(dataDir, debugPort);
   try {
-    coreFile = await waitForHealthyCore(dataDir);
+    coreFile = await waitForHealthyCore(dataDir, shellPid);
   } catch (error) {
     killProcessTree(shellPid);
     throw error;
@@ -1090,10 +1101,6 @@ shellTest('native preview references attach to the composer and highlight from s
   let url = '';
   let child: BrowserPage | undefined;
   try {
-    await page.click(testid('nav-settings'));
-    await page.click(testid('settings-tab-experiments'));
-    await page.click(testid('experiment-preview-comments'));
-    await page.click(testid('settings-back'));
     await page.type(testid('composer-input'), 'Make clearer.');
     await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
     await core.call('artifacts.preview', { threadId: thread.id, path: 'preview-fixture.html' });
@@ -1294,7 +1301,7 @@ shellTest(
     let corePid = 0;
 
     try {
-      corePid = (await waitForHealthyCore(ownDataDir)).pid;
+      corePid = (await waitForHealthyCore(ownDataDir, shell)).pid;
       expect(corePid).toBeGreaterThan(0);
       expect(pidAlive(corePid)).toBe(true);
 
@@ -1327,7 +1334,7 @@ shellTest(
     let shellPage: BrowserPage | undefined;
 
     try {
-      corePid = (await waitForHealthyCore(ownDataDir)).pid;
+      corePid = (await waitForHealthyCore(ownDataDir, shell)).pid;
       expect(corePid).toBeGreaterThan(0);
       expect(pidAlive(corePid)).toBe(true);
       // Started, not adopted: the core is this shell's own child.
@@ -1364,7 +1371,7 @@ shellTest(
       shellPage!.send('Input.dispatchKeyEvent', { type, key: 'q', code: 'KeyQ', modifiers: 2, windowsVirtualKeyCode: 81 });
 
     try {
-      corePid = (await waitForHealthyCore(ownDataDir)).pid;
+      corePid = (await waitForHealthyCore(ownDataDir, shell)).pid;
       shellPage = await attachShell(debugPort, ownDataDir, shell);
       await shellReady(shellPage);
       await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);

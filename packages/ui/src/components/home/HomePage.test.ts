@@ -1,15 +1,19 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
 import { confirm } from '../../lib/confirm.svelte';
 import { setExperiment } from '../../lib/experiments';
-import { inviteShare } from '../../lib/contact-link';
+import { inviteShare, readInvite } from '../../lib/contact-link';
+import { contactsOf } from '../../lib/contacts.svelte';
 import { FakeClient } from '../../lib/fake-client';
+import { RpcFailure } from '../../lib/rpc-error';
 import { FAKE_CONTACT_INVITE } from '../../lib/fake-client/contacts';
 import { Store, store as primary } from '../../lib/store.svelte';
-import { strings } from '../../lib/strings';
+import { fill, strings } from '../../lib/strings';
 import { workspace } from '../../lib/workspace.svelte';
 import HomePage from './HomePage.svelte';
 import SidebarContacts from './SidebarContacts.svelte';
+import TitleBar from '../TitleBar.svelte';
 
 let components: ReturnType<typeof mount>[] = [];
 let opened: Store | undefined;
@@ -52,6 +56,50 @@ async function draw(contact: string | null = null): Promise<Store> {
 
 const one = <T extends HTMLElement>(testid: string) => document.querySelector<T>(`[data-testid="${testid}"]`);
 const contacts = async (store: Store) => store.client!.call('contacts.get', {});
+
+test('a contact request stays visible at the top in Settings and opens the machine that received it', async () => {
+  const remote = await connect();
+  const local = new Store();
+  local.machineId = 'local';
+  local.booted = true;
+  local.page = 'settings';
+  workspace.machines = [{ id: 'local', label: 'Local', store: local }, { id: 'home', label: 'Workstation', store: remote }];
+  workspace.active = local;
+  components.push(mount(TitleBar, { target: document.body, props: { store: local } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  expect(one('contact-request-notice')!.textContent).toContain('Chris');
+  expect(one('contact-request-notice')!.textContent).toContain('Workstation');
+  one<HTMLButtonElement>('contact-request-review')!.click();
+  await vi.waitFor(() => expect(workspace.active).toBe(remote));
+  await vi.waitFor(() => expect([remote.page, remote.contact]).toEqual(['home', 'core-chris']));
+  await remote.client!.call('contacts.decide', { id: 'creq-pending', accept: true, projectId: remote.projects[0]!.id });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+});
+
+test('a dismissed request keeps its header badge, which refreshes after a reconnect without an update', async () => {
+  const store = await connect();
+  store.page = 'settings';
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let decidedWhileOffline = false;
+  vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+    const value = await call(method, params);
+    if (method !== 'contacts.get' || !decidedWhileOffline) return value;
+    const state = value as Awaited<ReturnType<typeof contacts>>;
+    return { ...state, requests: state.requests.filter(request => request.status !== 'pending') };
+  }) as typeof client.call);
+  components.push(mount(TitleBar, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-request-dismiss')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-notice')).toBeNull(); });
+  expect(one('contact-request-open')).not.toBeNull();
+  store.connection = 'connecting';
+  flushSync();
+  decidedWhileOffline = true;
+  store.connection = 'ready';
+  flushSync();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-request-open')).toBeNull(); });
+});
 
 function type(input: HTMLInputElement, value: string) {
   input.value = value;
@@ -208,6 +256,117 @@ test('accept shares the project picked in the menu; refuse waits for a reason; r
   expect((await contacts(store)).contacts).toEqual([]);
 });
 
+test('Elsewhere makes a link to this machine on Funnel, without a share; a tailnet outside tailscale.com invites only someone already on it', async () => {
+  await draw();
+  expect(one('contact-invite-self-hosted')).toBeNull();
+  one<HTMLButtonElement>('contact-invite-internet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')?.dataset.status).toBe('funnel'); });
+  const link = readInvite(one<HTMLInputElement>('contact-invite-link')!.value)!;
+  expect([link.u, link.s]).toEqual(['https://boite-pc.tail4f2a.ts.net:8443', null]);
+  expect(one('contact-invite')!.textContent).toContain(strings.contacts.invite.funnel);
+  // The core checked the link's origin from the internet: the owner knows it is ready to send.
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('ready'); });
+  expect(one('contact-invite-reach')!.textContent).toBe(strings.contacts.invite.reach.ready);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // Public DNS does not know the name yet: the owner is told to wait, then what to do once a repair did not help.
+  const waiting = await connect();
+  const waitingCall = waiting.client!.call.bind(waiting.client!);
+  let repaired = false;
+  let moved = false;
+  vi.spyOn(waiting.client!, 'call').mockImplementation(((method: string, params: unknown) => method === 'contacts.get'
+    ? waitingCall('contacts.get', {}).then(state => ({ ...state, funnel: state.funnel && (moved
+      ? { ...state.funnel, url: state.funnel.url.replace(/:\d+$/, ':10000'), status: 'ready', repaired }
+      : { ...state.funnel, status: 'unpublished', repaired }) }))
+    : waitingCall(method as never, params as never)) as typeof waitingCall);
+  waiting.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store: waiting } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-internet')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-invite-internet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('unpublished'); });
+  expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.unpublished);
+  repaired = true;
+  await contactsOf(waiting).refresh();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.stillUnpublished); });
+  // A repair put Funnel on another port: the internet reaches it, but not at the port the link shown names.
+  moved = true;
+  await contactsOf(waiting).refresh();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-reach')?.dataset.status).toBe('moved'); });
+  expect(one('contact-invite-reach')!.textContent).toContain(strings.contacts.invite.reach.moved);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // On Headscale neither a share nor Funnel reaches another network: the page says who invites whom.
+  const store = await connect();
+  const call = store.client!.call.bind(store.client!);
+  vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) => method === 'contacts.get'
+    ? call('contacts.get', {}).then(state => ({ ...state, tailscale: { ...state.tailscale, fqdn: 'boite.net.example.com' } }))
+    : call(method as never, params as never)) as typeof call);
+  store.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-self-hosted')?.textContent).toBe(strings.contacts.invite.selfHosted); });
+  expect(['contact-invite-tailnet', 'contact-invite-create', 'contact-invite-internet'].map(id => one<HTMLButtonElement>(id)!.disabled)).toEqual([false, true, true]);
+  for (const component of components.splice(0)) unmount(component);
+  document.body.innerHTML = '';
+
+  // An older core reads only `share` and would share the machine: Elsewhere is not offered there.
+  const older = await connect();
+  const olderCall = older.client!.call.bind(older.client!);
+  const sent: unknown[] = [];
+  vi.spyOn(older.client!, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'contacts.invite') sent.push(params);
+    return method === 'contacts.get' ? olderCall('contacts.get', {}).then(({ internet: _internet, ...state }) => state) : olderCall(method as never, params as never);
+  }) as typeof olderCall);
+  older.showHome(null);
+  components.push(mount(HomePage, { target: document.body, props: { store: older } }));
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-create')).not.toBeNull(); });
+  expect(one('contact-invite-internet')).toBeNull();
+  expect(sent).toEqual([]);
+});
+
+test('a join retries an unpublished address despite a concurrent submission, and Stop ends it', async () => {
+  const store = await draw();
+  const call = store.client!.call.bind(store.client!);
+  let refusals = 2;
+  const joins = vi.fn();
+  let finishFirst!: () => void;
+  const firstJoin = new Promise<void>(resolve => { finishFirst = resolve; });
+  vi.spyOn(store.client!, 'call').mockImplementation((async (method: string, params: unknown) => {
+    if (method !== 'contacts.join') return call(method as never, params as never);
+    joins();
+    if (joins.mock.calls.length === 1) await firstJoin;
+    if (refusals-- > 0) return Promise.reject(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'could not find NUNO: Tailscale has not published its address', data: { retryAfterMs: 150 } }));
+    return call(method as never, params as never);
+  }) as typeof call);
+  type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => expect(joins).toHaveBeenCalledTimes(1));
+  // Another submission during the RPC must not cancel this join's retries.
+  expect(await contactsOf(store).join(FAKE_CONTACT_INVITE)).toBeNull();
+  expect(joins).toHaveBeenCalledTimes(1);
+  finishFirst();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
+  await vi.waitFor(() => { flushSync(); expect(one('contact-joined-words')?.querySelectorAll('li')).toHaveLength(8); });
+  expect(joins).toHaveBeenCalledTimes(3);
+  expect(one('contact-join-waiting')).toBeNull();
+  one<HTMLButtonElement>('contact-joined-done')!.click();
+
+  // Stop: no join goes again after it.
+  refusals = Number.POSITIVE_INFINITY;
+  joins.mockClear();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-link')).not.toBeNull(); });
+  type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);
+  one<HTMLButtonElement>('contact-join')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-join-waiting')).not.toBeNull(); });
+  one<HTMLButtonElement>('contact-join-stop')!.click();
+  flushSync();
+  expect(one('contact-join-waiting')).toBeNull();
+  const made = joins.mock.calls.length;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  expect(joins).toHaveBeenCalledTimes(made);
+});
+
 test('Invite makes a link with its share; a joined link shows the eight words; Configure unfolds the key, the policy and the tier', async () => {
   const store = await draw();
   one<HTMLButtonElement>('contact-invite-create')!.click();
@@ -215,6 +374,38 @@ test('Invite makes a link with its share; a joined link shows the eight words; C
   const link = one<HTMLInputElement>('contact-invite-link')!.value;
   expect(link.startsWith('boite://contact#')).toBe(true);
   expect(one('contact-invite-share')!.dataset.status).toBe('created');
+  expect(inviteShare(link)).not.toBeNull();
+
+  // Someone already on this Tailscale: the link alone, no share made or asked for.
+  one<HTMLButtonElement>('contact-invite-tailnet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invite-share')!.dataset.status).toBe('none'); });
+  const alone = one<HTMLInputElement>('contact-invite-link')!.value;
+  expect([alone === link, inviteShare(alone)]).toEqual([false, null]);
+  expect(one('contact-invite')!.textContent).not.toContain(strings.contacts.invite.manual);
+
+  // A refused invitation copies nothing: the link on screen was made for someone else.
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  one<HTMLButtonElement>('contact-invite-create')!.click();
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+  const shown = one<HTMLInputElement>('contact-invite-link')!.value;
+  const call = store.client!.call.bind(store.client!);
+  const refused = vi.spyOn(store.client!, 'call').mockImplementation(((method: string, params: unknown) =>
+    method === 'contacts.invite' ? Promise.reject(new Error('at most 16 open invitations')) : call(method as never, params as never)) as typeof call);
+  one<HTMLButtonElement>('contact-invite-tailnet')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('home-error')?.textContent).toContain('at most 16 open invitations'); });
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(one<HTMLInputElement>('contact-invite-link')!.value).toBe(shown);
+  refused.mockRestore();
+  delete (navigator as { clipboard?: unknown }).clipboard;
+  one<HTMLButtonElement>('home-error')?.querySelector('button')?.click();
+
+  // A link sent too widely: Cancel them spends every open invitation, the one shown included.
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invites-open')?.textContent).toContain(fill(strings.contacts.invite.open, { count: '3' })); });
+  one<HTMLButtonElement>('contact-invites-cancel')!.click();
+  await vi.waitFor(() => { flushSync(); expect(one('contact-invites-open')).toBeNull(); });
+  expect(one('contact-invite')).toBeNull();
+  expect((await contacts(store)).invitations).toBe(0);
 
   // A core refuses its own link: the join takes another owner's.
   type(one<HTMLInputElement>('contact-join-link')!, FAKE_CONTACT_INVITE);

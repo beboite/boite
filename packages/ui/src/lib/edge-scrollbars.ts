@@ -1,5 +1,5 @@
 /*
- * Edge scrollbars, the `edge-scrollbars` experiment. `interaction-experiments.ts`
+ * Edge scrollbars, the `edge-scrollbars` feature. `interactions.ts`
  * starts this while the switch is on and calls the returned stop when it goes off.
  *
  * Native scrollbars take no room while it runs: the `edge-scrollbars` class on
@@ -73,7 +73,7 @@ export function dragScroll(startScroll: number, delta: number, scrollSize: numbe
   return Math.min(range, Math.max(0, startScroll + (delta * range) / room));
 }
 
-/** Starts the experiment and returns what turns it off again. Does nothing on a touch-only or forced-colours display. */
+/** Starts the scrollbars and returns what turns it off again. Does nothing on a touch-only or forced-colours display. */
 export function startEdgeScrollbars(): () => void {
   if (typeof window.matchMedia !== 'function') return () => {};
   const pointer = window.matchMedia(POINTER);

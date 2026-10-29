@@ -8,6 +8,43 @@ import { CUT_FROM, ROW_PARTS, TimelineRows, rowCuts, rowEstimate, rowIndexOf, se
 const tool = (id: string): MessagePart => ({ type: 'tool', toolId: id, name: 'Bash', input: { command: `echo ${id}` }, output: 'ok', status: 'done' });
 const text = (value: string): MessagePart => ({ type: 'text', text: value });
 
+function failedAttempts(): Message[] {
+  return Array.from({ length: 4 }, (_, index) => [
+    { ...message(`wake-${index}`, [text('Resumed after an error')], 'system'), turnId: `retry-${index}` },
+    { ...message(`error-${index}`, [{ type: 'error', message: `HTTP 503 attempt ${index}` }]), turnId: `retry-${index}` }
+  ]).flat();
+}
+
+test('consecutive failed automatic attempts occupy one row and retain every original message and jump target', () => {
+  const messages = failedAttempts();
+  const builder = new TimelineRows();
+  const rows = builder.build(messages);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.failures).toEqual(messages);
+  expect(rows[0]!.message).toBe(messages.at(-1));
+  for (const original of messages) expect(rowIndexOf(rows, original.id)).toBe(0);
+  expect(builder.build(messages)).toBe(rows);
+  const more = [...messages, { ...messages.at(-1)!, id: 'error-new', turnId: 'retry-new' }];
+  expect(builder.build(more)).toHaveLength(1);
+  expect(builder.changedFrom).toBe(0);
+  expect(builder.build(more)[0]!.failures).toHaveLength(9);
+});
+
+test('a failed group never swallows useful work, live output, memory notices or missing history', () => {
+  const messages = failedAttempts();
+  const boundary = message('answer', [text('The deployment completed.')]);
+  for (const middle of [boundary, { ...boundary, role: 'user' as const }, message('work', [tool('call')]), { ...messages[3]!, id: 'live', state: 'streaming' as const }]) {
+    const rows = new TimelineRows().build([...messages.slice(0, 4), middle, ...messages.slice(4)]);
+    expect(rows).toHaveLength(3);
+    expect(rows[1]!.message).toBe(middle);
+  }
+  const memory = new Map([['wake-2', [{ at: 1, kind: 'killed' } as MemoryEvent]]]);
+  expect(new TimelineRows().build(messages, memory).some(row => row.failures?.some(message => message.id === 'wake-2'))).toBe(false);
+  const rows = new TimelineRows().build(messages, undefined, new Map([['wake-2', {}]]));
+  expect(rows).toHaveLength(2);
+  expect(rows.map(row => row.failures?.length)).toEqual([4, 4]);
+});
+
 function message(id: string, parts: MessagePart[], role: Message['role'] = 'assistant'): Message {
   return { id, threadId: 't-1', turnId: `turn-${id}`, role, parts, state: 'complete', createdAt: 0 };
 }
@@ -149,6 +186,10 @@ test('an assistant message that carries on the turn above joins it at the gap of
   // Another turn, a prompt, a cut row and the first row keep the gap between messages.
   expect(seam(whole(inTurn(message('e', [tool('5')]), 'other')), running)).toBeNull();
   expect(seam(whole(inTurn(message('f', [text('Go on')], 'user'), 'turn')), running)).toBeNull();
+  // A system wake-up stays close to its answer, including an error, without joining another turn.
+  const wake = whole(inTurn(message('wake', [text('Resumed after an error')], 'system'), 'turn'));
+  expect(seam(wake, running)).toBe('block');
+  expect(seam({ ...wake, message: { ...wake.message, turnId: 'other' } }, running)).toBeNull();
   expect(seam(tools, { ...running, first: false })).toBeNull();
   expect(seam(undefined, running)).toBeNull();
 });

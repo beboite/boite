@@ -11,6 +11,8 @@ export type TurnExecution = Pick<ThreadSummary,
 > & {
   sessionGeneration: number;
   selectionVersion: number;
+  /** A server-owned queued prompt keeps its captured effort and speed while the next picker changes. */
+  frozenSelection?: true;
   /**
    * `background`: the agent resumed on its own after background work it
    * started finished; the turn carries no prompt of the user's.
@@ -20,8 +22,12 @@ export type TurnExecution = Pick<ThreadSummary,
    * carries what changed (`threads.watchPullRequest`).
    * `keepalive`: a minimal turn the core sent so the prompt cache stays warm
    * while the thread waits on its agents (`cacheKeepalive`); always `automatic`.
+   * `routine`: a persistent agent's routine came due; the prompt is the
+   * routine's, the opening message reads `Routine · <name>`.
+   * `event`: the core woke a persistent agent: something happened on its desk
+   * or in its projects, it was just created, or its instructions changed.
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request' | 'keepalive';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume' | 'pull-request' | 'keepalive' | 'routine' | 'event';
   /** A `compact` the core opened by the `autoCompact` setting, or a `keepalive`: not one the user asked for. */
   automatic?: true;
 };
@@ -56,6 +62,13 @@ export interface Turn {
    * finished before it was recorded.
    */
   agentTotals?: { costUsd: number; tokens: number } | null;
+  /**
+   * A persistent agent's `routine` or `event` turn that had nothing for the
+   * user: the final text block of its last answer opened, or ended, with a line
+   * `[quiet] <what it checked>`. It leaves the thread read, sends no
+   * notification and starts no memory pass; clients fold it to one line.
+   */
+  quiet?: true;
 }
 
 /**
@@ -99,30 +112,33 @@ export function requestStarts(turns: readonly Pick<Turn, 'id' | 'queuedAt' | 'st
   return starts;
 }
 
+/** The thread statuses that mean one of its turns is still under way. */
+export const ACTIVE_THREAD_STATUSES: readonly ThreadStatus[] = ['queued', 'running', 'waiting'];
+
 /** A thread status that means one of its turns is still under way. */
 export function threadActive(status: ThreadStatus): boolean {
-  return status === 'queued' || status === 'running' || status === 'waiting';
+  return ACTIVE_THREAD_STATUSES.includes(status);
 }
 
 /**
  * Whether a finished turn is worth a notification, for the core's Web Push and
  * a client's own toast alike. A delegated agent's result goes to its parent,
  * whose next turn reports it; a parent's turn that ends while `activeChildren`
- * of its agents still work is not the answer yet; a persistent agent's work is
- * read in the agents inbox, so only its failures notify; compacting the
- * context is housekeeping. A stop is the user's own doing. Requests that wait
- * for an answer are notified whatever the thread.
+ * of its agents still work is not the answer yet; a persistent agent's quiet
+ * wake had nothing to say; compacting the context is housekeeping. A stop is
+ * the user's own doing. Requests that wait for an answer are notified whatever
+ * the thread.
  */
 export function notifiesOnFinish(
-  thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>,
-  turn: Pick<Turn, 'status' | 'execution'>,
+  thread: Pick<ThreadSummary, 'parentThreadId'>,
+  turn: Pick<Turn, 'status' | 'execution' | 'quiet'>,
   activeChildren: number,
 ): boolean {
   if (turn.status !== 'done' && turn.status !== 'error') return false;
   if (thread.parentThreadId) return false;
   if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive') return false;
   if (turn.status === 'error') return true;
-  if (thread.agentSessionId) return false;
+  if (turn.quiet) return false;
   return activeChildren === 0;
 }
 

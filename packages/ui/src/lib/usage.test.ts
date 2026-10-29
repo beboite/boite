@@ -89,8 +89,8 @@ describe('summarize', () => {
     const view = summarize({ edges: [0, 10], rows: [
       { ...row(0, 'muse', 'default', 3, usage(20, 10, 0.5)), reported: 2, priced: 1 },
       { ...row(0, 'custom', null, 2, usage(0, 0)), reported: 0 }
-    ], threads: [] }, 'cost', ['muse', 'antigravity-cli', 'echo']);
-    expect(view.series.map((entry) => entry.key)).toEqual(['antigravity-cli', 'muse', 'custom', 'echo']);
+    ], threads: [] }, 'cost', ['muse', 'pi', 'echo']);
+    expect(view.series.map((entry) => entry.key)).toEqual(['pi', 'muse', 'custom', 'echo']);
     expect(view.bySeries['echo']).toMatchObject({ turns: 0, priced: 0, usage: { costUsdEquivalent: null } });
     expect(view.total).toMatchObject({ turns: 5, reported: 2, priced: 1, value: 0.5 });
     expect(view.unpriced).toEqual(['custom']);
@@ -98,7 +98,7 @@ describe('summarize', () => {
     expect(reportedValue('cost', 0, view.buckets[0]!.coverage['custom']!)).toBe('No price');
     expect(reportedValue('tokens', 0, view.buckets[0]!.coverage['echo']!)).toBe('0');
     expect(reportedValue('cost', 0, { turns: 1, reported: 1, priced: 1 })).toBe('$0.00');
-    expect(modelName('default', new Map([['muse\u0000default', 'Muse default'], ['antigravity-cli\u0000default', 'Antigravity CLI default']]), 'muse')).toBe('Muse default');
+    expect(modelName('default', new Map([['muse\u0000default', 'Muse default'], ['echo\u0000default', 'Echo default']]), 'muse')).toBe('Muse default');
   });
 
   test('joins a model recorded with its provider prefix and says where each price comes from', () => {
@@ -190,7 +190,7 @@ describe('the fake ledger', () => {
   test('draws the same days every time, from several providers', () => {
     const first = fakeUsageHistory(edges, { seeded: true, finished: [], now });
     expect(fakeUsageHistory(edges, { seeded: true, finished: [], now })).toEqual(first);
-    expect(new Set(first.rows.map((entry) => entry.providerId))).toEqual(new Set(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse']));
+    expect(new Set(first.rows.map((entry) => entry.providerId))).toEqual(new Set(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'muse']));
     expect(first.rows.every((entry) => entry.bucket >= 0 && entry.bucket < 90)).toBe(true);
     // The core prices Codex's own model at its public rates; its default model has none.
     const codex = first.rows.filter((entry) => entry.providerId === 'codex');

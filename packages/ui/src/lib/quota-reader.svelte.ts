@@ -1,6 +1,6 @@
 import { secureId } from './secure-id';
 import { errorText } from './errors';
-import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type CoreInfo, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type CoreInfo, type QuotaAlertPeriod, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
@@ -33,8 +33,7 @@ function remember(key: string, rows: AccountQuota[]): void {
 /**
  * A row a limits view shows: the provider reports on it, the user reads it,
  * and its account is signed in. A signed-out account or a provider nobody
- * connected has nothing to say, and the Antigravity CLI source shows once
- * someone turned it on.
+ * connected has nothing to say.
  */
 export function shownQuotas(rows: AccountQuota[], accounts?: Account[], providers?: readonly Pick<ProviderSummary, 'id' | 'enabled'>[]): AccountQuota[] {
   return namedQuotas(rows, accounts).filter((row) => {
@@ -187,6 +186,13 @@ export class QuotaReader {
     this.loading = false;
     this.accept(await client.call('quotas.configure', { accountId, enabled }));
     await this.read(client).catch(() => {});
+  }
+
+  /** One period's alert thresholds, shares left; the core answers every row, as for a switch. */
+  async alert(client: Client, accountId: string, period: QuotaAlertPeriod, thresholds: number[]): Promise<void> {
+    ++this.#latest;
+    this.loading = false;
+    this.accept(await client.call('quotas.alert', { accountId, period, thresholds }));
   }
 }
 

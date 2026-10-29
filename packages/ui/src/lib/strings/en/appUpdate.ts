@@ -6,6 +6,9 @@ export const strings = {
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
     unsupported: 'Automatic app updates are available in installed builds: the Windows x64 installer, the macOS app, and the Linux .deb or AppImage.',
     channel: 'Release channel',
+    nightlyShort: 'Nightly', releaseShort: 'Release',
+    noRelease: 'No release yet: Boite ships nightly builds for now.',
+    updates: 'Updates',
     stable: 'Boite',
     nightly: 'Boite Nightly',
     nightlyHint: 'Nightly is experimental and may contain unfinished changes. You can return to Boite even when its version number is lower.',
@@ -30,5 +33,7 @@ export const strings = {
     readyAction: 'Update',
     installTitle: 'Install the Boite update?',
     installBody: 'Agents finish their current tool call, 30 seconds at most. Boite then updates, restarts and resumes them.',
+    autoInstall: 'Install updates by itself when nothing runs',
+    autoInstallHint: 'A release found by the check every six hours downloads and installs with no question, only while the window is in the tray and no conversation, queued message or process runs. Boite comes back in the tray. Otherwise it tries again at the next check. Agents keep their own switch on the Providers page.',
   }
 } as const;

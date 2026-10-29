@@ -18,8 +18,9 @@ export function contactsShown(store: { owner: boolean }): boolean {
 export const CONTACTS_RAIL_WIDTH = 240;
 const FOLDED = 'boite.contacts-rail-folded';
 
+/** Folded until the owner unfolds it: the title bar's button says when something waits. */
 function readFolded(): boolean {
-  try { return localStorage.getItem(FOLDED) === '1'; } catch { return false; }
+  try { return localStorage.getItem(FOLDED) !== '0'; } catch { return true; }
 }
 
 class ContactsRail {

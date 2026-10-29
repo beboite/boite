@@ -13,14 +13,14 @@ let cleanup: (() => Promise<void>) | null = null;
 afterEach(async () => { await cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
 /** A persistent agent on the fake core, on Opus, and its Settings card mounted. */
-async function open() {
+async function open(model = 'claude-opus-5-5') {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
   await store.connect();
   // Claude's models are read when first asked for, as the picker would.
   await store.probeModels('claude', 'a-claude-main');
-  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model: 'claude-opus-5-5', effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'] } });
+  await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'claude', accountId: 'a-claude-main', model, effort: null, permissionMode: 'default' }, status: 'active' } });
   const view = new AgentsView(store);
   await view.refresh();
   const agent = (): AgentProfile => view.snapshot!.profiles[0]!;
@@ -43,6 +43,16 @@ async function pick(model: string) {
   await idle();
 }
 const status = () => document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]');
+
+test('picking a current model saves even when the agent still allows its previous unlisted model', async () => {
+  const { client, agent } = await open('previous-opus');
+  await pick('claude-opus-5-5');
+  await idle();
+  expect(status()?.dataset.state).toBe('saved');
+  const config = await client.call('agents.runtime.get', { agentId: agent().id });
+  expect(config.defaultRoute.model).toBe('claude-opus-5-5');
+  expect(config.allowedRoutes.map(route => route.model)).toEqual(['previous-opus', 'claude-opus-5-5']);
+});
 
 test('a model picked for an agent is saved without a Save button and is still there when its settings reopen', async () => {
   const { client, agent, show, hide } = await open();
@@ -129,15 +139,16 @@ test('a model picked after another writer changed the agent keeps that writer\'s
   const { client, view, agent } = await open();
   const config = await client.call('agents.runtime.get', { agentId: agent().id });
   // Another window saves the background settings while this card is open.
-  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, autoMemory: false, maxRunMinutes: 37 } });
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, autoMemory: false, eventWakes: true, dailyBudgetUsd: 37 } });
   await view.refresh();
   await idle();
   await pick('claude-sonnet-5-5');
   await idle();
   const saved = await client.call('agents.runtime.get', { agentId: agent().id });
-  expect([saved.defaultRoute.model, saved.autoMemory, saved.maxRunMinutes]).toEqual(['claude-sonnet-5-5', false, 37]);
+  expect([saved.defaultRoute.model, saved.autoMemory, saved.eventWakes, saved.dailyBudgetUsd]).toEqual(['claude-sonnet-5-5', false, true, 37]);
   expect(status()?.dataset.state).toBe('saved');
   expect(document.querySelector<HTMLInputElement>('[data-testid=agent-auto-memory]')!.checked).toBe(false);
+  expect(document.querySelector<HTMLInputElement>('[data-testid=agent-event-wakes]')!.checked).toBe(true);
 });
 
 test('a route name cleared just before the card closes is never sent', async () => {
@@ -154,10 +165,10 @@ test('a route name cleared just before the card closes is never sent', async () 
 test('a field changed here and elsewhere to different values is a conflict the card reports, not an overwrite', async () => {
   const { client, view, agent } = await open();
   const config = await client.call('agents.runtime.get', { agentId: agent().id });
-  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, maxRunMinutes: 37 } });
+  await client.call('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...config, dailyBudgetUsd: 37 } });
   await view.refresh();
   await idle();
-  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
+  const minutes = document.querySelector<HTMLInputElement>('[data-testid=agent-daily-budget]')!;
   minutes.value = '50';
   minutes.dispatchEvent(new Event('input', { bubbles: true }));
   minutes.dispatchEvent(new Event('change', { bubbles: true }));
@@ -165,7 +176,7 @@ test('a field changed here and elsewhere to different values is a conflict the c
   const engine = document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]');
   expect(engine?.dataset.state).toBe('error');
   expect(engine!.textContent).toContain(strings.settings.autosave.conflict);
-  expect((await client.call('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
+  expect((await client.call('agents.runtime.get', { agentId: agent().id })).dailyBudgetUsd).toBe(37);
 });
 
 test('another writer saving while this card\'s last save comes back still conflicts with the edit made meanwhile', async () => {
@@ -181,27 +192,27 @@ test('another writer saving while this card\'s last save comes back still confli
     return result;
   }) as typeof client.call;
   await pick('claude-sonnet-5-5');
-  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
+  const minutes = document.querySelector<HTMLInputElement>('[data-testid=agent-daily-budget]')!;
   minutes.value = '50';
   minutes.dispatchEvent(new Event('input', { bubbles: true }));
   minutes.dispatchEvent(new Event('change', { bubbles: true }));
   await idle();
   const current = await real('agents.runtime.get', { agentId: agent().id });
   const revision = (await real('agents.snapshot', {})).profiles[0]!.revision;
-  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: revision, config: { ...current, maxRunMinutes: 37 } });
+  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: revision, config: { ...current, dailyBudgetUsd: 37 } });
   await view.refresh();
   release();
   await idle();
-  expect((await real('agents.runtime.get', { agentId: agent().id })).maxRunMinutes).toBe(37);
+  expect((await real('agents.runtime.get', { agentId: agent().id })).dailyBudgetUsd).toBe(37);
   expect(document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state).toBe('error');
 });
 
-/** Another window saves `maxRunMinutes: 37`, then this card picks a model with one of its calls held, and the field it still shows as 10 is typed to 50 meanwhile. */
+/** Another window saves `dailyBudgetUsd: 37`, then this card picks a model with one of its calls held, and the field it still shows as 10 is typed to 50 meanwhile. */
 async function editDuringMerge(held: 'agents.runtime.get' | 'agents.runtime.configure') {
   const { client, view, agent } = await open();
   const real = client.call.bind(client);
   const initial = await real('agents.runtime.get', { agentId: agent().id });
-  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...initial, maxRunMinutes: 37 } });
+  await real('agents.runtime.configure', { agentId: agent().id, expectedRevision: agent().revision, config: { ...initial, dailyBudgetUsd: 37 } });
   await view.refresh();
   await idle();
   let release!: () => void;
@@ -215,8 +226,8 @@ async function editDuringMerge(held: 'agents.runtime.get' | 'agents.runtime.conf
     return result;
   }) as typeof client.call;
   await pick('claude-sonnet-5-5');
-  const minutes = document.querySelectorAll<HTMLInputElement>('[data-testid=agent-runtime] input[type=number]')[1]!;
-  expect(minutes.value).toBe('10');
+  const minutes = document.querySelector<HTMLInputElement>('[data-testid=agent-daily-budget]')!;
+  expect(minutes.value).toBe('');
   minutes.value = '50';
   minutes.dispatchEvent(new Event('input', { bubbles: true }));
   minutes.dispatchEvent(new Event('change', { bubbles: true }));
@@ -225,7 +236,7 @@ async function editDuringMerge(held: 'agents.runtime.get' | 'agents.runtime.conf
   await idle();
   await idle();
   const stored = await real('agents.runtime.get', { agentId: agent().id });
-  expect([stored.defaultRoute.model, stored.maxRunMinutes]).toEqual(['claude-sonnet-5-5', 37]);
+  expect([stored.defaultRoute.model, stored.dailyBudgetUsd]).toEqual(['claude-sonnet-5-5', 37]);
   expect(document.querySelector<HTMLElement>('[data-testid=agent-runtime] [data-testid=save-status]')?.dataset.state).toBe('error');
   expect(minutes.value).toBe('50');
 }

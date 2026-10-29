@@ -62,6 +62,14 @@ test('a finished turn reads how long it worked, when it was done and what it spe
   expect(document.querySelector('[data-testid=turn-background]')).toBeNull();
 });
 
+test('a failed turn keeps its duration and timestamps without claiming it completed successfully', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn({ status: 'error' }) } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
+  expect(text('turn-finished-at')).toBe(`failed ${clockTime(STARTED + 281_000)}`);
+  expect(document.querySelector('[data-testid=turn-summary]')?.getAttribute('aria-label')).toBe('Failed');
+});
+
 test('a turn that carries on after monitoring counts from the user request, its own share on hover', () => {
   // The user's turn began 30 minutes before Boite woke the agent for this one.
   const request = STARTED - 1_800_000;
@@ -211,6 +219,23 @@ test('mid-turn compaction counts from when the compacting phase began', () => {
   vi.advanceTimersByTime(2_000);
   flushSync();
   expect(text('compaction-elapsed')).toBe('Elapsed: 1m 25s');
+});
+
+test('a device whose clock runs behind its core still counts a compaction from its start', () => {
+  // The desktop app read 11 s behind the server it watched: a compaction begun 5 s ago read "Elapsed: 0s".
+  const core = STARTED + 300_000;
+  vi.useFakeTimers({ now: core - 11_000 });
+  const message = { id: 'prompt', role: 'user', turnId: 'turn-1', parts: [{ type: 'text', text: 'Implement depth of field' }] } as Message;
+  const progress = { turnId: 'turn-1', phase: 'compacting', detail: null, at: core - 5_000, since: core - 5_000, providerAt: core - 5_000 };
+  running = mount(MessageTurnSummary, { target: document.body, props: {
+    store: { connection: 'ready', clockOffset: 11_000, openThread: { id: 't-1', status: 'running', turns: [], progress } } as unknown as Store,
+    threadId: 't-1', turn: turn({ status: 'running', startedAt: core - 5_000, finishedAt: null, usage: null }), message, messages: [message],
+  } });
+  flushSync();
+  expect(text('compaction-elapsed')).toBe('Elapsed: 5s');
+  vi.advanceTimersByTime(2_000);
+  flushSync();
+  expect(text('compaction-elapsed')).toBe('Elapsed: 7s');
 });
 
 test.each([

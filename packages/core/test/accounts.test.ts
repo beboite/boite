@@ -2,10 +2,11 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
+import { withQuotaProbe } from '../src/quotas.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -101,6 +102,87 @@ describe('accounts', () => {
       restore();
     }
   });
+
+  test('removing an account stops its quota reads and resets, and waits for them, before deleting its directory', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Quota account' });
+    const owners = [`quota:${account.id}`, `quota-reset:${account.id}`];
+    const settled: string[] = [];
+    const reads = [false, true].map(reset => withQuotaProbe(harness.core, harness.core.accounts.require(account.id), 'echo', async ctx => {
+      const child = ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+      await new Promise<void>(resolve => child.once('close', () => resolve()));
+      // The read notices its process died and would start the next one.
+      ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+      return 'read';
+    }, reset).then(() => settled.push('completed'), () => settled.push('refused')));
+    try {
+      await waitFor(() => owners.every(owner => harness.core.procs.liveCount(owner) === 1));
+      // A quota child runs the executable a turn would: it holds the install lease like one.
+      expect(harness.core.providers.installs.leaseCount(providerId)).toBe(2);
+      await client.call('accounts.remove', { accountId: account.id });
+      expect(settled).toEqual(['refused', 'refused']);
+      expect(owners.map(owner => harness.core.procs.liveCount(owner))).toEqual([0, 0]);
+      expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
+      expect(existsSync(account.isolationDir!)).toBe(false);
+    } finally {
+      for (const owner of owners) await harness.core.procs.stopAndWait(owner);
+      await Promise.all(reads);
+    }
+  });
+
+  test('an account whose quota read could not be stopped is not removed until it stops', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Quota account' });
+    const owner = `quota:${account.id}`;
+    const realStop = harness.core.procs.stopAndWait.bind(harness.core.procs);
+    // The backend refuses to stop this owner's processes, as a timeout or a refused job would.
+    const stop = spyOn(harness.core.procs, 'stopAndWait').mockImplementation(async (threadId) => {
+      if (threadId === owner) throw new Error(`processes of ${owner} did not exit within five seconds`);
+      return realStop(threadId);
+    });
+    const read = withQuotaProbe(harness.core, harness.core.accounts.require(account.id), 'echo', async ctx => {
+      const child = ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+      await new Promise<void>(resolve => child.once('close', () => resolve()));
+      return 'read';
+    }, false).catch(() => 'refused');
+    try {
+      await waitFor(() => harness.core.procs.liveCount(owner) === 1);
+      expect(await thrown(client.call('accounts.remove', { accountId: account.id }))).toThrow(`processes of ${owner} did not stop`);
+      expect(existsSync(account.isolationDir!)).toBe(true);
+      expect((await client.call('accounts.list', {})).some(listed => listed.id === account.id)).toBe(true);
+      // Once its processes stop, the account goes.
+      stop.mockRestore();
+      await client.call('accounts.remove', { accountId: account.id });
+      expect(existsSync(account.isolationDir!)).toBe(false);
+    } finally {
+      stop.mockRestore();
+      await realStop(owner);
+      await read;
+    }
+  });
+
+  test.skipIf(process.platform !== 'linux')('a quota read whose descendant keeps its pipes open still finishes and releases the account', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Leaky quota' });
+    let descendant = 0;
+    const started = Date.now();
+    try {
+      const read = await withQuotaProbe(harness.core, harness.core.accounts.require(account.id), 'echo', async ctx => {
+        // The descendant leaves the child's process group and inherits its stdout, so `close` never comes while it lives.
+        const child = ctx.spawnChild('/bin/sh', ['-c', 'setsid sleep 20 & echo $!; exit 0']);
+        descendant = Number(await new Promise<string>(resolve => child.stdout.once('data', chunk => resolve(String(chunk).trim()))));
+        return 'read';
+      });
+      expect(read).toBe('read');
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
+    } finally {
+      if (descendant > 0) try { process.kill(descendant); } catch { /* already gone */ }
+    }
+  }, 20_000);
 
   test('piped sign-in links and output contain no terminal control sequences', async () => {
     const client = await harness.connect();
@@ -439,6 +521,38 @@ describe('accounts', () => {
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     expect(turn.threadId).toBe(thread.id);
     await harness.core.scheduler.stopAndWait(thread.id);
+  });
+
+  test('an Antigravity CLI account from an older Boite leaves at startup, and its thread waits for another account', async () => {
+    const client = await harness.connect();
+    const echo = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: echo.id });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello from agy' });
+    await waitFor(() => harness.core.threads.require(thread.id).status === 'idle');
+    // What the retired provider left: its default account, a conversation on it and its quota switch.
+    harness.core.journal.putAccount({ id: 'acc_agy', providerId: 'antigravity-cli', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 1 });
+    harness.core.journal.putThread({ ...harness.core.threads.require(thread.id), providerId: 'antigravity-cli', accountId: 'acc_agy', model: 'default', sessionId: 'agy-conversation' });
+    harness.core.journal.setSetting('quota-accounts', { 'quota:antigravity-cli': true, [echo.id]: false });
+    client.close();
+    await harness.server.stop();
+    await harness.core.close();
+
+    const next = new Core({ dataDir: harness.dataDir, token: harness.token });
+    try {
+      expect(next.accounts.list().some(entry => entry.providerId === 'antigravity-cli')).toBe(false);
+      expect(next.journal.getSetting('quota-accounts')).toEqual({ [echo.id]: false });
+      expect((await next.quotas.list()).some(row => row.accountId === 'quota:antigravity-cli' || row.providerId === 'antigravity-cli')).toBe(false);
+      expect(next.threads.get(thread.id).messages.some(message => message.role === 'user')).toBe(true);
+      expect(next.threads.list({}).some(entry => entry.id === thread.id)).toBe(true);
+      expect(next.threads.compactRefusal(next.threads.require(thread.id))).toContain('not installed');
+      // The refusal of a removed account; the model picker's switch moves it.
+      expect(() => next.threads.startTurn(thread.id, 'hello again')).toThrow('was removed');
+      const moved = next.threads.update({ threadId: thread.id, accountId: echo.id });
+      expect(moved).toMatchObject({ providerId: 'echo', accountId: echo.id, sessionId: null });
+      await next.logs.flush();
+      expect(await next.logs.select(record => record.message.includes('unknown provider'), 10)).toEqual([]);
+    } finally { await next.close(); }
   });
 
   test('a thread whose account signed out runs its next turn on another signed-in account of its agent', async () => {

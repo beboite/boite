@@ -1,0 +1,19 @@
+[package]
+name = "boite-launcher"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The `boite` command on Windows: runs the installed core's CLI with each argument as it came"
+
+[[bin]]
+name = "boite"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

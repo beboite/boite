@@ -8,6 +8,8 @@ export const fr: Translation = {
     loading: 'Recherche des sessions',
     empty: 'Aucune session Claude Code pour ce dossier.',
     imported: 'Importée',
+    chooseAccount: 'Choisir un compte pour {title}',
+    accounts: '{count} comptes',
     importing: 'Import en cours',
   }
 };

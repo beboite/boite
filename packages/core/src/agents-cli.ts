@@ -1,13 +1,17 @@
 /**
- * `boite agents`: find the other agents on this core and on linked cores,
- * read their conversations and talk with them. Addresses are short where
+ * `boite threads`: find the other threads on this core and on linked cores,
+ * read their conversations and talk with them (`boite agents` before; the
+ * old word still answers). Addresses are short where
  * they can be: a thread id alone, `<machine>/<thread-id>` or a core id
  * prefix, resolved against the directory. `contacts` and `ask` reach other
  * owners' Boites linked as contacts.
  */
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentRelation, CoordinationView } from '@boite/contracts';
-import { COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
+import { threadActive, COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
+
+/** What `boite threads` says when nothing is reachable. */
+export const NO_CONTACT = 'no other thread is reachable; the user can turn communication on in the thread\'s Communication settings and link machines in Machines';
 
 /** The default wait stays under a two-minute tool timeout. */
 export const WAIT_DEFAULT_S = 90;
@@ -25,7 +29,7 @@ type Printer = (lines: string[], value: unknown) => void;
 class AgentsUsage extends Error {}
 export { AgentsUsage };
 
-function ago(at: number | undefined, now = Date.now()): string {
+export function ago(at: number | undefined, now = Date.now()): string {
   if (at === undefined) return '';
   const s = Math.max(0, Math.round((now - at) / 1000));
   if (s < 60) return `${s}s ago`;
@@ -44,7 +48,7 @@ export function shortAddress(contact: AgentContact, selfCore: string): string {
 }
 
 export function contactLine(contact: AgentContact, selfCore: string, now = Date.now()): string {
-  const working = ['queued', 'running', 'waiting'].includes(contact.status);
+  const working = threadActive(contact.status);
   const completed = contact.lastCompletedAt;
   const recent = typeof completed === 'number' && completed <= now && now - completed <= COORDINATION_RECENT_COMPLETION_MS;
   const completion = typeof completed === 'number' ? `last completed ${ago(completed, now)}` : completed === null ? 'no completed turn' : 'last completion unknown';
@@ -53,7 +57,9 @@ export function contactLine(contact: AgentContact, selfCore: string, now = Date.
     contact.paused ? 'coordination paused' : undefined, contact.projectArchived ? 'project archived; delivery will restore it' : undefined]
     .filter((fact): fact is string => typeof fact === 'string' && fact.length > 0);
   const resources = contact.resources ? `\n    resources: ${contact.resources}` : '';
-  const warning = !working && (contact.status === 'error' || !recent) ? '\n    warning: contacting this inactive thread is allowed but discouraged unless it completed work in the last 15 minutes.' : '';
+  // A failed thread left its work unfinished: a message wakes it to resume, unlike one that is merely done.
+  const warning = working ? '' : contact.status === 'error' ? '\n    note: its last turn failed; a message wakes it to resume.'
+    : !recent ? '\n    warning: contacting this inactive thread is allowed but discouraged unless it completed work in the last 15 minutes.' : '';
   return `${shortAddress(contact, selfCore)}  ${JSON.stringify(contact.title)}  (${facts.join(', ')})${resources}${warning}`;
 }
 
@@ -63,7 +69,7 @@ export function contactLine(contact: AgentContact, selfCore: string, now = Date.
  */
 export function resolveAgent(target: string, contacts: AgentContact[], selfCore: string): AgentAddress {
   const parts = target.split('/');
-  if (parts.length > 2 || parts.some(part => part.length === 0)) throw new AgentsUsage(`agent: expected <thread-id>, <machine>/<thread-id> or <core-id>/<thread-id>, got ${target}`);
+  if (parts.length > 2 || parts.some(part => part.length === 0)) throw new AgentsUsage(`thread: expected <thread-id>, <machine>/<thread-id> or <core-id>/<thread-id>, got ${target}`);
   const [where, threadId] = parts.length === 2 ? [parts[0]!, parts[1]!] : [null, parts[0]!];
   if (where !== null && /^[0-9a-f]{64}$/.test(where)) return { coreId: where, threadId };
   const found = contacts.filter(contact => contact.threadId === threadId && (where === null
@@ -71,14 +77,14 @@ export function resolveAgent(target: string, contacts: AgentContact[], selfCore:
     || (/^[0-9a-f]{6,}$/.test(where) && contact.coreId.startsWith(where))
     || (where === 'here' && contact.coreId === selfCore)));
   if (found.length === 1) return { coreId: found[0]!.coreId, threadId };
-  if (found.length === 0) throw new Error(`agent ${target}: no reachable agent has this address; boite agents list shows them, boite agents find <words> searches them`);
-  throw new Error(`agent ${target}: ${found.length} agents share this thread id; name the machine: ${found.map(contact => shortAddress(contact, '')).join(', ')}`);
+  if (found.length === 0) throw new Error(`thread ${target}: no reachable thread has this address; boite threads lists them, boite threads find <words> searches them`);
+  throw new Error(`thread ${target}: ${found.length} threads share this id; name the machine: ${found.map(contact => shortAddress(contact, '')).join(', ')}`);
 }
 
-/** How the other end relates to this thread, in the words `boite agents` prints. */
+/** How the other end relates to this thread, in the words `boite threads` prints. */
 const RELATION: Record<AgentRelation, string> = {
   starter: 'started this thread', started: 'you started it', parent: 'your parent', child: 'your subagent',
-  resident: 'the agent your project is entrusted to', project: 'same project', 'other-project': 'other project', machine: 'other machine',
+  resident: 'the bot your project is entrusted to', project: 'same project', 'other-project': 'other project', machine: 'other machine',
 };
 /** Past this, `send` and `reply` remind the agent that a message is read best short. */
 export const COMPACT_CHARS = 600;
@@ -99,10 +105,10 @@ function sameAddress(a: AgentAddress, b: AgentAddress): boolean {
 export async function agentsCommand(client: CoreClient, threadId: string, rest: string[], options: AgentsOptions, print: Printer): Promise<void> {
   const want = (index: number, what: string): string => {
     const value = rest[index];
-    if (value === undefined) throw new AgentsUsage(`agents ${rest[0] ?? ''} needs ${what}`);
+    if (value === undefined) throw new AgentsUsage(`threads ${rest[0] ?? ''} needs ${what}`);
     return value;
   };
-  const action = want(0, 'list, find, read, send, reply, log, wait, inbox, contacts or ask');
+  const action = want(0, 'find, read, send, reply, log, wait, inbox, contacts or ask');
   const view = (): Promise<CoordinationView> => client.call('collaboration.get', { threadId });
   const directory = () => client.call('collaboration.directory', { threadId });
   const resolve = async (target: string): Promise<{ to: AgentAddress; self: AgentAddress; contact?: AgentContact }> => {
@@ -121,23 +127,19 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     return letters.map(letter => letterLine(letter, self));
   };
 
-  if (action === 'list') {
-    const [{ self }, result] = await Promise.all([view(), directory()]);
-    const lines = result.agents.map(contact => contactLine(contact, self.coreId));
-    if (lines.length === 0) lines.push('no other agent is reachable; the user can turn communication on in the thread\'s Communication settings and link machines in Machines');
-    print([...lines, ...result.unavailable.map(name => `unavailable: ${name}`)], result);
-  } else if (action === 'find' || action === 'search') {
+  // `threads` and `threads list` are the listing, in control-cli.ts.
+  if (action === 'find' || action === 'search') {
     const query = rest.slice(1).join(' ');
-    if (!query) throw new AgentsUsage('agents find needs words to look for');
+    if (!query) throw new AgentsUsage('threads find needs words to look for');
     const [{ self }, result] = await Promise.all([view(), client.call('collaboration.search', { threadId, query })]);
     const lines = result.matches.map((match: AgentMatch) => [
       `${contactLine(match, self.coreId)}\n    matched: ${match.matched.join(', ')}`,
       ...match.excerpts.map(text => `    > ${text}`),
     ].join('\n'));
-    if (lines.length === 0) lines.push(`no reachable agent matches ${JSON.stringify(query)}`);
+    if (lines.length === 0) lines.push(`no reachable thread matches ${JSON.stringify(query)}`);
     print([...lines, ...result.unavailable.map(name => `unavailable: ${name}`)], result);
   } else if (action === 'read') {
-    const { to, self } = await resolve(want(1, 'an agent from agents list'));
+    const { to, self } = await resolve(want(1, 'a thread from boite threads'));
     const result = await client.call('collaboration.read', { threadId, target: to, ...(options.last === undefined ? {} : { limit: options.last }), ...(options.before === undefined ? {} : { before: options.before }) });
     const lines = [contactLine(result.contact, self.coreId)];
     if (result.more && result.entries[0]) lines.push(`(older entries: --before ${result.entries[0].at})`);
@@ -147,9 +149,9 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     }
     print(lines, result);
   } else if (action === 'send' || action === 'reply') {
-    const target = want(1, action === 'send' ? 'an agent from agents list' : 'an incoming message id from agents inbox');
+    const target = want(1, action === 'send' ? 'a thread from boite threads' : 'an incoming message id from threads inbox');
     const body = rest.slice(2).join(' ');
-    if (!body) throw new AgentsUsage(`agents ${action} needs message text`);
+    if (!body) throw new AgentsUsage(`threads ${action} needs message text`);
     let to: AgentAddress;
     let self: AgentAddress;
     let contact: AgentContact | undefined;
@@ -157,19 +159,19 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
       const current = await view();
       self = current.self;
       const letter = current.messages.find(m => m.id === target && m.to.coreId === self.coreId && m.to.threadId === threadId);
-      if (!letter) throw new AgentsUsage('reply needs an incoming message id from agents inbox');
+      if (!letter) throw new AgentsUsage('reply needs an incoming message id from threads inbox');
       to = { coreId: letter.from.coreId, threadId: letter.from.threadId };
       contact = (await directory()).agents.find(agent => sameAddress(agent, to));
     } else ({ to, self, contact } = await resolve(target));
     const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: options.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
-    const recipient = contact ? contactLine(contact, self.coreId) : 'warning: recipient activity is unknown; sending or replying may wake an inactive thread and restore its archived project. Check agents list or read before contacting it.';
+    const recipient = contact ? contactLine(contact, self.coreId) : 'warning: recipient activity is unknown; sending or replying may wake an inactive thread and restore its archived project. Check boite threads or threads read before contacting it.';
     const lines = [recipient, `id: ${letter.id}`, `status: ${letter.status}`, ...(letter.error ? [`error: ${letter.error}`] : []),
-      ...(body.length > COMPACT_CHARS ? [`note: ${body.length} characters. Keep agent messages to one to three short lines; the recipient already sees your thread, project and task.`] : [])];
+      ...(body.length > COMPACT_CHARS ? [`note: ${body.length} characters. Keep messages to other threads to one to three short lines; the recipient already sees your thread, project and task.`] : [])];
     if (options.wait && letter.status !== 'rejected') lines.push(...await waitFor(to, self));
     else lines.push('Delivery is not consent. Wait for an explicit reply before a disruptive action.');
     print(lines, letter);
   } else if (action === 'log') {
-    const { to, self } = await resolve(want(1, 'an agent from agents list'));
+    const { to, self } = await resolve(want(1, 'a thread from boite threads'));
     const current = await view();
     const letters = current.messages.filter(m => sameAddress(m.from, to) || sameAddress(m.to, to));
     print(letters.length === 0 ? [`no message exchanged with ${want(1, '')} yet`] : letters.map(letter => letterLine(letter, self)), letters);
@@ -188,16 +190,16 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     const contacts = await client.call('collaboration.contacts', { threadId });
     const lines = contacts.map(contact => `${contact.name}  (${contact.link}, opened to you: ${contact.projects.length ? contact.projects.join(', ') : 'no project yet'})`);
     if (lines.length === 0) lines.push("no contact; the user links other owners' Boites in Contacts");
-    else lines.push('Their agents in opened projects are in agents list as <contact>/<thread-id>. Ask a contact for an agent with agents ask <contact> <text>.');
+    else lines.push('Their threads in opened projects are in boite threads as <contact>/<thread-id>. Ask a contact for one with threads ask <contact> <text>.');
     print(lines, contacts);
   } else if (action === 'ask') {
-    const contact = want(1, 'a contact from agents contacts');
+    const contact = want(1, 'a contact from threads contacts');
     const body = rest.slice(2).join(' ');
-    if (!body) throw new AgentsUsage('agents ask needs the request text: the project or work you need an agent for');
+    if (!body) throw new AgentsUsage('threads ask needs the request text: the project or work you need a thread for');
     const request = await client.call('collaboration.ask', { threadId, contact, text: body });
     const lines = [`request ${request.id} to ${request.contact}: ${request.status}${request.gitRemote ? ` (sent with your git remote ${request.gitRemote})` : ''}`];
     if (options.wait) lines.push(...await waitFor({ coreId: request.coreId, threadId: request.id }, { coreId: request.from.coreId, threadId }));
-    else lines.push('The answer comes back to this thread as a message: the project opened and its agents, or the reason for a refusal.');
+    else lines.push('The answer comes back to this thread as a message: the project opened and its threads, or the reason for a refusal.');
     print(lines, request);
-  } else throw new AgentsUsage('agents expects list, find, read, send, reply, log, wait, inbox, contacts or ask');
+  } else throw new AgentsUsage('threads expects list, find, read, send, reply, log, wait, inbox, contacts or ask');
 }

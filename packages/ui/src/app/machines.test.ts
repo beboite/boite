@@ -8,7 +8,7 @@ import { mountOnFake, query, test, type, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
 
-test('automatic settings sync follows the chosen source outside settings and stops when unchecked', async () => {
+test('the default machine is followed outside settings, and a follower names it above its pages and stars what it keeps', async () => {
   await mountOnFake('/?fake=1&machines=1');
   await waitFor(() => workspace.machines.length === 2);
   const remote = workspace.machines.find(machine => machine.store !== store)!;
@@ -17,14 +17,15 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await remote.store.client!.call('settings.set', { warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   await store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentCpuCapPercent: 85 });
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
-  const checkbox = query<HTMLInputElement>('[data-testid=group-sync]');
-  expect(checkbox.type).toBe('checkbox');
-  checkbox.click();
+  // The page groups the connected machines, then offers a default machine for the group.
+  await waitFor(() => remote.store.group?.cores.length === 2 && document.querySelector('[data-testid=group-home-pick]') !== null);
+  const home = store.group!.self;
+  query<HTMLButtonElement>('[data-testid=group-home-pick]').click();
+  flushSync();
+  query<HTMLElement>(`[data-testid=group-home-pick-menu] [data-value="${home}"]`).click();
   await waitFor(() => remote.store.settings?.asyncQuestions === false);
+  expect(remote.store.group?.settingsHome).toBe(home);
   expect(document.querySelector('[data-testid=confirm-ok]')).toBeNull();
-  expect(document.querySelector('[data-testid=machines-page]')).not.toBeNull();
-  expect(document.querySelector('[data-testid=machine-settings]')).toBeNull();
   expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   store.showChat();
   await store.client!.call('settings.set', { asyncQuestions: true });
@@ -34,7 +35,7 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await store.client!.call('brain.configure', { ...brain.config, boiteGuide: false });
   await waitFor(() => workspace.settingsSync.reports[remote.id]?.report.brain === 'copied');
   await vi.waitFor(async () => expect((await remote.store.client!.call('brain.status', {})).config).toMatchObject({ path: '/home/user/target-brain', boiteGuide: false }));
-  // Missed changes catch up when the destination reconnects.
+  // Missed changes catch up when the follower reconnects.
   remote.store.connection = 'closed';
   flushSync();
   await store.client!.call('settings.set', { asyncQuestions: false });
@@ -42,17 +43,72 @@ test('automatic settings sync follows the chosen source outside settings and sto
   flushSync();
   await waitFor(() => remote.store.settings?.asyncQuestions === false);
   expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
-  // Switching the visible host does not reverse the saved source.
-  await workspace.select(remote.store);
-  await store.client!.call('settings.set', { asyncQuestions: true });
-  await waitFor(() => remote.store.settings?.asyncQuestions === true);
-  await workspace.select(store);
+
+  // The follower's settings, picked above the page: the window stays on its own machine.
+  store.showSettings('general');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null);
+  expect(document.querySelector('[data-testid=settings-is-home]')).not.toBeNull();
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  flushSync();
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => document.querySelector('[data-testid=settings-follows]') !== null);
+  expect(workspace.active).toBe(store);
+  expect(document.querySelector('[data-testid=sync-mark]')).toBeNull();
+  // A setting changed there stays there, starred, whatever the default machine does next.
+  const short = store.settings?.shortAnswers ?? true;
+  query<HTMLInputElement>('[data-testid=setting-short-answers]').click();
+  await waitFor(() => remote.store.settings?.shortAnswers === !short && remote.store.settings?.syncOverrides?.includes('shortAnswers') === true);
+  expect(store.settings?.shortAnswers ?? true).toBe(short);
+  await waitFor(() => document.querySelector('[data-testid=sync-mark][data-key=shortAnswers]') !== null);
+  await store.client!.call('settings.set', { shortAnswers: short, muteAgents: false });
+  await waitFor(() => remote.store.settings?.muteAgents === false);
+  expect(remote.store.settings?.shortAnswers).toBe(!short);
+  // The star gives it back to the default machine.
+  query<HTMLButtonElement>('[data-testid=sync-mark][data-key=shortAnswers]').click();
+  await waitFor(() => remote.store.settings?.shortAnswers === short && document.querySelector('[data-testid=sync-mark]') === null);
+  expect(remote.store.settings?.syncOverrides).toEqual([]);
+
+  // No default machine any more: nothing follows.
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
-  query<HTMLInputElement>('[data-testid=group-sync]').click();
-  await store.client!.call('settings.set', { asyncQuestions: false });
+  await waitFor(() => document.querySelector('[data-testid=group-home-pick]') !== null);
+  query<HTMLButtonElement>('[data-testid=group-home-pick]').click();
+  flushSync();
+  query<HTMLElement>('[data-testid=group-home-pick-menu] [data-value=none]').click();
+  await waitFor(() => remote.store.group?.settingsHome === undefined);
+  await store.client!.call('settings.set', { asyncQuestions: true });
   await new Promise(resolve => setTimeout(resolve, 300));
-  expect(remote.store.settings?.asyncQuestions).toBe(true);
+  expect(remote.store.settings?.asyncQuestions).toBe(false);
+});
+
+test('background compaction turns on for the machine picked above it, not the window\'s', async () => {
+  // Flipped from the desktop app, the switch only ever reached the PC's core, never the server running the thread.
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const remote = workspace.machines.find(machine => machine.store !== store)!;
+  store.showSettings('experiments');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=background-compaction-on]') !== null);
+  // This device's switches come first; the bar names the machine of the cards below it.
+  const page = query('[data-testid=experiments-page]');
+  const bar = query('[data-testid=settings-machine-bar]');
+  expect(page.contains(bar)).toBe(true);
+  expect(bar.compareDocumentPosition(query('[data-testid=experiment-goal2]')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  flushSync();
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  query<HTMLInputElement>('[data-testid=background-compaction-on]').click();
+  await waitFor(() => remote.store.settings?.backgroundCompaction === true);
+  expect(store.settings?.backgroundCompaction ?? false).toBe(false);
+  // The checklist model sits among this device's switches, above the bar: it stays this window's machine's.
+  query<HTMLInputElement>('[data-testid=experiment-goal2]').click();
+  await waitFor(() => document.querySelector('[data-testid=goal2-tracker-model]') !== null);
+  query<HTMLButtonElement>('[data-testid=goal2-tracker-model]').click();
+  flushSync();
+  const picked = [...document.querySelectorAll<HTMLElement>('[data-testid=goal2-tracker-model-menu] [data-value]')].find(row => row.dataset.value !== 'auto')!;
+  picked.click();
+  await waitFor(() => store.settings?.goalTracker != null);
+  expect(remote.store.settings?.goalTracker ?? null).toBe(null);
+  expect(workspace.active).toBe(store);
 });
 
 test('machines coexist and disconnecting a remote leaves the primary connected', async () => {

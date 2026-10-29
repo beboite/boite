@@ -10,6 +10,18 @@ then lets the next core continue that work. The journal owns the record;
    any stop. A core killed during the wait therefore leaves a handoff.
 2. Stop each running turn between tool calls. An active tool has up to
    30 seconds to finish; after that, Stop applies at its current position.
+   A tool already running for 30 seconds when the restart starts gets no
+   wait: on 2026-10-22 two updates each spent the whole grace on such a call
+   (a nine-minute script, a polling loop) and cut it anyway: 30.6 and 30.2
+   seconds between the `core.handoff.started` and `core.shutdown.started`
+   events of `%LOCALAPPDATA%\boite2\logs\core.*.ndjson`, each line's `at`
+   subtracted. On Windows:
+
+   ```powershell
+   Get-Content "$env:LOCALAPPDATA\boite2\logs\core.*.ndjson" | ConvertFrom-Json |
+     Where-Object event -in 'core.handoff.started', 'core.shutdown.started' |
+     Sort-Object at | Select-Object at, event
+   ```
    Normal stop enforcement ends processes after 10 seconds and force-settles
    a remaining turn two seconds later.
 3. Exit after draining. Eligible queued turns remain queued in the journal.
@@ -61,9 +73,9 @@ agent resumes them with `boite delegate resume`
 ([delegation](delegation.md#stop-pause-and-resume),
 [workflows](workflows.md#failure-stop-and-restart)).
 
-Resident-agent sessions, compactions and coordination wakes are excluded. Their
-own runtimes require explicit resume when recovery pauses them. See
-[persistent agents](agents.md).
+Compactions and coordination wakes are excluded. A bot's thread
+resumes like any conversation; a wake that was waiting for its thread to be
+free survives the restart ([bots](bots.md#wakes)).
 Native processes and terminals follow the ordinary [shutdown limits](trace.md#linux-and-macos).
 
 ## Turns that stop before their answer
@@ -87,13 +99,15 @@ no turn running gets a resume for that alone.
 Nothing resumes for a turn that answered, a turn the user stopped, a refusal
 at capacity or at a usage limit, which retries on its own
 ([usage](usage.md#when-a-provider-refuses-a-turn)), a compaction or coordination turn, a
-sub-thread, a persistent agent, or background work a Stop or an archive ended.
+sub-thread, or background work a Stop or an archive ended.
 After a crash, nothing resumes when the previous core wrote its last thread
 event over an hour ago, or when it was stopped on purpose without a handoff
 (`core.shutdown`, `SIGINT`, `POST /shutdown`), which leaves the journal setting
 `auto-continue-stopped`.
 
-Each plan sits in the journal setting `auto-continues`, so a restart arms it
+Each plan sits in the journal setting `resumes` with the usage limit resumes
+(`threads/resume.ts`; a core that still has the older `auto-continues` or
+`limit-resumes` reads them into it once), so a restart arms it
 again; one caught while dispatching is dropped. The row shows it as `retry`
 (`kind: 'auto-continue'`) with Do not resume. When it fires it is dropped
 instead if the thread was archived, answered or is busy, a card waits for the

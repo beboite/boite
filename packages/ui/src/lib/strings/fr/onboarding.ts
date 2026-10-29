@@ -15,7 +15,7 @@ export const fr: Translation = {
       dealHint: 'Aussi les modèles et réglages utilisés. Merci !',
       details: "De base : installations actives sous un identifiant aléatoire haché, et lancements, conversations et résultats des tours sous des identifiants qui changent chaque jour. Aucun profil. Marché conclu ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable ; les modèles privés comptent comme « autre ». L'application marche pareil dans tous les cas, et les réglages le changent quand vous voulez.",
       optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
-      offLabel: 'tout désactiver :c',
+      offLabel: "désactiver les statistiques d'usage :c",
       doc: 'Ce qui est collecté'
     },
     demo: {

@@ -30,7 +30,7 @@ export function reachesThroughLink(root: string, target: string): boolean {
   return false;
 }
 
-/** A zip member may not climb out of the directory it is unpacked into. */
+/** An archive member may not climb out of the directory it is unpacked into. */
 export function safeEntryPath(name: string): string | null {
   const cleaned = name.split('\\').join('/');
   if (cleaned.length === 0 || cleaned.endsWith('/')) return null;
@@ -41,7 +41,7 @@ export function safeEntryPath(name: string): string | null {
 }
 
 /**
- * fflate's streaming unzip, one archive chunk at a time, so a 400 MB member
+ * fflate's streaming decompressors, one archive chunk at a time, so a 400 MB member
  * never sits in memory. A member the descriptor does not list is skipped by
  * simply never being started. `signal` is the install run's own.
  */
@@ -83,6 +83,9 @@ export async function extractRelease(
   /** A listed member's file, opened without following a link planted in its place. */
   const openMember = (safe: string, entry: string): number => {
     const target = join(releaseDir, safe);
+    if (reachesThroughLink(releaseDir, target)) {
+      throw refused(`refusing to unpack ${safe} through a symlink`, { entry });
+    }
     mkdirSync(dirname(target), { recursive: true });
     if (lstatSync(dirname(target)).isSymbolicLink() || (existsSync(target) && lstatSync(target).isSymbolicLink())) {
       throw refused(`refusing to unpack ${safe} through a symlink`, { entry });
@@ -197,6 +200,8 @@ async function feedArchive(
 }
 
 const TAR_BLOCK = 512;
+/** Only names and pax records are buffered; file bodies always stream to disk. */
+const TAR_METADATA_BYTES = 1024 * 1024;
 /** Regular files: `0`, the old NUL, and `7` (contiguous). */
 const TAR_FILES = new Set([0x30, 0x00, 0x37]);
 const TAR_DIRECTORY = 0x35;
@@ -259,7 +264,7 @@ export class TarReader {
 
   /** The stream is over: a member cut short means the archive was. */
   finish(): void {
-    if (this.#remaining > 0 || this.#headerFill > 0) throw refused('the archive ends in the middle of an entry');
+    if (this.#remaining > 0 || this.#headerFill > 0 || this.#padding > 0) throw refused('the archive ends in the middle of an entry');
   }
 
   #startEntry(): void {
@@ -281,6 +286,7 @@ export class TarReader {
     this.#remaining = size;
     this.#padding = (TAR_BLOCK - (size % TAR_BLOCK)) % TAR_BLOCK;
     if (type === TAR_PAX || type === TAR_GNU_LONG_NAME || type === TAR_PAX_GLOBAL) {
+      if (size > TAR_METADATA_BYTES) throw refused('the archive name metadata exceeds 1 MiB');
       this.#meta = { type, chunks: [] };
     } else {
       const name = this.#nextName ?? (prefix === '' ? plain : `${prefix}/${plain}`);
@@ -314,13 +320,17 @@ function tarString(field: Uint8Array): string {
 
 /** Octal, or base-256 when the first byte has its high bit set. */
 function tarNumber(field: Uint8Array): number {
+  let value: number;
   if ((field[0]! & 0x80) !== 0) {
-    let value = field[0]! & 0x7f;
+    value = field[0]! & 0x7f;
     for (const byte of field.subarray(1)) value = value * 256 + byte;
-    return value;
+  } else {
+    const text = tarString(field).trim();
+    if (!/^[0-7]*$/.test(text)) throw refused('the archive holds an invalid tar number');
+    value = text === '' ? 0 : Number.parseInt(text, 8);
   }
-  const text = tarString(field).trim();
-  return text === '' ? 0 : Number.parseInt(text, 8);
+  if (!Number.isSafeInteger(value) || value < 0) throw refused('the archive holds an invalid tar number');
+  return value;
 }
 
 export function checkSizes(install: ProviderInstall, releaseDir: string): void {

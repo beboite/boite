@@ -25,16 +25,44 @@
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import { providerGroups } from '../lib/provider-family';
-import { workspace } from '../lib/workspace.svelte';
-  import { browserBridge } from '../lib/browser-bridge';
+  import { isThisPC, workspace } from '../lib/workspace.svelte';
+  import SettingsMachineBar from './SettingsMachineBar.svelte';
+  import { untrack } from 'svelte';
   import { revealSettingsCard } from '../lib/settings-flash';
+  import { desktopPage, desktopSettings, machinePage, ownerOnly } from '../lib/settings-tabs';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
+
+  /**
+   * The pages that change one machine (`machinePage`) take it from the bar
+   * above them; the others are this window's (appearance), the whole group's (machines) or
+   * pick their own (usage, which also reads every machine). Experiments mixes
+   * this device's switches with a machine's, so its bar sits above the latter.
+   */
+  /** Machines this window controls, and the window's own whatever its role there. */
+  let choices = $derived(workspace.machines.filter((machine) => machine.store === store || (machine.store.connection === 'ready' && machine.store.owner)));
+  let picked = $state<string | null>(null);
+  /**
+   * Until one is picked, a page shows the window's machine. Plugins open on
+   * this PC instead: desktop apps run where they were installed.
+   */
+  let chosen = $derived(choices.find((machine) => machine.id === picked)
+    ?? (store.settingsTab === 'plugins' ? choices.find(isThisPC) : undefined)
+    ?? choices.find((machine) => machine.store === store));
+  let target = $derived(machinePage(store.settingsTab) ? chosen?.store ?? store : store);
+  /** The bar when there is a machine to pick or a default machine to speak of. */
+  let bar = $derived(machinePage(store.settingsTab) && chosen !== undefined && (choices.length > 1 || chosen.store.group?.settingsHome !== undefined));
+  /**
+   * A page reads the card it was asked to show off its own machine's layout:
+   * on another machine than the window's, that layout follows the window's.
+   */
+  $effect(() => {
+    const machine = target, tab = store.settingsTab, section = store.settingsSection;
+    if (machine === store) return;
+    untrack(() => { machine.settingsTab = tab; machine.settingsSection = section; });
+  });
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-
-  /** Providers, Plugins, Resources, Brain and Diagnostics call nothing a paired device may call. */
-  const OWNER_TABS: SettingsTab[] = ['accounts', 'plugins', 'resources', 'brain', 'diagnostics'];
 
   type Tab = SettingsTile;
 
@@ -67,7 +95,9 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
-      ...(browserBridge.paints ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
+      ...(store.owner ? [{ id: 'windows', label: strings.windows.settings.allowedHeading }, { id: 'window-exclusions', label: strings.windows.settings.exclusionsHeading }] : []),
+      { id: 'secrets', label: strings.secrets.heading },
+      ...(store.owner ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
@@ -78,7 +108,10 @@ import { workspace } from '../lib/workspace.svelte';
     ],
     brain: [{ id: 'brain-folder', label: strings.brain.folder }, { id: 'hooks', label: strings.hooks.heading }],
     // The page's order: connected providers first, then the ones still to add.
-    accounts: [...providerList.connected, ...providerList.rest, ...providerList.off].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
+    accounts: [
+      ...[...providerList.connected, ...providerList.rest, ...providerList.off].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
+      { id: 'agent-updates', label: strings.harnessUpdates.heading }
+    ],
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-chart', label: strings.usage.chart },
@@ -91,14 +124,14 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'tasks', label: strings.protection.tasks }
     ],
     machines: [
-      { id: 'machines', label: strings.machines.heading },
-      { id: 'phone', label: strings.phone.heading }
+      { id: 'updates', label: strings.appUpdate.updates },
+      { id: 'machines', label: strings.machines.heading }
     ],
     advanced: [
-      ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
+      ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'phone', label: strings.phone.heading }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
       { id: 'core', label: strings.settings.core }
     ],
-    experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })),
+    experiments: [...EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title })), ...(store.owner ? [{ id: 'background-compaction', label: strings.settings.backgroundCompaction }, { id: 'device-stream', label: strings.settings.deviceStream }] : [])],
     diagnostics: [
       { id: 'diagnostics-status', label: strings.diagnostics.status },
       { id: 'diagnostics-problems', label: strings.diagnostics.problems },
@@ -113,14 +146,14 @@ import { workspace } from '../lib/workspace.svelte';
    * whose names are already in view, and a sub-entry there only repeats a
    * heading. The search still finds every section above.
    */
-  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage', 'machines'];
+  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage'];
   let toc = $derived<Partial<Record<SettingsTab, { id: string; label: string }[]>>>(
     Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
   );
 
-  let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
-  /** A tab this client has no nav entry for lands on Home rather than nowhere. */
-  let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'home');
+  let tabs = $derived(all.filter((tab) => store.owner || !ownerOnly(tab.id)));
+  /** A page only the owner may open lands on Home on a paired device, as it does on a phone. */
+  let tab = $derived(desktopPage(store.settingsTab, store.owner));
 
   /**
    * Single settings the search also finds, each with the card it sits on:
@@ -135,7 +168,10 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.toolSummaries],
     ['general', 'conversations', strings.settings.titleModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
-    ...(browserBridge.paints ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
+    ...(inShell ? [['general', 'conversations', strings.features.openChatLinks.title] as [SettingsTab, string, string]] : []),
+    ['general', 'conversations', strings.features.previewComments.title],
+    ...(store.owner ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
+    ...(store.owner ? [['general', 'window-exclusions', strings.windows.settings.addLabel]] as [SettingsTab, string, string][] : []),
     ['general', 'archived', strings.settings.archived.doneRetentionLabel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
@@ -146,6 +182,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'theme', strings.settings.language],
     ['appearance', 'theme', strings.settings.groupChanges],
     ['appearance', 'theme', strings.settings.expandDiffs],
+    ['appearance', 'theme', strings.features.edgeScrollbars.title],
     ['appearance', 'reading', strings.settings.font],
     ['appearance', 'reading', strings.settings.monoFont],
     ...(inShell ? [['appearance', 'reading', strings.settings.zoom] as [SettingsTab, string, string]] : []),
@@ -155,17 +192,19 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'buttons', strings.terminal.title],
     ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
-    ['machines', 'machines', strings.appUpdate.heading],
-    ['machines', 'machines', strings.harnessUpdates.auto],
-    ['machines', 'machines', strings.harnessUpdates.heading],
-    ['machines', 'machines', strings.serverUpdate.updates],
+    ['machines', 'updates', strings.appUpdate.heading],
+    ['machines', 'updates', strings.appUpdate.channel],
+    ['accounts', 'agent-updates', strings.harnessUpdates.auto],
+    ['accounts', 'agent-updates', strings.harnessUpdates.heading],
+    ['machines', 'updates', strings.serverUpdate.updates],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
     ['resources', 'tasks', strings.settings.reapOrphans],
-    ['machines', 'phone', strings.settings.listenOnLan],
+    ['advanced', 'phone', strings.settings.listenOnLan],
     ['machines', 'machines', strings.group.addDevice],
-    ['machines', 'phone', strings.phone.publicUrl],
+    ['machines', 'machines', strings.machines.home],
+    ['advanced', 'phone', strings.phone.publicUrl],
     ['machines', 'machines', strings.machines.main],
     ['advanced', 'execution', strings.settings.warmProcessMinutes],
     ['limits', 'limit-resume', strings.quotas.autoResume],
@@ -198,10 +237,6 @@ import { workspace } from '../lib/workspace.svelte';
   const motion = (): ScrollBehavior => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth');
 
   function jump(id: string) {
-    if (tab === 'machines') {
-      store.showSettings('machines', id);
-      return;
-    }
     store.settingsSection = null;
     selectedSection = id;
     const target = document.getElementById(`settings-${id}`);
@@ -255,8 +290,12 @@ import { workspace } from '../lib/workspace.svelte';
   });
 </script>
 
-{#if narrow.current && !inShell}
-  <MobileSettings {store} {onopenthread} />
+{#snippet machineBar()}
+  {#if chosen}<SettingsMachineBar machine={chosen} machines={choices} onpick={(id) => { picked = id; }} />{/if}
+{/snippet}
+
+{#if !desktopSettings(narrow.current)}
+  <MobileSettings {store} {target} bar={bar ? machineBar : undefined} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">
   <nav aria-label={strings.settings.heading}>
@@ -275,7 +314,7 @@ import { workspace } from '../lib/workspace.svelte';
         data-testid="settings-tab-{entry.id}"
         aria-current={tab === entry.id ? 'page' : undefined}
         aria-expanded={toc[entry.id] ? tab === entry.id : undefined}
-        onclick={() => { selectedSection = ''; store.showSettings(entry.id, entry.id === 'machines' ? 'machines' : undefined); }}
+        onclick={() => { selectedSection = ''; store.showSettings(entry.id); }}
       >
         <Icon size={15} strokeWidth={1.75} />
         <span class="ui-label">{entry.label}</span>
@@ -305,40 +344,43 @@ import { workspace } from '../lib/workspace.svelte';
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
   {#key tab}
-    <section class="framed" onscrollcapture={spy}>
+    <section class="framed" class:with-bar={bar} onscrollcapture={spy}>
+      {#if bar && tab !== 'experiments'}{@render machineBar()}{/if}
+      {#key target}
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
-        <BrainPage {store} />
+        <BrainPage store={target} />
       {:else if tab === 'voice'}
-        <VoiceSettings {store} />
+        <VoiceSettings store={target} />
       {:else if tab === 'general'}
-        <GeneralSettings {store} />
+        <GeneralSettings store={target} here={store} />
       {:else if tab === 'machines'}
         <MachinesPage {onopenthread} />
       {:else if tab === 'advanced'}
-        <AdvancedSettings {store} />
+        <AdvancedSettings store={target} />
       {:else if tab === 'appearance'}
         <AppearancePage {store} />
       {:else if tab === 'keyboard'}
-        <KeyboardPage {store} />
+        <KeyboardPage store={target} />
       {:else if tab === 'accounts'}
-        <AccountsPage {store} />
+        <AccountsPage store={target} />
       {:else if tab === 'usage'}
         <UsagePage {store} />
       {:else if tab === 'limits'}
-        <LimitsPage {store} />
+        <LimitsPage store={target} />
       {:else if tab === 'task-manager'}
         <TaskManagerLoader {store} {onopenthread} />
       {:else if tab === 'plugins'}
-        <PluginsPage {store} />
+        <PluginsPage store={target} />
       {:else if tab === 'experiments'}
-        <ExperimentsPage {store} />
+        <ExperimentsPage {store} {target} bar={bar ? machineBar : undefined} />
       {:else if tab === 'diagnostics'}
-        <DiagnosticsPage {store} {onopenthread} />
+        <DiagnosticsPage store={target} {onopenthread} />
       {:else}
-        <ResourcesPage {store} />
+        <ResourcesPage store={target} />
       {/if}
+      {/key}
     </section>
   {/key}
 </div>
@@ -346,6 +388,17 @@ import { workspace } from '../lib/workspace.svelte';
 
 <style>
   .mobile-subcategories { display: none; }
+  /* With the machine bar, the panel scrolls bar and page together, on one column. */
+  .framed.with-bar { scrollbar-gutter: stable both-edges; }
+  .framed.with-bar > :global(.machine-bar) { padding: 24px clamp(20px, 4vw, 64px) 0; }
+  .framed.with-bar > :global(.page) { height: auto; overflow: visible; padding-top: 20px; }
+  @media (min-width: 721px) {
+    .framed.with-bar > :global(.machine-bar) { padding-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2)); max-width: none; }
+  }
+  @media (max-width: 720px) {
+    .framed.with-bar > :global(.machine-bar) { padding: 16px 16px 0; }
+    .framed.with-bar > :global(.page) { padding-top: 16px; }
+  }
   .category { flex: none; }
   .rule { flex: none; height: 1px; margin: 8px 10px; background: var(--color-border); }
   .tab span { flex: 1; text-align: left; }
@@ -376,6 +429,7 @@ import { workspace } from '../lib/workspace.svelte';
 
 
   .back {
+    flex: none;
     justify-content: flex-start;
     margin-bottom: 10px;
   }

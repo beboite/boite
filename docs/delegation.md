@@ -26,10 +26,20 @@ permissions, process trace and usage. It inherits the parent's project,
 checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
 these Boite subagents, and appear in their own section of the tab. The global
-Persistent agents page holds agents with their own roles, memory and missions;
-it is not the list of children of a conversation. Enable it in Settings >
-Experiments to reveal its bottom-left launcher, which opens a dedicated
-interface. It adds no conversation panel or mobile navigation tab.
+Bots page holds bots: agents with their own identity, memory and
+routines, each in a thread of its own; it is not the list of children of a
+conversation. Enable it in Settings > Experiments to show the Threads and
+Bots switch at the top of the desktop sidebar and the Bots tab in the phone's
+bottom navigation. Each bot opens its ordinary conversation, with its desk in
+the right panel ([bots](bots.md)).
+
+A bot delegates project work with `boite delegate spawn "<brief>" --project <project>`.
+The project must be entrusted to that bot. With one entrusted project, delegation
+uses it automatically; with several or none, an unnamed child stays personal.
+Project workers run in the project's folder and appear in its thread list,
+including Done and Archived, while the bot keeps steering them from Subagents.
+Ordinary conversations keep their helpers under their parent. Memory passes
+stay in the bot's brain folder.
 
 Subagents is one list and nothing else: the conversation's
 [workflow](workflows.md) runs, then the Boite subagents, then the provider's
@@ -74,8 +84,8 @@ identify an individual child.
 Codex collaboration calls and subagent activity become persisted tool parts.
 Child-thread text and tools stay out of the parent's answer. Claude Agent/Task
 calls and background agent lists, Muse subagent items, and named agent tools
-from ACP and pi feed the same view. Other drivers, including agy's ordinary
-tool stream, retain agent tools if the provider reports their name and brief.
+from ACP and pi feed the same view. Other drivers retain agent tools if the
+provider reports their name and brief.
 A provider that sends only text or shell output exposes no native agent list.
 
 Agent CLIs launched through a shell also appear under "Started from a command"
@@ -87,10 +97,13 @@ own provider process do not appear as children.
 After a core restart, an old trace without an exit stays in history as Status
 unknown unless the current process registry confirms it is still running.
 
-Windows records descendant starts and exits through its process jobs. Linux and
-macOS record only direct processes, so a CLI launched inside another shell can
-remain outside this view. Provider-native agents and Boite-managed children use
-their existing lifecycle on every platform.
+Windows records descendant starts and exits through its process jobs. When the
+job never reports an exit, for example after a nested job is terminated, the
+next load sample finds it within four seconds and the active count drops.
+A CLI that Boite or its job ended exits with code 9 and reads Stopped; any
+other nonzero code reads Failed. Linux and macOS record only direct processes, so a CLI launched inside another
+shell can remain outside this view. Provider-native agents and Boite-managed
+children use their existing lifecycle on every platform.
 
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent
@@ -113,7 +126,8 @@ One button above the composer shows the number of active subagents and running
 workflows, with elapsed time since the oldest active start. It appears for a
 running workflow even before a child starts. Click it to open the team overview,
 then select an agent or workflow to inspect its progress. The panel keeps
-completed results after the button disappears.
+completed results after the button disappears. The button sits right on the
+composer, below any notice; the task overlay floats above it, never over it.
 
 A parent's row in the sidebar, the Recent list and the phone's list carries a
 chip with the number of its subagents at work, in every state of the parent.
@@ -151,7 +165,7 @@ provider session carries a short guide: the commands, `--model`, `--effort` and
 and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
-parent and how to report a blocker. Persistent agents keep their own setting, which starts off. Only the
+parent and how to report a blocker. Bots keep their own setting, which starts off. Only the
 owner can configure profiles or turn delegation off; the parent agent resumes
 the pauses listed under [Stop, pause and resume](#stop-pause-and-resume). A
 paired phone can inspect and stop an enabled team.
@@ -217,6 +231,51 @@ explicit dependencies, fan-out, conditions and plan concurrency. They do not
 require an enabled team or custom profile; pause still holds launches. Workflow
 steps remain separate from the team's agent list. That guide owns plan syntax,
 structured output, commands and recovery.
+
+## Shared-project hosts
+
+An associated project can offer compute separately from its read and board
+permissions ([Contacts](contacts.md#compute-and-results)). The host owner binds
+the offer to an enabled local parent, its delegation profiles, permission mode
+and optional contribution limit. `sharedCompute.models/start/list/get/send/cancel`
+operate on that exact association and source conversation. The host resolves
+the provider/account, creates an ordinary captured child and isolated worktree,
+and uses its scheduler, quota and process controls. Credentials never cross.
+
+The source supplies a full base commit already present in both registered
+repositories; no remote path or account is accepted. The host retains the
+captured branch even when echo makes no changes. Completion derives repository,
+branch, base, commit and dirty state from Git, rather than an agent's answer.
+Core preparation and inspection disable Git hooks, filters and fsmonitor for
+these jobs. Bounded result text remains data. Fetching and merging the branch
+uses the project's ordinary approved Git workflow; the result executes nothing.
+
+The host can be a group member behind a Contact gateway. Its canonical
+owner/core/project tuple selects the original host; the gateway does not
+choose its account, spawn the worker or consume its result. The real three-core
+fixture in `tests/e2e/shared-cores.test.ts` fetches the captured worker branch
+from a fixture-controlled local repository, checks the advertised object and
+base ancestry, then cherry-picks that commit on the source integration branch.
+This verifies normal Git consumption without executing a peer-supplied URL.
+
+Follow-ups stay external instructions and cannot approve a host permission
+card. Stop/revoke fences exactly the captured job, including delayed starts,
+and waits for its tracked processes and preparation; siblings and the host's
+own conversation continue. Non-Windows process tracking retains its documented
+direct-child limitations. An offline cancellation remains pending until the
+host confirms it. Interrupted host execution is uncertain after restart and
+is never automatically resubmitted.
+
+Actual host file protection is required before enabling providers with tools.
+Without that service only tool-free echo is admitted. Claude/Codex use their
+mandatory protected adapters and the common OS executor when available. Their
+trusted native account/control stays local; model tools receive a filtered
+project view without account credentials, hooks or ambient host access.
+`boite_commit` publishes validated edits on the captured branch for real Git
+result verification. OpenCode 1.19.3 (default/build or plan) and pi (YOLO/bypass)
+now use their own native extension and the common executor. Muse 1.4.13 uses
+its verified mandatory MCP-only native registry and the same executor; older
+Muse versions and other ACP implementations remain refused. No permission fallback or implicit bypass is introduced.
 
 ## Agent commands
 
@@ -298,10 +357,7 @@ note says so. Each wake (`docs/cli.md`, "Watching a pull request") opens the
 child's next turn, and that turn's answer goes to the parent as a result, so
 the parent hears only what the child made of a CI verdict or a review. The
 child's watches end when it is stopped, by its own Stop, `delegate stop` or a
-failed turn, and when its parent stops, is archived or is removed. When a
-persistent agent takes its next work item, it archives its finished children
-but keeps one that still watches a pull request; that child is archived once
-its last watch ends, its turn is over and its last result reached the parent.
+failed turn, and when its parent stops, is archived or is removed.
 
 ### Finished children are put away
 
@@ -367,8 +423,8 @@ files each child owns. `boite delegate spawn --worktree` (and `"worktree":
 true` on a [workflow](workflows.md) step) gives the child a git worktree of its
 own on a new `boite/sub-<id>` branch, in the configured worktree folder. Its
 branch and folder are chosen at spawn and shown in the spawn output; the
-worktree itself is made from the parent's current HEAD just before the child's
-first turn. Uncommitted edits in the parent's checkout are not in it. A
+worktree itself is made from the parent's current HEAD, or the entrusted project's
+HEAD for a bot, just before the child's first turn. Uncommitted edits are not in it. A
 conversation outside a git repository is refused by name.
 
 The child is told to commit its work on that branch. When one of its turns ends
@@ -378,7 +434,7 @@ branch are removed and the result says so; otherwise both are kept and the
 result ends with `Worktree kept: <path> on branch <branch>, N commits beyond
 <base>`, uncommitted changes noted, and the `git merge <branch>` to run.
 Boite does not merge for the parent. A removed worktree is made again, from
-the parent's HEAD of that moment, if the child gets another turn.
+the same source checkout's current HEAD, if the child gets another turn.
 
 While a child works, the parent should do independent work or finish its turn.
 Waiting inside a tool keeps the parent busy and can delay delivery of results.

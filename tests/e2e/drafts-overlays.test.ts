@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { BrowserPage, freePort } from './lib/cdp';
 import { removeDirectory } from './lib/cleanup';
 import { startUi } from './lib/ui';
+import { ATTACHMENTS_PER_TURN } from '../../packages/contracts/src/index.ts';
 
 async function escape(page: BrowserPage) {
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -22,11 +23,11 @@ test('height-capped desktop popovers can scroll to their last action', async () 
       await page.click(`[data-testid="${trigger}"]`);
       await page.waitFor(`document.querySelector('[data-testid="${popup}"]')`);
       await page.settleAnimations();
-      const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = el.querySelector('button:last-of-type'); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+      const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = [...el.querySelectorAll('button')].at(-1); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `${popup}-short.png`));
       expect(result.overflow).toBe('auto');
       expect(result.scroll).toBeGreaterThan(0);
       expect(result.visible).toBe(true);
-      await page.screenshot(join(import.meta.dir, '.artifacts', `${popup}-short.png`));
       await escape(page);
       await page.waitFor(`!document.querySelector('[data-testid="${popup}"]')`);
     }
@@ -53,7 +54,7 @@ test('unread attachments survive text edits and explicit removals during storage
     page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
     await page.type('[data-testid=composer-input]', 'Keep one attachment');
     await page.evaluate(`(() => { const data = new DataTransfer(); for (const name of ['remove.txt', 'keep.txt']) data.items.add(new File([name], name, {type:'text/plain'})); document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {clipboardData:data,bubbles:true})); })()`);
-    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 2');
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]:not([data-loading])").length === 2');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.flushDrafts()')).toBe(true);
     const script = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'IDBFactory.prototype.open = function() { return {}; };' }) as { identifier: string };
     await page.reload();
@@ -190,7 +191,7 @@ test('unsent text survives the browser process being killed', async () => {
     await page.waitFor('document.querySelector("[data-testid=composer-input]")');
     await page.type('[data-testid=composer-input]', 'Recover after a forced exit');
     await page.evaluate(`(() => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(4 * 1024 * 1024)], 'draft.bin', { type: 'application/octet-stream' })); document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true })); })()`);
-    await page.waitFor('document.querySelector("[data-testid=composer-attachment]")');
+    await page.waitFor('document.querySelector("[data-testid=composer-attachment]:not([data-loading])")');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.flushDrafts()')).toBe(true);
     // close() kills the captured browser PID; no pagehide or unload callback saves the draft.
     await page.close();
@@ -209,3 +210,42 @@ test('unsent text survives the browser process being killed', async () => {
     await page.waitFor('document.querySelector("[data-testid=composer-input]")?.value === "Recover this reply too"');
   } finally { await page?.close(); await server.close(); await removeDirectory(profile); }
 }, 120_000);
+
+test('a 60k-character draft and its images survive the browser being killed within the journal pause', async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  const profile = mkdtempSync(join(tmpdir(), 'boite-e2e-draft-pause-'));
+  const options = { url: `http://127.0.0.1:${port}/?fake=1`, userDataDir: profile };
+  const input = '[data-testid=composer-input]';
+  const files = '(globalThis.__boiteTest.workspace.active.composerStates.draft?.attachments.filter(file => file.data && !file.pendingDraftAsset).length ?? 0)';
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch(options);
+    await page.waitFor(`document.querySelector("${input}")`);
+    // Screenshots pasted at once, as many as one message may carry, each fitted and referenced in the text.
+    await page.evaluate(`(async () => {
+      const data = new DataTransfer();
+      for (let i = 0; i < ${ATTACHMENTS_PER_TURN}; i++) {
+        const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 200;
+        const context = canvas.getContext('2d'); context.fillStyle = 'hsl(' + i * 17 + ', 70%, 50%)'; context.fillRect(0, 0, 320, 200);
+        context.fillStyle = '#fff'; context.fillText('screenshot ' + i, 20, 100);
+        data.items.add(new File([await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))], 'shot-' + i + '.png', { type: 'image/png' }));
+      }
+      document.querySelector('${input}').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+    })()`);
+    await page.waitFor(`${files} === ${ATTACHMENTS_PER_TURN} && document.querySelector('${input}').value.includes('[Image ${ATTACHMENTS_PER_TURN}]')`, 30_000);
+    // Then a whole description pasted after them; the app dies before the journal's pause ends.
+    const typed = await page.evaluate<string>(`(() => {
+      const box = document.querySelector('${input}');
+      box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+      document.execCommand('insertText', false, ' ' + 'every problem described at once, with its steps. '.repeat(1250));
+      return box.value;
+    })()`);
+    expect(typed.length).toBeGreaterThan(60_000);
+    await page.close();
+    page = await BrowserPage.launch(options);
+    await page.waitFor(`document.querySelector("${input}")?.value.length > 0`);
+    expect(await page.evaluate<string>(`document.querySelector("${input}").value`)).toBe(typed);
+    await page.waitFor(`${files} === ${ATTACHMENTS_PER_TURN}`);
+  } finally { await page?.close(); await server.close(); await removeDirectory(profile); }
+}, 180_000);

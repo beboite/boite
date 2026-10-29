@@ -1,6 +1,8 @@
 import { threadActive, type AgentEntrustment, type AgentProfile, type AgentsSnapshot, type ThreadSummary } from '@boite/contracts';
+import { untrack } from 'svelte';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
+import { noteUpkeep } from './agent-upkeep';
 
 /** A thread an agent is busy in right now: a turn running, queued, or waiting on the user. */
 export function agentThreadLive(thread: ThreadSummary): boolean {
@@ -26,11 +28,17 @@ export interface AgentAtWork {
  * session (`agentSessionId`), a delegated child its parent; the session names
  * the agent. An entrusted thread is named in the snapshot's `entrusted`. Only
  * with the Agents experiment on, the agents snapshot loads, at most once per
- * `SETTLE_MS`.
+ * `SETTLE_MS`, without any desk. While the Agents page is on screen its view
+ * fetches the snapshot and hands it here (`adopt`), so one change costs one
+ * fetch, not two.
  */
 export class AgentDirectory {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
   private client: Store['client'] = null;
+  /** The client `snapshot` came from: a reattach to the same one keeps it on screen. */
+  private snapshotClient: Store['client'] = null;
+  /** Agents views on screen that fetch for this directory (`feed`). */
+  private feeders = 0;
   private off: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private loading = false;
@@ -61,9 +69,22 @@ export class AgentDirectory {
     if (this.client === this.store.client && this.off) return;
     this.off?.();
     this.client = this.store.client;
-    this.snapshot = null;
+    if (this.snapshotClient !== this.client) this.snapshot = null;
     this.off = this.client?.on('agents.changed', () => this.schedule()) ?? null;
-    void this.load();
+    if (this.feeders === 0) void this.load();
+  }
+
+  /** An Agents view on screen fetches the snapshot for this directory (true), or left the screen (false). */
+  feed(on: boolean): void {
+    this.feeders = Math.max(0, this.feeders + (on ? 1 : -1));
+    if (on && this.timer) { clearTimeout(this.timer); this.timer = null; }
+  }
+
+  /** A snapshot the Agents view read from `client`; its one desk changes nothing here. */
+  adopt(snapshot: AgentsSnapshot, client: Store['client']): void {
+    if (client !== this.store.client) return;
+    this.snapshot = snapshot;
+    this.snapshotClient = client;
   }
 
   private detach(): void {
@@ -85,7 +106,7 @@ export class AgentDirectory {
   }
 
   private schedule(): void {
-    if (this.timer) return;
+    if (this.timer || this.feeders > 0) return;
     this.timer = setTimeout(() => { this.timer = null; void this.load(); }, SETTLE_MS);
   }
 
@@ -95,8 +116,8 @@ export class AgentDirectory {
     if (!client) return;
     this.loading = true;
     try {
-      const snapshot = await client.call('agents.snapshot', {});
-      if (client === this.client) this.snapshot = snapshot;
+      const snapshot = await client.call('agents.snapshot', { desk: null });
+      if (client === this.client) { this.snapshot = snapshot; this.snapshotClient = client; noteUpkeep(this.store, snapshot); }
     } catch {
       // An older core without agents, or a dropped connection: the rows keep their provider logo.
     } finally {
@@ -153,10 +174,10 @@ export class AgentDirectory {
   }
 
   /**
-   * Every agent busy on this machine: a turn under way in its thread, or work
-   * that waits on the user (a decision it asked for) even after its turn
-   * ended. The one waiting on the user comes first, then the longest running.
-   * `waiting` says the user has something to answer.
+   * Every agent busy on this machine: a turn under way in its thread, or one
+   * that waits on the user (a question or a permission). The one waiting on
+   * the user comes first, then the longest running. `waiting` says the user
+   * has something to answer.
    */
   get atWork(): AgentAtWork[] {
     const snapshot = this.snapshot;
@@ -167,15 +188,15 @@ export class AgentDirectory {
       const agent = this.ownerOf(thread);
       if (agent) byThread.set(thread.id, { agent, thread, waiting: thread.status === 'waiting' });
     }
-    for (const work of snapshot.work) {
-      if (work.status !== 'waiting' && work.status !== 'running') continue;
-      const run = work.runId ? snapshot.runs.find(r => r.id === work.runId) : undefined;
-      const thread = run ? this.store.threads.find(t => t.id === run.threadId) : undefined;
-      const agent = snapshot.profiles.find(a => a.id === work.agentId);
+    // A machine whose rows this client has not read yet still says who works, from the agents' own status.
+    for (const status of snapshot.status ?? []) {
+      if (!status.threadId || byThread.has(status.threadId)) continue;
+      if (status.state !== 'working' && status.state !== 'queued' && status.state !== 'waiting') continue;
+      const thread = this.store.threads.find(t => t.id === status.threadId);
+      const agent = snapshot.profiles.find(a => a.id === status.agentId);
       if (!thread || !agent || thread.archived) continue;
-      const held = byThread.get(thread.id);
-      if (work.status === 'waiting') byThread.set(thread.id, { agent, thread: { ...thread, status: 'waiting' }, waiting: true });
-      else if (!held) byThread.set(thread.id, { agent, thread: { ...thread, status: 'running', runningSince: thread.runningSince ?? run?.startedAt ?? null }, waiting: false });
+      const waiting = status.state === 'waiting';
+      byThread.set(thread.id, { agent, thread: { ...thread, status: waiting ? 'waiting' : 'running' }, waiting });
     }
     return [...byThread.values()].sort((a, b) => Number(b.waiting) - Number(a.waiting) || (a.thread.runningSince ?? 0) - (b.thread.runningSince ?? 0));
   }
@@ -188,4 +209,23 @@ export function agentDirectory(store: Store): AgentDirectory {
   let directory = directories.get(store);
   if (!directory) { directory = new AgentDirectory(store); directories.set(store, directory); }
   return directory;
+}
+
+/**
+ * Keeps every machine's agents snapshot loaded while the caller is drawn and
+ * `on` holds, so a count of the agents at work is current: the sidebar's
+ * switch and the phone's Bots tab. Called while a component initialises.
+ */
+export function followAgentDirectories(stores: () => readonly Store[], on: () => boolean): void {
+  $effect(() => {
+    if (!on()) return;
+    const directories = stores().map(agentDirectory);
+    const releases = untrack(() => directories.map(directory => directory.watch()));
+    return () => { for (const release of releases) release(); };
+  });
+  $effect(() => {
+    if (!on()) return;
+    // A reconnection is a new client: each directory follows its own.
+    for (const owner of stores()) { void owner.client; untrack(() => agentDirectory(owner).refresh()); }
+  });
 }

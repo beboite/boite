@@ -10,3 +10,12 @@
  * without an extension.
  */
 export { workerEntry } from '../../worker-entry.ts';
+
+/** What a Worker's error event says, for the message that reports it. */
+export function describeWorkerError(event: unknown): string {
+  if (event instanceof Error) return event.message;
+  if (typeof event === 'object' && event !== null && 'message' in event) {
+    return String((event as { message: unknown }).message);
+  }
+  return 'worker error';
+}

@@ -19,7 +19,7 @@ test('each subscription has its own name, limits, error and expansion beside the
   flushSync();
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="quota-provider"]')];
   expect(rows.map(row => row.querySelector('.name')!.textContent)).toEqual(['Personal', 'Work']);
-  expect(rows.map(row => row.querySelector('.amount')!.textContent)).toEqual(['90%', '10%']);
+  expect(rows.map(row => row.querySelector('.amount')!.textContent)).toEqual(['90% left', '10% left']);
   expect(rows.map(row => row.querySelector('[data-logo]')!.getAttribute('data-logo'))).toEqual(['codex', 'codex']);
   expect(rows[0]!.textContent).not.toContain('unavailable');
   expect(rows[0]!.querySelector('[data-testid=quota-credits]')!.textContent).toContain('42 credits');
@@ -89,7 +89,7 @@ test('the headline and reset come from the primary window, weekly first unless D
   component = mount(QuotaOverview, { target: document.body, props: { rows: [row], connect: () => {} } });
   flushSync();
   const article = () => document.querySelector<HTMLElement>('[data-testid="quota-provider"]')!;
-  expect(article().querySelector('.amount')!.textContent).toBe('69%');
+  expect(article().querySelector('.amount')!.textContent).toBe('69% left');
   expect(article().querySelector('.mini-window.lead')!.getAttribute('title')).toContain('69%');
   expect(article().querySelector('.caption.reset')!.textContent).toBe(quotaResetTime(later));
   unmount(component);
@@ -97,7 +97,7 @@ test('the headline and reset come from the primary window, weekly first unless D
   const flagged: AccountQuota = { ...row, windows: [{ ...windows[0]!, primary: true }, windows[1]!] };
   component = mount(QuotaOverview, { target: document.body, props: { rows: [flagged], connect: () => {} } });
   flushSync();
-  expect(article().querySelector('.amount')!.textContent).toBe('49%');
+  expect(article().querySelector('.amount')!.textContent).toBe('49% left');
   expect(article().querySelectorAll('.mini-window')).toHaveLength(2);
   expect(article().querySelector('.caption.reset')!.textContent).toBe(quotaResetTime(soon));
   unmount(component);

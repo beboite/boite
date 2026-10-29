@@ -24,6 +24,7 @@ export interface ThreadRow {
   archived_at?: number | null;
   fork_origin?: string | null;
   parent_thread_id: string | null;
+  parent_is_bot?: number;
   context_mode?: string | null;
   last_user_message_at?: number | null;
   id: string;
@@ -69,6 +70,7 @@ export interface TurnRow {
   checkpoint?: string | null;
   queue_hold?: string | null;
   agent_totals?: string | null;
+  quiet?: number | null;
 }
 
 export interface MessageRow {
@@ -121,6 +123,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
   return {
     ...(row.fork_origin ? { forkOrigin: parseJson<ThreadSummary['forkOrigin']>(row.fork_origin, `threads.fork_origin of ${row.id}`) } : {}),
     ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
+    ...(row.parent_is_bot === 1 ? { parentIsBot: true as const } : {}),
     ...(row.context_mode ? { contextMode: parseJson<ThreadSummary['contextMode']>(row.context_mode, `threads.context_mode of ${row.id}`) } : {}),
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
@@ -171,6 +174,7 @@ export function toTurn(row: TurnRow): Turn {
     ...(row.checkpoint ? { checkpoint: parseJson<NonNullable<Turn['checkpoint']>>(row.checkpoint, `turns.checkpoint of ${row.id}`) } : {}),
     ...(row.queue_hold ? { queueHold: parseJson<NonNullable<Turn['queueHold']>>(row.queue_hold, `turns.queue_hold of ${row.id}`) } : {}),
     ...(row.agent_totals ? { agentTotals: parseJson<NonNullable<Turn['agentTotals']>>(row.agent_totals, `turns.agent_totals of ${row.id}`) } : {}),
+    ...(row.quiet ? { quiet: true as const } : {}),
   };
 }
 

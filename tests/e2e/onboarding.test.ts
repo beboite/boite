@@ -18,11 +18,11 @@ const WATCH_PALETTE = `(() => {
 })()`;
 /** Runs before the app on the next load: notes whether the tour is ever drawn. */
 const WATCH_TOUR = `new MutationObserver(() => { if (document.querySelector('[data-testid=onboarding]')) window.__tourShown = true; }).observe(document, { childList: true, subtree: true });`;
-async function capture(name: string) {
+async function capture(name: string, browser = page) {
   // Static layout captures use the final frame. The interaction test below
   // checks the running timeline, pause and replay separately.
-  await page.evaluate(`document.fonts.ready.then(() => { for (const animation of document.getAnimations()) { if (animation.effect?.getTiming().iterations !== Infinity) animation.finish(); } })`);
-  await page.screenshot(join(import.meta.dir, '.artifacts', name));
+  await browser.evaluate(`document.fonts.ready.then(() => { for (const animation of document.getAnimations()) { if (animation.effect?.getTiming().iterations !== Infinity) animation.finish(); } })`);
+  await browser.screenshot(join(import.meta.dir, '.artifacts', name));
 }
 beforeAll(async () => {
   const port = await freePort();
@@ -102,10 +102,11 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         await page.click(`[data-testid=onboarding-dot-${step}]`);
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
-        if (width > 390) expect(await page.evaluate(FITS)).toBe(true);
+        if (width > 390 || step === 'privacy') expect(await page.evaluate(FITS)).toBe(true);
         const height = await page.evaluate<number>(`document.querySelector('[data-testid=onboarding] [role=dialog]').getBoundingClientRect().height`);
-        expect(height).toBeLessThanOrEqual(width === 390 ? 640 : 600);
-        if (panelHeight !== undefined) expect(height).toBe(panelHeight);
+        expect(height).toBeLessThanOrEqual(width === 390 ? step === 'privacy' ? 868 : 640 : 600);
+        // Privacy is the final action, and uses the phone's height to expose every choice.
+        if (panelHeight !== undefined && !(width === 390 && step === 'privacy')) expect(height).toBe(panelHeight);
         panelHeight = height;
         if (step !== 'profile' && step !== 'privacy') {
           // The measures come with a failure: the controls' place depends on the pointer the machine reports.
@@ -230,7 +231,9 @@ test('pending agent updates remain in Machines after the tour closes', async () 
   await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-connection]')`);
   await page.click('[data-testid=mobile-settings-connection]');
-  await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
+  // Machines lists what the agents still offer, and Update starts them from there.
+  await page.waitFor(`[...document.querySelectorAll('[data-testid=updates-other]')].map(row => row.dataset.part).sort().join() === 'claude,codex'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=updates-run-all]').disabled`)).toBe(false);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.harnessUpdates.filter(update => update.pending).length`)).toBe(2);
 }, 20_000);
 
@@ -254,35 +257,41 @@ test('an unavailable onboarding chunk keeps agent updates accessible in Machines
     await offline.click('[data-testid=nav-settings]');
     await offline.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
     await offline.click('[data-testid=settings-tab-machines]');
-    await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
+    await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && [...document.querySelectorAll('[data-testid=updates-other]')].map(row => row.dataset.part).sort().join() === 'claude,codex'`);
+    // Each agent's own Update is on Providers.
+    await offline.click('[data-testid=settings-tab-accounts]');
+    await offline.waitFor(`document.querySelectorAll('[data-testid=harness-updates-card] [data-testid=harness-update-row-run]').length === 2`);
   } finally {
     await offline.close();
   }
 }, 60_000);
 
 test('a phone gets two screens: the welcome and what the computer does, no host setting', async () => {
-  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  try {
-    for (const locale of ['en', 'fr']) {
-      await page.evaluate(`localStorage.removeItem('boite.onboarding'); localStorage.setItem('boite.locale', '${locale}')`);
-      await page.reload();
-      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
-      expect(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding] .dot')].map(dot => dot.dataset.testid)`)).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
-      await capture(`tour-phone-${locale}-welcome.png`);
-      await page.click('[data-testid=onboarding-next]');
-      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'reach'`);
-      expect(await page.evaluate(`document.querySelector('#onboarding-title').textContent`)).toBe(locale === 'en' ? 'Your computer does the work' : 'Votre ordinateur fait le travail');
-      expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
-      expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
-      await capture(`tour-phone-${locale}-reach.png`);
+  const origin = await page.evaluate<string>('location.origin');
+  for (const locale of ['en', 'fr']) {
+    // A first-run phone owns a fresh profile and history, independent of the desktop Settings scenarios.
+    const phone = await BrowserPage.launch({ url: 'about:blank', showTour: true, windowSize: { width: 390, height: 844 } });
+    try {
+      await phone.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('boite.locale', '${locale}')` });
+      await phone.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+      await phone.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await phone.navigate(`${origin}/?fake=1`);
+      await phone.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome' && (history.state?.boiteDepth ?? 0) > 0`);
+      const historyDepth = await phone.evaluate<number>('history.state.boiteDepth');
+      expect(await phone.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding] .dot')].map(dot => dot.dataset.testid)`)).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
+      await capture(`tour-phone-${locale}-welcome.png`, phone);
+      await phone.click('[data-testid=onboarding-next]');
+      await phone.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'reach'`);
+      expect(await phone.evaluate(`document.querySelector('#onboarding-title').textContent`)).toBe(locale === 'en' ? 'Your computer does the work' : 'Votre ordinateur fait le travail');
+      expect(await phone.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      expect(await phone.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+      await capture(`tour-phone-${locale}-reach.png`, phone);
       // The second screen is the last: its button closes the tour, and the device remembers.
-      await page.click('[data-testid=onboarding-next]');
-      await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
-      expect(await page.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
+      await phone.click('[data-testid=onboarding-next]');
+      await phone.waitFor(`!document.querySelector('[data-testid=onboarding]') && (history.state?.boiteDepth ?? 0) < ${historyDepth}`);
+      expect(await phone.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
+    } finally {
+      await phone.close();
     }
-  } finally {
-    await page.evaluate(`localStorage.removeItem('boite.locale')`);
-    await page.send('Emulation.clearDeviceMetricsOverride', {});
   }
 }, 45_000);

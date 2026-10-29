@@ -41,7 +41,7 @@ test('a quiet revalidation retains message objects', async ({ ready }) => {
   await store.open('t-long', false);
   expect(store.openThread).toBe(thread);
   expect(store.openThread!.messages).toBe(messages);
-  expect(asked.mock.calls.map(([method]) => method)).toEqual(['threads.get']);
+  expect(asked.mock.calls.map(([method]) => method)).toEqual(['threads.get', 'secrets.pending']);
   const snapshot = await asked.mock.results[0]!.value;
   expect(snapshot.messages).toEqual([]);
   expect(snapshot.messagesUnchanged).toBe(true);
@@ -84,6 +84,30 @@ test('a cached attachment remains downloadable after reconnecting to an older co
     expect(message.parts[partIndex]).not.toHaveProperty('dataDeferred');
     expect(spy.mock.calls.map(([method]) => method)).toEqual(['messages.attachment', 'messages.list']);
   } finally { spy.mockRestore(); }
+});
+
+for (const cancelled of [false, true]) test(`older-core attachment fallback ${cancelled ? 'cancels quietly after navigation' : 'reports a real missing attachment'}`, async ({ ready }) => {
+  const { store, client } = await ready();
+  await store.open('t-bench');
+  const message = store.openThread!.messages.at(-1)!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'messages.attachment') throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'older core' });
+    if (method === 'threads.get' && (params as { threadId: string }).threadId === 't-bench') await gate;
+    return call(method, params);
+  });
+  const loading = store.loadMessageAttachment('t-bench', message.id, 999);
+  // Observe the rejection immediately, before releasing the response barrier.
+  const outcome = loading.then(value => ({ value }), error => ({ error }));
+  try {
+    await vi.waitFor(() => expect(spy.mock.calls.some(([method]) => method === 'threads.get')).toBe(true));
+    if (cancelled) await store.open('t-trace');
+    release();
+    if (cancelled) expect(await outcome).toEqual({ value: null });
+    else expect(await outcome).toMatchObject({ error: { code: RpcErrorCode.NotFound } });
+  } finally { release(); await outcome; spy.mockRestore(); }
 });
 
 test('revalidation refreshes JSON input when an array becomes an object with numeric keys', async ({ ready }) => {
@@ -365,4 +389,19 @@ test('a live end past its bound lets its oldest messages go and reads them again
   const messages = store.openThread!.messages;
   expect(messages.findIndex(message => message.id === first)).toBeGreaterThan(0);
   expect(new Set(messages.map(message => message.id)).size).toBe(messages.length);
+});
+
+test('a live end past its bound keeps the messages the timeline draws near the bottom', async ({ ready }) => {
+  const { store } = await ready({ delayMs: 0, long: true });
+  await store.open('t-long');
+  const thread = store.openThread!;
+  const count = thread.messages.length;
+  // A song the agent published, 5.2 million base64 characters, under the answer that closes its turn.
+  thread.messages.at(-2)!.parts = [{ type: 'file', name: 'menu-theme.mp3', mimeType: 'audio/mpeg', data: 'A'.repeat(5_200_000) }];
+  expect(store.releaseOlder('t-long', () => 6)).toBe(count - 6);
+  expect(store.openThread!.messages).toHaveLength(6);
+  thread.messages.push({ ...thread.messages.at(-1)!, id: 'm-next' });
+  // Everything held is drawn near the bottom: nothing goes.
+  expect(store.releaseOlder('t-long', () => 7)).toBe(0);
+  expect(store.openThread!.messages).toHaveLength(7);
 });

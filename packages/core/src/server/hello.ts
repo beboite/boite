@@ -1,8 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { hostname } from 'node:os';
 import { CLIENT_DEVICE_MAX, HELLO_ACCEPTED, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, RpcFailure } from '../errors.ts';
+import { machineName } from '../paths.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 import { clientField, logHelloAccepted, logHelloRefused } from './connection-log.ts';
@@ -166,7 +166,7 @@ export function sentFromOf(identity: Identity, name: string, device: unknown, re
   if (identity.principal === 'agent' || (name !== 'shell' && name !== 'pwa')) return null;
   const said = typeof device === 'string' ? device.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, '').trim() : '';
   const named = said.length > 0 && said.length <= CLIENT_DEVICE_MAX ? said : null;
-  return { client: name, device: named ?? (name === 'shell' && !remote ? hostname() : null) };
+  return { client: name, device: named ?? (name === 'shell' && !remote ? machineName() : null) };
 }
 
 /** Equal without the time taken saying how much of the owner token matched. */

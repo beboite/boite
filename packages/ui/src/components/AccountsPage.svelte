@@ -1,6 +1,8 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import LocalAcpCard from './LocalAcpCard.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -17,9 +19,9 @@
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
-   * in when nothing is signed in, nothing once it is ready. Versions and updates
-   * are on Machines and updates, one list per machine, and are not repeated here.
-   * Connected providers come first; the rest wait below as the ways to
+   * in when nothing is signed in, nothing once it is ready. A row names no
+   * version: this machine's agents and their updates are one card lower on the
+   * page (`HarnessUpdatesCard.svelte`). Connected providers come first; the rest wait below as the ways to
    * add one, and the ones turned off close the page, dimmed, with only their
    * switch to act on. Accounts, the default model and the uninstall sit behind
    * the row's chevron. A family (Antigravity and its CLI) is one row, each way
@@ -114,6 +116,7 @@
     return store.accountsOf(provider.id).length > 0
       || store.installOf(provider.id)?.state === 'installed'
       || provider.executable !== null
+      || (provider.source === 'user' && store.owner)
       || (provider.available && (provider.login !== false || !provider.alwaysIsolated));
   }
 
@@ -206,6 +209,18 @@
       danger: true
     });
     if (ok) await store.uninstallProvider(provider.id);
+  }
+
+  /** A provider added on this machine leaves with its file; its accounts and conversations stay. */
+  async function removeLocal(provider: ProviderSummary) {
+    const ok = await confirm.ask({
+      title: fill(strings.localAcp.removeTitle, { provider: provider.name }),
+      body: strings.localAcp.removeBody,
+      confirmLabel: strings.localAcp.remove,
+      cancelLabel: strings.install.removeCancel,
+      danger: true
+    });
+    if (ok) await store.removeLocalProvider(provider.id);
   }
 
   /** Something the user installed or signed into outside Boite: look again. */
@@ -525,7 +540,7 @@
     </div>
   {/if}
 
-  {#if install?.state === 'installed' || provider.executable}
+  {#if install?.state === 'installed' || provider.executable || (provider.source === 'user' && store.owner)}
     <div class="section-head"><span class="section-label"><span class="ui-label">{strings.providerSettings.installation}</span></span></div>
     <dl class="facts">
       {#if install?.state === 'installed'}
@@ -541,6 +556,14 @@
         <div class="fact">
           <dt>{strings.providerSettings.executable}</dt>
           <dd><code>{provider.executable}</code></dd>
+        </div>
+      {/if}
+      {#if provider.source === 'user' && store.owner}
+        <div class="fact">
+          <dt>{strings.localAcp.source}</dt>
+          <dd class="managed">
+            <button class="quiet small" data-testid="local-acp-remove" onclick={() => void removeLocal(provider)}><span class="ui-label">{strings.localAcp.remove}</span></button>
+          </dd>
         </div>
       {/if}
     </dl>
@@ -601,13 +624,13 @@
         </div>
       {/if}
       <div class="act">
-        <!-- A provider still to add shows its one way in. Versions and updates are on Machines and updates, not here. -->
+        <!-- A provider still to add shows its one way in. Its version and update are in the agent card lower on the page. -->
         <!-- Off, nothing of it is offered: no install, no sign-in, only the way back on. -->
         {#if !off}
           {@render stepAction(lead, step, main)}
         {/if}
-        <!-- A family's switches are its members', inside the opened row. -->
-        {#if alone}{@render enabledSwitch(lead)}{/if}
+        <!-- A family's switches are its members', inside the opened row: its own slot stays empty, so the column of switches stays straight. -->
+        {#if alone}{@render enabledSwitch(lead)}{:else}<span class="switch-slot" aria-hidden="true" data-testid="provider-switch-slot"></span>{/if}
       </div>
     </div>
     {#if !off}{@render progress(lead, step)}{/if}
@@ -681,6 +704,8 @@
       {#each groups.off as row (row.id)}{@render providerRow(row, true)}{/each}
     </div>
   {/if}
+  {#if store.owner}<LocalAcpCard {store} />{/if}
+  {#if store.owner}<HarnessUpdatesCard {store} />{/if}
   {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>
 
@@ -692,11 +717,12 @@
 
 
   /* One card, one row per provider: the page reads top to bottom as a checklist. */
-  .provider { padding: 12px 16px; display: grid; gap: 10px; }
+  /* The cards' inset, so the switches here end where the cards' switches below do. */
+  .provider { padding: 12px var(--settings-padding); display: grid; gap: 10px; }
   .provider + .provider { border-top: 1px solid var(--color-border); }
 
   /* Providers still to add: lower, smaller, quieter, so the connected list leads. */
-  .provider.secondary { padding: 8px 16px; gap: 8px; }
+  .provider.secondary { padding: 8px var(--settings-padding); gap: 8px; }
   .secondary .name { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
   .secondary .summary:hover .name { color: var(--color-foreground); }
   .secondary-list { background: transparent; }
@@ -755,6 +781,7 @@
   .dot.live { background: var(--color-live); }
 
   .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+  .switch-slot { flex: 0 0 var(--switch-width, 40px); }
 
 
   /* A link that does a button's job: leaving for a sign-in page or an installer. */

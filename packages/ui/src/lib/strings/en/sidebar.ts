@@ -10,15 +10,19 @@ export const strings = {
     projectArchivedThreads: '{project}: {count} archived',
     /** The fold under the list for projects with no open conversation, and what choosing one does. */
     idleProjects: 'Idle projects',
-    /** The same fold once it also holds archived projects. */
-    otherProjects: 'Other projects',
-    archivedProject: 'Archived',
+    /** The section on top of the Projects view: projects whose every conversation is at work, so nothing there waits on the user. */
+    workingProjects: 'Working',
+    workingProjectsHint: 'Every conversation in these projects is at work. A project moves down once one needs you.',
+    /** The section under the open projects: nothing open, conversations archived to pick up again. */
+    laterProjects: 'Set aside',
+    laterProjectsHint: 'Conversations you archived to pick up later, in projects with nothing else open.',
+    idleProjectsHint: 'Nothing to do here: no open or set-aside conversation. Choose one to start a thread.',
     groupingOptions: 'Display options',
-    /** The sidebar's top switch between the thread list and the Agents page. */
-    surface: 'Threads or agents',
+    /** The sidebar's top switch between the thread list and the Bots page. */
+    surface: 'Threads or bots',
     threads: 'Threads',
-    agents: 'Agents',
-    /** The count beside Threads or Agents in that switch: what works now, and whether something there needs the user. */
+    agents: 'Bots',
+    /** The count beside Threads or Bots in that switch: what works now, and whether something there needs the user. */
     surfaceWorking: '{count} at work',
     surfaceWaiting: '{count} at work, something needs you',
     surfaceSubagentsOne: 'and 1 subagent',
@@ -47,6 +51,13 @@ export const strings = {
     reopenNamedThread: 'Move "{title}" to Recent',
     doneNotice: 'This thread is done. Move it to Recent to continue.',
     /** Above the composer, or the done notice, of a thread whose worktree Boite removed. */
+    contactHold: {
+      title: 'Contact mail holds this thread',
+      body: 'Its history holds messages from {contacts}, sent outside a shared project. Boite cannot bound what that mail asks, so it refuses every turn here.',
+      trust: 'Trust this history',
+      trustTip: 'The agent then runs with its usual tools and reads that mail like the rest of its history.',
+      ownerOnly: 'Trust it from the computer that runs this Boite.'
+    },
     worktreeGone: {
       title: 'Worktree removed',
       merged: 'Boite removed this thread\'s worktree {when}, after #{number} was merged.',
@@ -77,6 +88,8 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     manageProject: 'Manage project',
+    renameProject: 'Rename project',
+    projectName: 'Project name',
     worktreeDefault: 'Worktree by default',
     autoArchiveMergedPr: 'Hide merged PR conversations',
     autoRemoveWorktrees: 'Remove settled worktrees',
@@ -161,6 +174,12 @@ export const strings = {
     undoHint: 'Undo (Ctrl+Z)',
     draft: 'New thread',
     /** A draft row's menu: what is typed there and not sent goes. */
-    deleteDraft: 'Delete draft'
+    deleteDraft: 'Delete draft',
+    /** A draft sent while its machine was away: its conversation starts once the machine is back. */
+    draftQueued: 'Starts when {machine} is back',
+    draftStarting: 'Starting on {machine}',
+    draftQueueFailed: 'Not started: {reason}',
+    /** Its menu takes the queued prompt back into the draft, which then waits to be sent again. */
+    cancelQueuedDraft: 'Cancel the start'
   }
 } as const;

@@ -65,7 +65,8 @@ async function attach(page: BrowserPage): Promise<void> {
       } else document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {bubbles:true,cancelable:true,clipboardData:transfer}));
     })()`);
   }
-  await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 2');
+  // A tile shows before its file is read: the uploads start once both are ready.
+  await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]:not([data-loading])").length === 2');
   await page.waitFor(`(() => { const w = globalThis.__startupWire; return w.requests.filter(f => f.method === 'attachments.upload').slice(-2).filter(r => w.responses.some(f => f.id === r.id && f.result?.id)).length === 2; })()`);
 }
 
@@ -113,7 +114,7 @@ for (const phone of [false, true]) {
       const account = await client.call('accounts.add', { providerId: 'codex-fixture', label: 'Fixture', useDefaultLocation: true });
       // Echo's local title writer avoids an unrelated native title process in this lifecycle proof.
       await client.call('settings.set', { warmProcessMinutes: 0, titleModel: { providerId: 'echo', model: 'echo' } });
-      page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+      page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
       await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
         localStorage.setItem('boite.composer', ${JSON.stringify(JSON.stringify({ providerId: 'codex-fixture', accountId: account.id, permissionMode: 'default', model: 'fake-smart', effort: null }))});
         globalThis.__startupWire = {requests:[],responses:[]};
@@ -123,7 +124,9 @@ for (const phone of [false, true]) {
           send(raw) { try { const f=JSON.parse(raw); if (/^(drafts\\.|attachments\\.|threads.create$|turns.start$)/.test(f.method)) globalThis.__startupWire.requests.push(f); } catch {} super.send(raw); }
         };
       ` });
-      await page.reload();
+      // Install the recorder before the first app boot. A reload could interrupt
+      // the token link after it was stripped but before the connection stored it.
+      await page.navigate(pairingUrlOf(core));
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       if (phone) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       const projectPicker = phone ? 'mobile-draft-project' : 'draft-project';

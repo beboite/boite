@@ -16,6 +16,22 @@ export function publishedFile(message: Message): boolean {
     (part?.type === 'file' || (part?.type === 'artifact' && !part.view));
 }
 
+/** The first message of each turn: on a wake turn, the prompt it opened with. A line Boite adds to that turn later is not a second wake. */
+export function firstByTurn(messages: readonly Message[]): Map<string, string> {
+  const first = new Map<string, string>();
+  for (const message of messages) if (!first.has(message.turnId)) first.set(message.turnId, message.id);
+  return first;
+}
+
+/** One model attribution per turn; views and published files draw after the answer. */
+export function firstAssistantByTurn(messages: readonly Message[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
+  }
+  return result;
+}
+
 /**
  * `timeline` with each finished turn's published files moved after its last
  * other message, in the order they were published. Views are left for

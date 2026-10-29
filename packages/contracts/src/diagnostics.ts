@@ -394,7 +394,7 @@ export function createLogAnonymizer(context: LogAnonymizeContext): LogAnonymizer
         // (`/repos/<owner>/<repo>`, `/orgs/<owner>`) names them one segment later.
         const segments = path.split('/');
         const owner = /^(?:repos|orgs|users)$/i.test(segments[1] ?? '') ? 2 : 1;
-        return scheme + host + (port ?? '') + segments.map((segment, index) => (index === owner || index === owner + 1) && segment.length > 0 && !/^(?:beboite|boite|\[redacted\])$/i.test(segment) && !/^(?:repos|orgs|users|api|v\d)$/i.test(segment) ? `<${index === owner ? 'owner' : 'repo'}:${shortHash(context.salt, segment.toLowerCase())}>` : segment).join('/');
+        return scheme + host + (port ?? '') + segments.map((segment, index) => (index === owner || index === owner + 1) && segment.length > 0 && !/^(?:mtsu-dev|beboite|boite|\[redacted\])$/i.test(segment) && !/^(?:repos|orgs|users|api|v\d)$/i.test(segment) ? `<${index === owner ? 'owner' : 'repo'}:${shortHash(context.salt, segment.toLowerCase())}>` : segment).join('/');
       }
       return `${scheme}<host:${shortHash(context.salt, host.toLowerCase())}>${port ?? ''}${path && path !== '/' ? '/<path>' : (path ?? '')}`;
     });
@@ -609,7 +609,7 @@ export interface DiagnosticsExport {
   summary: DiagnosticSummary;
 }
 
-export const ISSUE_REPOSITORY = 'beboite/boite';
+export const ISSUE_REPOSITORY = 'mtsu-dev/boite';
 /** Why an agent's submit publishes nothing: an injected or wrong agent must not post publicly as the owner. */
 export const AGENT_SUBMIT_REFUSED = 'an agent cannot publish the issue: the user opens the prefilled link and submits it with their GitHub account, or submits it from Settings > Diagnostics';
 

@@ -38,9 +38,13 @@ async function phone(open = true): Promise<FakeClient> {
   return client;
 }
 
-/** The conversation's agent, on the machine the phone watches. */
+/**
+ * The conversation's agent, on the machine the phone watches. One socket plays
+ * both: an agent's socket never hears `browser.remoteChanged`, so the command
+ * goes out as the owner, which the browser answers the same way.
+ */
 async function agent(client: FakeClient, url: string): Promise<string> {
-  client.becomes('agent');
+  client.becomes('owner');
   try { return (await client.call('browser.command', { threadId: 't-trace', action: { kind: 'open', url } })).tabId!; }
   finally { client.becomes('session'); }
 }
@@ -50,7 +54,7 @@ async function showPanel(): Promise<void> {
   await settle();
 }
 
-test('a paired phone offers the agent browser, and only a tab the agent opens brings it forward, covered', async () => {
+test('a paired client at desktop width offers the agent browser, and a new tab brings it forward, covered', async () => {
   const client = await phone();
   expect(store.owner).toBe(false);
   expect(browserBridge.paints).toBe(false);
@@ -79,6 +83,35 @@ test('a paired phone offers the agent browser, and only a tab the agent opens br
   expect(store.panel.surfaces.filter(surface => surface.kind === 'agent-browser')).toHaveLength(1);
   expect(store.panel.active?.kind).toBe('agent-browser');
   stop();
+});
+
+test('new agent pages leave a phone in chat or on its chosen surface, and hiding the viewer keeps every page alive', async () => {
+  const client = await phone();
+  const matchMedia = window.matchMedia.bind(window);
+  vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ ...matchMedia(query), matches: query === '(max-width: 720px)' }));
+  const stop = watchAgentBrowser(store, 't-trace'); await settle();
+  try {
+    const first = await agent(client, 'https://example.com/docs'); await settle();
+    expect(store.panel.isOpen).toBe(false);
+    expect(store.panel.surfaces).toHaveLength(0);
+
+    store.panel.openFiles();
+    await agent(client, 'https://shop.example/cart'); await settle();
+    expect(store.panel.active?.kind).toBe('files');
+    store.panel.open('agent-browser');
+    store.panel.hide();
+    await agent(client, 'https://example.com/third'); await settle();
+    expect(store.panel.isOpen).toBe(false);
+    expect(store.panel.surfaces.filter(surface => surface.kind === 'agent-browser')).toHaveLength(1);
+    expect(await client.call('browser.remoteStatus', { threadId: 't-trace' })).toMatchObject({ live: true, tabs: expect.arrayContaining([expect.objectContaining({ tabId: first })]) });
+    expect((await client.call('browser.remoteStatus', { threadId: 't-trace' })).tabs).toHaveLength(3);
+
+    // The same watcher uses the current width after a rotation or resize.
+    vi.mocked(window.matchMedia).mockImplementation(matchMedia);
+    await agent(client, 'https://example.com/wide'); await settle();
+    expect(store.panel.isOpen).toBe(true);
+    expect(store.panel.active?.kind).toBe('agent-browser');
+  } finally { stop(); }
 });
 
 test('an open viewer follows a replacement client without reusing old frames or pointer gestures', async () => {

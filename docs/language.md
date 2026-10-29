@@ -89,6 +89,14 @@ imports `lib/i18n.svelte` for `setLocaleSetting` and the list of locales.
 
 ## Adding a sentence
 
+Authored UI copy must not contain em dashes (U+2014). Use a comma, colon or
+separate sentence. `bun run check:copy` enforces `no-em-dash-copy` on the
+English catalogue and every translation, including lists, imported parts and
+the source of copy-producing functions (without invoking them).
+It also runs in `bun run check` and on every pull request. Chat messages,
+code, provider output and the UI's missing-value symbols stay outside this
+rule; it never changes user content.
+
 Put it in `strings/en/<part>.ts`, the file of the block its screen belongs to,
 then in `strings/fr/<part>.ts` at the same path. Two changes to different
 parts never edit the same file. A new block is a new part: a file in

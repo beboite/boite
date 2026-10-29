@@ -6,8 +6,8 @@ Boite Nightly are described in [Desktop updates](updates.md).
 Each core checks and updates the agent executables on its own machine. Clients
 show those readings and send Update or Skip to that core.
 
-An agent with an updater but no readable latest-version source, such as the
-Antigravity CLI, shows Checks by itself and Run its updater. A successful run
+An agent with an updater but no readable latest-version source shows Checks by
+itself and Run its updater. A successful run
 records its resulting version as current until the next check. If a newer
 version was known but the installed version stays unchanged, or the command
 fails, the row retains its update action and error. Automatic updates exclude
@@ -15,11 +15,11 @@ agents without a readable latest version.
 
 ## What the user sees
 
-Settings, Machines and updates lists each machine's agents under that
-machine's details, with their installed and available versions, Update and
-Skip. A machine with a release waiting for one of its agents says Update
-available on its row before the details are opened; a skipped release does
-not. Updates create no pinned chat notice: the sidebar's update button and
+Each machine's Providers page (the machine picked above the page) lists its
+agents with their installed and available versions, Update and Skip. A machine
+with a release waiting for one of its agents says Update available on its row
+in Settings, Machines and updates, whose updates card lists that release; a
+skipped release does not. Updates create no pinned chat notice: the sidebar's update button and
 its card list them with the rest, and Update all starts every agent of every
 machine at once ([update everything](updates.md#update-everything)).
 
@@ -28,10 +28,11 @@ machine at once ([update everything](updates.md#update-everything)).
   agent the update still waits for to pause ([Turns in flight](#turns-in-flight));
   the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
-  The same row in Machines and updates offers a skipped version again.
+  The same row on Providers offers a skipped version again.
 - A failed update keeps the updater's error and Try
   again. Standard error takes priority over progress on standard output; an
-  explicit error takes priority over npm's final log-file location.
+  explicit error takes priority over npm's final log-file location. OpenCode's
+  installation-method error takes priority over its closing `Failed` line.
 - When the agent that runs is the user's own install (the `self` route), its
   update row offers no Update for a copy Boite downloaded earlier: that copy
   is not what runs, and the version shown is the one the update reads.
@@ -40,8 +41,9 @@ machine at once ([update everything](updates.md#update-everything)).
 itself, pausing running turns the same way and also waiting for the work
 agents left running in the background ([Background work](#background-work)).
 It is off by default. `Check for updates` reads its versions again.
-Providers keeps sign-ins and installation controls and names no version: an
-agent's version is on its machine's card and nowhere else.
+A provider's own row keeps its sign-ins and installation controls and names no
+version: the agent's version, Update and Skip sit in the Agent updates card
+lower on the same Providers page.
 
 ## Two routes
 
@@ -104,11 +106,16 @@ user can write the package's parent directory and `<prefix>/bin` (`<prefix>` on
 Windows). When it cannot, the update fails at once with the prefix and the
 directory it cannot write, without running anything.
 
+When a separate npm prefix keeps two agent versions side by side, a PATH alias
+must be a symbolic link to its package executable. A hard link hides the npm
+path and stays on the old file when npm replaces it. With a symbolic link,
+Boite can identify the package and update its own prefix directly, including on
+Windows, without asking the agent to guess its installation method.
+
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
 row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its
-newest release. The Antigravity CLI ships with its updater alone, having no
-newest release Boite can read. Muse Code has no updater, so it is not listed.
+newest release. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
@@ -129,6 +136,9 @@ hours after the kept reading when that is later, unless a row was dropped
 because its program moved, which brings the check back to ten minutes, and waits
 ten more minutes while any turn is queued, running or waiting. A check started
 from the card counts: the timer does not read again within six hours of it.
+An owner client also checks when it connects or its window is shown again and
+the newest reading is more than 15 minutes old, unless a row is checking,
+updating or shows a failure.
 
 A managed update has no time limit: it waits for its download, which retries a
 dropped connection by itself and fails once the retries run out
@@ -168,7 +178,7 @@ their own pause. Before any turn has paused, the update waits for the current
 tool calls with no deadline. Past the limit, the paused turns go on with
 `Resumed: the <agent> update waits for other turns`, no turn is paused again,
 and the update runs at the first moment no turn of the agent runs. This covers a turn whose tool call
-waits on another turn of the same agent, such as `boite agents send --wait`,
+waits on another turn of the same agent, such as `boite threads send --wait`,
 which would otherwise never let the update start.
 
 Stop during a pause ends the turn as stopped and the update goes on. A core
@@ -207,8 +217,8 @@ agent gets the continuation `boite delegate resume` sends, unless its owner
 paused the team; its parent still hears the interruption. A conversation of
 the user's own resumes like background work that ended without waking it
 ([auto-continue](restart-handoff.md#turns-that-stop-before-their-answer)). A
-turn paused for the update reads it in its resume note. A persistent agent
-only gets the notice.
+turn paused for the update reads it in its resume note. A bot's
+thread resumes like a conversation of the user's.
 
 ## Restarts
 
@@ -249,13 +259,14 @@ on the next core like any turn it cut.
 ## Remote machines
 
 A multi-machine client keeps separate update lists and routes each action to
-the owning core ([machines](machines.md)). Each agent row stays under its own
-machine's card, including when provider IDs match on different machines.
+the owning core ([machines](machines.md)). The Agent updates card shows the
+agents of the machine picked above the Providers page, including when provider
+IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
 startup and every six hours, postponing checks while work is active, and
 updates an agent by pausing its turns in flight between two tool calls. Enable it
-under that machine's agents in Settings, Machines and updates. Providers
+on that machine's Providers page, under its agents. Providers
 without a managed release use the self route as the core user. An unwritable
 npm prefix fails before the
 updater starts and names the directory; other updater permission failures
@@ -286,8 +297,7 @@ The client treats that machine as having no updates and shows no error.
 
 - `providers.updates { refresh? }`: the list, answered from the last reading
   without running any agent. `refresh: true` reads every agent first. On a core
-  with no reading yet the list is empty; Settings, Machines and updates asks
-  for a refresh
+  with no reading yet the list is empty; the Providers page asks for a refresh
   when it opens on an empty list.
 - `providers.update { providerId }`: start one update. While turns of the
   agent still run a tool call, its entry is `updating` with `waitingFor` set

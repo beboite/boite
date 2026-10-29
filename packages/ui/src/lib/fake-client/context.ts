@@ -1,10 +1,14 @@
 import { secureId } from '../secure-id';
+import { FakeComposerState } from './composer';
 import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
+import { cancelSecretCards, type FakeSecretCard, type FakeSecretTransit } from './secrets';
 import {
   type ClientPreferences,
+  type ExperimentId,
+  type QuotaAlerts,
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -61,6 +65,8 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
+import { checkEffort, checkModel } from './checks';
+import { modelsOf } from './provider-catalog';
 import { settleAgentSettings } from './agent-settings';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { activityMethods, finishActivityTurn } from './activity';
@@ -77,7 +83,7 @@ import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialDesktopUpdate, initialServerUpdate } from './server-update';
 import { observeLog } from './logs';
-import { followGoal } from './todos';
+import { agentTodos, followGoal } from './todos';
 import type { FakeWorktree } from './worktrees';
 
 /**
@@ -88,10 +94,14 @@ import type { FakeWorktree } from './worktrees';
 export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}` | `resident.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
+  /** Explicit peer clients share one core's composer records and attachment assets. */
+  composerState?: FakeComposerState;
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
   /** Exhausted quotas with banked resets and credits for visual checks. */
   quotaExtras?: boolean;
+  /** Simulate Windows refusing global instruction symlinks. */
+  brainLinkPermission?: boolean;
   /**
    * Characters per streamed delta, like the echo driver's 16, so a per-delta
    * cost shows. Unset streams an answer in five deltas; `?fake=1&stream=tokens` sets 16.
@@ -103,6 +113,8 @@ export interface FakeClientOptions {
   longCopies?: number;
   /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
   heavy?: boolean;
+  /** Seeds one thread whose answer holds diagrams and formulas, what `?fake=1&diagrams=1` opens (`diagrams-thread.ts`). */
+  diagrams?: boolean;
   /** Seeds this many more threads at work, their load sampled every second: what `?fake=1&working=16` shows. */
   working?: number;
   /** Seeds this many threads that work without end, what `?fake=1&load=16` streams (`load.ts`). */
@@ -121,8 +133,14 @@ export interface FakeClientOptions {
   boardDemo?: boolean;
   /** Two pull request watches on the trace thread, one paused by GitHub's rate limit, on `?fake=1&watch=1`. */
   watchDemo?: boolean;
+  /** Window captures, consent cards in each state and a watched Unity window on the trace thread, on `?fake=1&windows=1`. */
+  windowsDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
+  /** The thread an agent's token names; with none, every agent call fails closed, as on the core. */
+  agentThreadId?: ThreadId;
+  /** A link nobody encrypts (plain HTTP from another machine): no secret value travels on it; `?fake=1&plainLink=1` sets it. */
+  plainLink?: boolean;
   /**
    * Methods this core answers `unknown method` to, like a machine on an older
    * Boite; `?fake=1&missing=diagnostics.summary,diagnostics.export` sets them.
@@ -161,9 +179,12 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  readonly composer: FakeComposerState;
   hasProtectedInput(threadId: ThreadId): boolean {
     return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);
   }
+  /** The thread an agent's token names; `becomes('agent', id)` moves it. */
+  agentThreadId: ThreadId | null;
   readonly logs: CoreLogRecord[] = [];
   readonly logRunId = secureId();
   logSequence = 0;
@@ -244,6 +265,8 @@ export class FakeContext {
   clientPreferences: ClientPreferences | null = null;
   /** Each app's last report by its id, as the core's book keeps them. */
   readonly clientApps = new Map<string, ClientPreferences>();
+  /** What the fake machine's desktop app has on, as `client.desktopExperiments` says; null before it reported. */
+  desktopExperiments: ExperimentId[] | null = null;
   speech: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '', model: SPEECH_DEFAULT_MODEL };
   readonly speechStatus: SpeechStatus = { revision: 'fake-voice', engine: 'local', ready: true, localReady: true, groqKeySet: false, openrouterKeySet: false, installing: false, downloadedBytes: 0, totalBytes: 0, error: null, canInstallRuntime: true, models: fakeSpeechModels(), downloading: null, runtimeOutdated: false };
   readonly speechRequests = new Map<string, symbol>();
@@ -254,6 +277,8 @@ export class FakeContext {
     errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
   };
   readonly quotaEnabled: Record<string, boolean> = {};
+  /** What `quotas.alert` saved, per account or gateway entry. */
+  readonly quotaAlerts: Record<string, QuotaAlerts> = {};
   readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;
@@ -273,6 +298,10 @@ export class FakeContext {
     string,
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
+  /** Open cards and synthetic transit metadata: never a value or a project key. */
+  readonly pendingSecrets = new Map<string, FakeSecretCard>();
+  readonly secretTransits = new Map<string, FakeSecretTransit>();
+  readonly settledSecrets = new Map<string, { threadId: Thread['id']; result: RpcResult<'secrets.ask'> }>();
   readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
   private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */
@@ -292,7 +321,10 @@ export class FakeContext {
   readonly long: boolean;
   readonly longCopies: number;
   readonly heavy: boolean;
+  readonly diagrams: boolean;
   readonly quotaExtras: boolean;
+  readonly plainLink: boolean;
+  brainLinkPermission: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
    * have a subject (`provider-installs.ts`).
@@ -300,8 +332,11 @@ export class FakeContext {
   readonly harnessUpdates: HarnessUpdate[] = initialHarnessUpdates();
 
   constructor(options: FakeClientOptions = {}) {
+    this.composer = options.composerState ?? new FakeComposerState();
     this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
-    this.bus = new FakeBus(options.principal ?? 'owner');
+    this.brainLinkPermission = options.brainLinkPermission ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('brainLinkPermission') === '1');
+    this.plainLink = options.plainLink ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('plainLink') === '1');
+    this.bus = new FakeBus(options.principal ?? 'owner', { threadId: () => this.agentThreadId, projectOf: id => this.threads.get(id)?.projectId ?? null, visibleTodos: (id, todos) => agentTodos(this, id, todos) });
     this.agents = new FakeAgents(revision => {
       this.emit('agents.changed', { revision });
       // As the core: a change to any agent may answer a card, settled once per burst after it commits.
@@ -309,16 +344,31 @@ export class FakeContext {
       this.settlingAgentCards = true;
       queueMicrotask(() => { this.settlingAgentCards = false; settleAgentSettings(this); });
     }, {
-      create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
-      start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
-      stop: threadId => { void this.stopTurn(threadId); },
+      create: (agent, sessionId) => createAgentSession(this, agent, sessionId),
+      // A wake runs on the thread like a turn the user started; one already running refuses it, as the composer's queue would wait.
+      wake: (threadId, prompt, operation, label) => this.startTurn(threadId, prompt, [], operation, undefined, undefined, [], false, label),
       thread: threadId => this.threads.get(threadId),
+      settle: threadId => { const thread = this.threads.get(threadId); if (thread?.unread) { thread.unread = false; this.touch(thread); } },
+      waiting: threadId => [...this.pendingQuestions.values()].some(q => q.request.threadId === threadId) || [...this.pendingPermissions.values()].some(p => p.request.threadId === threadId),
+      question: threadId => {
+        const ask = [...this.pendingQuestions.values()].find(q => q.request.threadId === threadId)?.request;
+        return ask ? { id: ask.id, text: ask.text, options: ask.options.map(o => o.label) } : null;
+      },
       goal: (threadId, objective) => {
         const methods = activityMethods(this);
         void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
       },
       // A project's folder holds files: a brain root refuses it.
       occupied: path => this.projects.some(p => p.path.replace(/[\\/]+$/, '') === path),
+      checkRoute: (value, previous) => {
+        const provider = this.providers.find(p => p.id === value.providerId);
+        const account = this.accounts.find(a => a.id === value.accountId);
+        if (!provider || !account || account.providerId !== provider.id) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'route.accountId: expected an account of route.providerId' });
+        const models = modelsOf(this, provider.id, account.id);
+        const kept = previous?.providerId === provider.id && previous.accountId === account.id && previous.model === value.model;
+        if (!kept) checkModel(provider, account.id, models, value.model, this.modelCatalogs.has(provider.id + '::' + account.id));
+        if (!kept || previous.effort !== value.effort) checkEffort(provider, models, value.model, value.effort);
+      },
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),
@@ -347,11 +397,13 @@ export class FakeContext {
     this.long = options.long ?? false;
     this.longCopies = options.longCopies ?? 0;
     this.heavy = options.heavy ?? false;
-    const coreId = options.coreId ?? `fake-core-${secureId()}`;
+    this.diagrams = options.diagrams ?? false;
+    const coreId = options.coreId ?? `${secureId()}${secureId()}`;
     if (options.desktopApp) {
       this.serverUpdate = { ...this.serverUpdate, mode: 'manual', phase: 'idle', version: null, publishedAt: null, received: 0, total: null, error: null };
       this.desktopUpdate = initialDesktopUpdate();
     }
+    this.agentThreadId = options.agentThreadId ?? null;
     this.identity = {
       coreId,
       name: options.coreName ?? 'This PC',
@@ -374,11 +426,17 @@ export class FakeContext {
       reapOrphans: true,
       autoUpdateHarnesses: false
     };
+    // `?gateway=douane` or `cliproxyapi`: a gateway the owner saved and turned off, for a paired phone to switch on.
+    const gateway = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('gateway');
+    if (gateway === 'douane' || gateway === 'cliproxyapi') {
+      this.settings.subscriptionProxy = { enabled: false, kind: gateway, baseUrl: 'https://gateway.example.test/v1',
+        dashboardUrl: gateway === 'douane' ? 'https://gateway.example.test/admin/#quotas' : 'https://gateway.example.test/management.html#/quota' };
+    }
     this.core = {
       version: '2.0.0-beta.1',
       coreId,
       protocolVersion: PROTOCOL_VERSION,
-      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true },
+      features: { draftPreparation: true, attachmentUploads: true, threadSnapshots: true, chunkedAnswers: true, readingPages: true, messagePositions: true, deferredToolParts: true, deviceKeys: true, revealMachines: true, loadEvents: true, desktopUpdates: true, gatewayMove: true, projectBoard: true, settingsHome: true, sharedProjects: 1 },
       os: 'windows',
       channel: 'stable',
       pid: 4242,
@@ -432,6 +490,16 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    this.composer.observe(this, event, payload);
+    if (event === 'thread.removed') cancelSecretCards(this, (payload as RpcEvents['thread.removed']).threadId);
+    if (event === 'thread.updated') {
+      const thread = payload as RpcEvents['thread.updated'];
+      if (thread.archived) cancelSecretCards(this, thread.id);
+    }
+    if (event === 'turn.finished') {
+      const turn = payload as RpcEvents['turn.finished'];
+      cancelSecretCards(this, turn.threadId, turn.id);
+    }
     if (event === 'core.log') {
       const log = payload as RpcEvents['core.log'];
       const bounded = (value: string): string => normalizeCoreLogText(value).replace(/[\r\n\t]/g, ' ').slice(0, 200);
@@ -443,11 +511,15 @@ export class FakeContext {
       } as RpcEvents[E];
     }
     observeLog(this, event, payload);
+    if (event === 'thread.removed') this.agents.threadEnded((payload as RpcEvents['thread.removed']).threadId);
+    if (event === 'thread.updated' && (payload as RpcEvents['thread.updated']).archived) this.agents.threadEnded((payload as RpcEvents['thread.updated']).id);
     if (event === 'turn.finished') {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
       const answer = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n') ?? '';
-      if (agentThread?.agentSessionId) this.agents.finished(turn, answer());
+      // The final text block, as the core reads it for `[quiet]`.
+      const finalText = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' && p.text.trim() ? [p.text] : [])).at(-1) ?? '';
+      if (agentThread?.agentSessionId) this.agents.finished(turn, finalText());
       const goal = agentThread?.activity?.goal?.status;
       finishActivityTurn(this, turn);
       this.agents.goalEnded(turn, goal, answer);

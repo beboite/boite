@@ -1,17 +1,11 @@
 import type { AccountId, ModelInfo, ProviderId, RpcEvents, RpcParams, RpcResult, ThreadId } from '@boite/contracts';
-import { mkdtempSync } from 'node:fs';
-import { removeDir } from '../fs-retry.ts';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Core } from '../core.ts';
-import { forgetProbes, probedModelsOf, probeModels, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
+import { forgetProbes, holdModels, probedModelsOf, probeModels, readModelsOf, refreshProbes, rememberExternalModels, settleRefresh } from '../drivers/index.ts';
 import { launchTemp, type LaunchTemp } from '../drivers/launch-temp.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused, unavailable } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
-
-/** After owned processes stop, a missing pipe-close event must not hold the account's probe lane. */
-const PROBE_CLOSE_GRACE_MS = 1000;
+import { forgetSavedCatalog, readSavedCatalog, saveCatalog } from './saved-catalogs.ts';
 
 /** The synthetic thread a probe process runs under, so the trace shows it like a login. */
 export function probeThreadId(providerId: ProviderId, accountId: AccountId): ThreadId {
@@ -93,8 +87,10 @@ async function probeNative(
   const account = core.accounts.require(accountId);
   const threadId = probeThreadId(provider.id, account.id);
   const cleanupContext = { source: provider.id, event: 'provider.probeCleanup', threadId };
-  const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
-  const exits: Promise<void>[] = [];
+  const log = (message: string): void => core.log('warn', `probing ${provider.id}: ${message}`, cleanupContext);
+  // The account owns the probe: removing it stops this process and waits for it.
+  // A probe runs the same executable a turn would, so its children hold the same lease.
+  const operation = core.accounts.operations.open(account.id, provider.id, threadId, log);
   let temp: LaunchTemp | null = null;
   try {
     temp = launchTemp(provider, account.isolationDir);
@@ -103,66 +99,21 @@ async function probeNative(
       provider,
       accountId: account.id,
       accountEnv: temp === null ? accountEnv : { ...accountEnv, ...temp.env },
-      cwd: directory,
+      cwd: operation.scratch('boite-probe-'),
       catalogThread: core.drafts.catalogThread(provider.id, account.id)
         ?? core.threads.list({}).find(thread => thread.providerId === provider.id && thread.accountId === account.id && core.threads.focus.viewed(thread.id)),
       ...(model === undefined ? {} : { model }),
-      // A probe runs the same executable a turn would, so it holds the same lease:
-      // removing a managed install under a probe would be the same crash.
-      spawnChild: (cmd, args, opts) => {
-        core.accounts.require(account.id);
-        const child = core.procs.spawnChild(threadId, cmd, args, opts);
-        exits.push(new Promise<void>((resolve) => {
-          child.once('close', () => resolve());
-          child.once('error', () => resolve());
-        }));
-        const installs = core.providers.installs;
-        installs.acquire(provider.id);
-        let released = false;
-        const drop = (): void => {
-          if (released) return;
-          released = true;
-          installs.release(provider.id);
-        };
-        child.once('exit', drop);
-        child.once('error', drop);
-        return child;
-      },
-      killTree: () => {
-        core.procs.killTree(threadId);
-      },
+      spawnChild: operation.spawnChild,
+      killTree: operation.killTree,
       log: (level, message, context) => {
         core.log(level, message, { ...context, source: provider.id, event: 'provider.probe', threadId });
       },
     });
     return { models, probedAt };
   } finally {
-    cleanups.push(cleanup());
-  }
-
-  async function cleanup(): Promise<void> {
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the models just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `probing ${provider.id}: ${error instanceof Error ? error.message : String(error)}`, cleanupContext));
-    if (exits.length > 0) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          Promise.all(exits),
-          new Promise<void>(resolve => {
-            timer = setTimeout(() => {
-              core.log('warn', `probing ${provider.id}: process pipes did not close within ${PROBE_CLOSE_GRACE_MS} ms`, cleanupContext);
-              resolve();
-            }, PROBE_CLOSE_GRACE_MS);
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    const log = (message: string): void => core.log('warn', `probing ${provider.id}: ${message}`, cleanupContext);
-    await temp?.dispose(log);
-    await removeDir(directory, log);
+    cleanups.push(operation.close().then(() => temp?.dispose(log)));
   }
 }
 
@@ -200,6 +151,23 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       if (models !== null) return Promise.resolve({ models, probedAt: known });
     }
     const key = JSON.stringify([params.providerId, params.accountId, params.model ?? null]);
+    // Nothing read since this core started, or since a change that dropped the
+    // list: the one saved under the same descriptor, program, gateway and
+    // login answers now, and a fresh read replaces it once the agent answers.
+    // A list a driver already holds, from a sign-in's own session or a turn, is
+    // fresher and starts no process: the plain path below answers it. A list
+    // only held for a refresh, the saved one included, does not count.
+    if (!params.refresh && params.model === undefined && known === undefined && core.providers.enabled(params.providerId)
+      && readModelsOf(core.providers.require(params.providerId).protocol, params.providerId, params.accountId) === null) {
+      const saved = readSavedCatalog(core, params.providerId, params.accountId);
+      if (saved !== null) {
+        // Model checks accept the list on screen until the fresh read settles,
+        // whether this call starts that read or a refresh already runs.
+        holdModels(params.providerId, params.accountId, saved.models);
+        if (!pending.has(key)) void probe({ providerId: params.providerId, accountId: params.accountId, refresh: true }).catch(() => undefined);
+        return Promise.resolve(saved);
+      }
+    }
     const existing = pending.get(key);
     if (existing) return existing;
     // One probe at a time per account: they share a synthetic thread, so the
@@ -208,7 +176,10 @@ export function registerProbeMethods(core: Core): ProviderProbe {
     // holds until the process has exited; the caller is answered before that.
     const before = lanes.get(lane) ?? Promise.resolve();
     const cleanups: Promise<void>[] = [];
-    const request = before.then(() => {
+    const request = before.then(async () => {
+      // Meta discovery can connect Muse and invalidate its old account catalog.
+      // Settle that change before recording the revision this probe belongs to.
+      if (params.providerId === 'muse') await core.quotas.gateway.read();
       const protocol = core.providers.require(params.providerId).protocol;
       if (params.refresh) refreshProbes(protocol, params.providerId, params.accountId);
       const startedAtRevision = revision;
@@ -230,6 +201,13 @@ export function registerProbeMethods(core: Core): ProviderProbe {
   core.router.register('providers.probe', probe);
 
   core.bus.onAny((name, payload) => {
+    if (name === 'providers.probed') {
+      const { providerId, accountId, models, probedAt } = payload as RpcEvents['providers.probed'];
+      // A failed write costs the next start its instant list, never this answer.
+      try { saveCatalog(core, providerId, accountId, { models, probedAt }); }
+      catch (error) { core.log('warn', `saving the ${providerId} model list: ${logMessageOf(error)}`); }
+      return;
+    }
     if (name === 'settings.updated') {
       const nextProxy = JSON.stringify((payload as RpcEvents['settings.updated']).subscriptionProxy);
       if (nextProxy === proxyConfig) return;
@@ -253,6 +231,9 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       bumpAccount(account.id);
       forgetProbes({ providerId: account.providerId, accountId: account.id });
       forgetAnswered(account.id);
+      // A sign-in can reach another account under the same identity, or none
+      // the core can read: only a list read after it stands for the next start.
+      forgetSavedCatalog(core, account.id);
       return;
     }
     if (name === 'accounts.removed') {
@@ -260,6 +241,7 @@ export function registerProbeMethods(core: Core): ProviderProbe {
       bumpAccount(accountId);
       forgetProbes({ accountId });
       forgetAnswered(accountId);
+      forgetSavedCatalog(core, accountId);
     }
   });
   return probe;

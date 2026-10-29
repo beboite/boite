@@ -5,7 +5,7 @@
   import { fill, strings } from '../lib/strings';
   import Deferred, { parts } from './Deferred.svelte';
 
-  let { rows, loading, completed, error = '', outdated = false, owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
+  let { rows, loading, completed, error = '', outdated = false, owner = true, order = [], reorder, refresh, connect, settings, close, title, actions, testPrefix = 'quota' }: {
     rows: AccountQuota[] | null;
     loading: boolean;
     completed: string[];
@@ -17,10 +17,12 @@
     order?: string[];
     reorder?: (order: string[]) => Promise<boolean>;
     refresh: () => void;
-    connect: () => void;
+    /** Absent where Providers is out of reach: a phone or a paired device. */
+    connect?: () => void;
     settings: () => void;
     close: () => void;
     title?: Snippet;
+    actions?: Snippet;
     testPrefix?: string;
   } = $props();
 </script>
@@ -29,6 +31,7 @@
   <header>
     <h2><Gauge size={17} /><span>{#if title}{@render title()}{:else}{strings.quotas.glance}{/if}</span></h2>
     <div class="actions">
+      {@render actions?.()}
       {#if owner}
         <button type="button" class="ghost icon" aria-label={strings.quotas.refresh} title={strings.quotas.refresh} aria-busy={loading} data-testid={`${testPrefix}-refresh`} onclick={refresh}><RefreshCw size={16} class={loading ? 'spinning' : ''} /></button>
       {/if}

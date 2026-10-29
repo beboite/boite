@@ -45,6 +45,7 @@ function agentKit() {
   const boxed = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   // A control styled away to nothing is operated through a label the user sees.
   const operable = el => (visible(el) && boxed(el)) || !el.labels ? el : Array.from(el.labels).find(label => visible(label) && boxed(label)) ?? el;
+  const hits = (el, hit) => hit?.nodeType === 1 && (el.contains(hit) || (hit.tagName === 'LABEL' && hit.control === el) || (el.tagName === 'LABEL' && el.control === hit));
   const labelled = el => {
     const ids = el.getAttribute('aria-labelledby');
     if (ids) { const text = ids.split(/\s+/).map(id => el.ownerDocument.getElementById(id)?.innerText ?? '').join(' ').trim(); if (text) return text; }
@@ -92,9 +93,11 @@ function agentKit() {
     return line;
   };
 
+  // `start` numbers refs after those of the documents read before; `base` is the depth of a frame's document
+  // under its iframe. A frame of another origin is listed in `frames` for the core to read through its own context.
   K.snapshot = (opts = {}) => {
-    K.refs = new Map(); let n = 0;
-    const out = []; let size = 0; const MAX = opts.maxChars || 40000; let truncated = false;
+    K.refs = new Map(); let n = opts.start || 0;
+    const out = []; const frames = []; let size = 0; const MAX = opts.maxChars || 40000; let truncated = false;
     const emit = (depth, text) => {
       if (truncated) return;
       const line = '  '.repeat(opts.interactive ? 0 : depth) + '- ' + text;
@@ -121,14 +124,21 @@ function agentKit() {
       const viaLabel = !isVisible && (r === 'checkbox' || r === 'radio') && Array.from(el.labels ?? []).some(visible);
       if (!isVisible && !viaLabel && (!el.children.length || getComputedStyle(el).display === 'none')) return;
       if (isVisible || viaLabel) {
-        if (r && (INTERACTIVE.has(r) || r === 'heading' || (!opts.interactive && (r === 'img' || r === 'iframe')))) {
+        if (r && (INTERACTIVE.has(r) || r === 'heading' || r === 'iframe' || (!opts.interactive && r === 'img'))) {
           flush();
           const ref = INTERACTIVE.has(r) || r === 'heading' || r === 'iframe' ? 'e' + (++n) : null;
           if (ref) K.refs.set(ref, new WeakRef(el));
+          const at = out.length;
           emit(depth, describe(el, r, ref, opts));
           if (r === 'iframe') {
-            let doc = null; try { doc = el.contentDocument; } catch {}
-            if (doc?.body && (!opts.depth || depth + 1 < opts.depth)) walk(doc.body, depth + 1);
+            let foreign = false;
+            if (boxed(el) && !truncated && (!opts.depth || depth + 1 < opts.depth)) {
+              let doc = null; try { doc = el.contentDocument; } catch {}
+              if (doc?.body) walk(doc.body, depth + 1);
+              else if (!doc) { foreign = true; frames.push({ ref, at: out.length, depth: depth + 1 }); }
+            }
+            // With -i, a frame with nothing to act on says nothing; the core reads one of another origin.
+            if (opts.interactive && !foreign && out.length === at + 1) { size -= out[at].length + 1; out.splice(at, 1); }
           }
           // Links and buttons can wrap headings or fields; those stay reachable.
           if (r === 'link' || r === 'button' || r === 'listitem' || r === 'option' || r === 'tab' || r === 'menuitem' || r === 'treeitem') {
@@ -154,11 +164,11 @@ function agentKit() {
     };
     const roots = opts.selector ? Array.from(document.querySelectorAll(opts.selector)) : [document.body ?? document.documentElement];
     if (opts.selector && !roots.length) throw new Error('no element matches ' + opts.selector);
-    for (const root of roots) walk(root, 0);
+    for (const root of roots) walk(root, opts.base || 0);
     flush();
-    if (truncated) out.push('- note: snapshot truncated at ' + MAX + ' characters; use snapshot -i, -s <selector> or -d <depth>');
-    if (!out.length) out.push(document.readyState === 'loading' ? '- note: the page is still loading' : '- note: no visible content');
-    return { text: out.join('\n'), refs: n };
+    if (truncated) out.push('  '.repeat(opts.interactive ? 0 : opts.base || 0) + '- note: snapshot truncated at ' + (opts.limit || MAX) + ' characters; use snapshot -i, -s <selector> or -d <depth>');
+    if (!out.length && !opts.base) out.push(document.readyState === 'loading' ? '- note: the page is still loading' : '- note: no visible content');
+    return { text: out.join('\n'), refs: n, frames };
   };
 
   K.find = target => {
@@ -201,20 +211,65 @@ function agentKit() {
     await new Promise(resolve => { const done = setTimeout(resolve, 120); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(done); resolve(); })); });
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height || !visible(el)) throw new Error('element is not visible');
-    const x = Math.max(0, Math.min(innerWidth - 1, r.left + r.width / 2));
-    const y = Math.max(0, Math.min(innerHeight - 1, r.top + r.height / 2));
-    const hit = document.elementFromPoint(x, y);
-    const reached = hit && (el.contains(hit) || (hit.tagName === 'LABEL' && hit.control === el) || (el.tagName === 'LABEL' && el.control === hit));
+    // An element in a frame of this origin is measured and hit in its own document.
+    const doc = el.ownerDocument, view = doc.defaultView ?? window;
+    const x = Math.max(0, Math.min(view.innerWidth - 1, r.left + r.width / 2));
+    const y = Math.max(0, Math.min(view.innerHeight - 1, r.top + r.height / 2));
+    const hit = doc.elementFromPoint(x, y);
+    const reached = hits(el, hit);
     if (typing) {
       el.focus();
-      if (el.isContentEditable) { const range = document.createRange(); range.selectNodeContents(el); if (mode === 'type') range.collapse(false); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+      if (el.isContentEditable) { const range = doc.createRange(); range.selectNodeContents(el); if (mode === 'type') range.collapse(false); const sel = view.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
       else if (mode === 'type') { const end = el.value.length; try { el.setSelectionRange(end, end); } catch {} }
       else if (typeof el.select === 'function') el.select();
     }
+    // Then the point moves out through each iframe around it to this window's viewport.
+    const out = outward(view, x, y);
     // A covered element is driven through the DOM rather than clicking what covers it.
-    return reached || typing ? { x, y } : { x, y, covered: hit ? clip(hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + ' ' + (hit.innerText ?? ''), 60) : 'nothing at its center' };
+    if (typing) return { x: out.x, y: out.y };
+    const covered = !reached ? (hit ? named(hit) : 'nothing at its center') : out.covered;
+    return covered ? { x: out.x, y: out.y, covered } : { x: out.x, y: out.y };
   };
 
+  const named = el => clip(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + ' ' + (el.innerText ?? ''), 60);
+  /**
+   * A point in the document `frame` shows, in the viewport of the document
+   * that holds the iframe, and what native input there would meet instead of
+   * the frame: something drawn over it, or nothing when the point is out of
+   * view. A scale or translation of the iframe moves and scales the point.
+   * In reverse, maps a parent point into the frame, checking that same hit.
+   */
+  const through = (frame, x, y, reverse = false) => {
+    const r = frame.getBoundingClientRect(), view = frame.ownerDocument.defaultView ?? window, style = view.getComputedStyle(frame);
+    const sx = frame.offsetWidth ? r.width / frame.offsetWidth : 1, sy = frame.offsetHeight ? r.height / frame.offsetHeight : 1;
+    const point = reverse
+      ? { x: (x - r.left) / sx - frame.clientLeft - parseFloat(style.paddingLeft), y: (y - r.top) / sy - frame.clientTop - parseFloat(style.paddingTop) }
+      : { x: r.left + (frame.clientLeft + parseFloat(style.paddingLeft) + x) * sx, y: r.top + (frame.clientTop + parseFloat(style.paddingTop) + y) * sy };
+    const at = reverse ? { x, y } : point;
+    if (at.x < 0 || at.y < 0 || at.x >= view.innerWidth || at.y >= view.innerHeight) return { ...point, covered: 'the edge of the frame it is in' };
+    const root = frame.getRootNode(), hit = (typeof root.elementFromPoint === 'function' ? root : frame.ownerDocument).elementFromPoint(at.x, at.y);
+    return hit === frame ? point : { ...point, covered: hit ? named(hit) : 'nothing over its frame' };
+  };
+  // From `view`'s viewport out to this window's, through each frame of this origin between them.
+  const outward = (view, x, y) => {
+    let point = { x, y }, covered;
+    for (let inner = view; inner !== window && inner.frameElement; inner = inner.parent) {
+      point = through(inner.frameElement, point.x, point.y);
+      covered ??= point.covered;
+    }
+    return { x: point.x, y: point.y, ...(covered ? { covered } : {}) };
+  };
+  // Recheck a fixed viewport point through the current frame positions, without scrolling.
+  const inward = (view, x, y) => {
+    const frames = [];
+    for (let inner = view; inner !== window && inner.frameElement; inner = inner.parent) frames.push(inner.frameElement);
+    let point = { x, y };
+    for (const frame of frames.reverse()) {
+      point = through(frame, point.x, point.y, true);
+      if (point.covered) return null;
+    }
+    return point;
+  };
   const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith('pointer') ? (window.PointerEvent ?? MouseEvent) : type.startsWith('key') ? KeyboardEvent : type === 'input' ? (window.InputEvent ?? Event) : type === 'change' ? Event : MouseEvent)(type, { bubbles: true, cancelable: true, composed: true, ...init }));
   const setValue = (el, value) => {
     if (el.isContentEditable) { el.textContent = value; }
@@ -312,6 +367,40 @@ function agentKit() {
   K.scroll = (x, y, target) => { const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
   K.scrollIntoView = target => { K.find(target).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); return true; };
   K.focus = target => { K.find(target).focus(); return true; };
+  // A popup can receive native input while Chromium leaves its CSS :hover unset.
+  // Observe this command's trusted movement in the target's own document instead.
+  K.watchPointer = target => {
+    const el = operable(K.find(target)), doc = el.ownerDocument;
+    let received = false;
+    const moved = event => {
+      if (event.isTrusted) received = event.composedPath().some(hit => hits(el, hit));
+    };
+    doc.addEventListener('pointermove', moved, true);
+    K.pointerMoved = (x, y) => {
+      if (!received || !el.isConnected) return false;
+      try { if (operable(K.find(target)) !== el) return false; } catch { return false; }
+      const point = inward(doc.defaultView ?? window, x, y);
+      return !!point && hits(el, doc.elementFromPoint(point.x, point.y));
+    };
+    K.stopPointer = () => {
+      doc.removeEventListener('pointermove', moved, true);
+      delete K.pointerMoved;
+      delete K.stopPointer;
+    };
+  };
+  K.into = (target, x, y) => {
+    const frame = K.find(target), point = inward(frame.ownerDocument.defaultView ?? window, x, y);
+    if (!point) return null;
+    const inner = through(frame, point.x, point.y, true);
+    return inner.covered ? null : inner;
+  };
+  // A point of the document iframe `target` shows, in this window's viewport, and what covers the way there.
+  K.through = (target, x, y) => {
+    const frame = K.find(target), point = through(frame, x, y), out = outward(frame.ownerDocument.defaultView ?? window, point.x, point.y);
+    const covered = point.covered ?? out.covered;
+    return covered ? { x: out.x, y: out.y, covered } : { x: out.x, y: out.y };
+  };
+  K.reveal = target => { K.find(target).scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }); return true; };
   const glob = pattern => new RegExp('^' + pattern.replace(/[.+^$(){}|[\]\\?]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '$');
   K.met = spec => {
     if (spec.selector) { try { const el = K.find(spec.selector); return visible(el); } catch (error) { if (/stale|unknown ref/.test(String(error))) throw error; return false; } }

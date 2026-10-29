@@ -1,8 +1,10 @@
 import type { AgentTask, ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
 import type { SessionContext, TurnContext } from '../types.ts';
+import { stringify } from '../tool-text.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
 import { answerText } from '../../attachments.ts';
+export { questionTextOf } from '../../attachments.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -12,23 +14,7 @@ export function textOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-export function stringify(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value) ?? null;
-  } catch {
-    return String(value);
-  }
-}
 
-/** The header and the question itself, whichever of the two the server filled. */
-export function questionTextOf(entry: CodexQuestion): string {
-  const header = textOf(entry.header).trim();
-  const body = textOf(entry.question).trim();
-  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
-  return body.length > 0 ? body : header;
-}
 
 /** A string option, or an object with an id and a label, becomes one card row. */
 export function optionsOf(raw: unknown): QuestionOption[] {
@@ -198,14 +184,14 @@ export function addCounts(a: CodexTokenCounts, b: CodexTokenCounts): CodexTokenC
 }
 
 /**
- * The turn's summed counts as a Boite `Usage`. The input keeps Codex's
- * meaning and still holds the cache reads, like every Codex turn already in
- * the journal: `usage.history` takes them out when it sums Codex rows. Codex
- * carries no price on the wire, so the cost stays null and the UI says so.
+ * The turn's summed counts as a Boite `Usage`, whose input holds neither
+ * cache count: Codex's does, so both come out here, once, and the journal
+ * stores buckets that read the same for every provider. Codex carries no
+ * price on the wire, so the cost stays null and the UI says so.
  */
 export function mapUsage(counts: CodexTokenCounts): Usage {
   return {
-    inputTokens: counts.input,
+    inputTokens: Math.max(0, counts.input - counts.cached - counts.cacheWrite),
     outputTokens: counts.output,
     cacheReadTokens: counts.cached,
     cacheWriteTokens: counts.cacheWrite,
@@ -247,17 +233,20 @@ export function imageInputsOf(attachments: ImageAttachment[]): { type: 'image'; 
  * then, so a change reaches the running app-server with the next prompt. The
  * permission mode is, unlike the ACP driver's key: Codex takes the
  * `approvalPolicy` and `sandbox` pair on `thread/start` and `thread/resume` and
- * has no call that changes it on a live thread, so a change there is the one
- * thing that still drops the process.
+ * has no call that changes it on a live thread. The compaction limit has the
+ * same restriction: a change reopens the session before its next turn.
  */
 export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
     cwd: ctx.thread.cwd,
     generation: ctx.thread.sessionGeneration ?? 0,
     permissionMode: ctx.thread.permissionMode,
+    contextMode: ctx.thread.contextMode ?? null,
+    autoCompactTokens: ctx.autoCompactTokens?.() ?? null,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,
     env: ctx.accountEnv,
+    protection: ctx.protectedExecution?.fingerprint ?? null,
   });
 }
 

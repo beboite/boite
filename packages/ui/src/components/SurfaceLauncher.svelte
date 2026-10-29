@@ -41,7 +41,7 @@
       >
         <SurfaceIcon kind={card.kind} size={28} />
         <span class="card-name ui-label">{kindName(card.kind)}</span>
-        <span class="kbd ui-label">{card.key}</span>
+        <span class="kbd ui-label-box"><span class="ui-label">{card.key}</span></span>
       </button>
     {/each}
   </div>

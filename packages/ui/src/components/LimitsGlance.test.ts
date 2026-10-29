@@ -4,6 +4,7 @@ import type { AccountQuota } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import { RpcFailure } from '../lib/client';
 import LimitsGlance from './LimitsGlance.svelte';
+import { phoneWidth } from '../test/phone-width';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -13,6 +14,21 @@ const quota: AccountQuota = {
   accountId: 'claude-account', providerId: 'claude', providerName: 'Claude', label: 'Default', enabled: true,
   status: 'ready', windows: [{ id: 'week', label: 'Weekly', usedPercent: 20, resetsAt: null }], checkedAt: null, error: null,
 };
+
+test('on a phone, which leaves Providers to the desktop, an empty glance offers no way to Providers', async () => {
+  const restore = phoneWidth();
+  try {
+    const call = vi.fn(async () => []);
+    const store = { client: { call, on: () => () => {} }, owner: true, endpointUrl: 'glance-phone-core', accounts: [] } as unknown as Store;
+    mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+    document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+    await settle();
+    expect(document.querySelector('[data-testid="quota-empty"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="quota-empty"] button')).toBeNull();
+  } finally {
+    restore();
+  }
+});
 
 test('a failed first read says so and offers a retry instead of asking to connect a provider', async () => {
   let fail = true;
@@ -31,6 +47,44 @@ test('a failed first read says so and offers a retry instead of asking to connec
   expect(call).toHaveBeenLastCalledWith('quotas.list', { refresh: true, requestId: expect.any(String) });
   expect(document.querySelector('[data-testid="limits-glance-error"]')).toBeNull();
   expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
+});
+
+test('Escape closes the glance and gives the focus back to its trigger', async () => {
+  const store = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl: 'glance-escape-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  const trigger = document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!;
+  trigger.focus();
+  trigger.click();
+  await settle();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  document.activeElement!.dispatchEvent(escape);
+  await settle();
+  expect(escape.defaultPrevented).toBe(true);
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
+});
+
+test('an Escape in a dialog opened over the glance is that dialog\'s, and the glance stays', async () => {
+  const store = { client: { call: async () => [quota], on: () => () => {} }, owner: true, endpointUrl: 'glance-palette-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  const trigger = document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!;
+  trigger.focus();
+  trigger.click();
+  await settle();
+  // The command palette, opened with Ctrl+K while the glance is up, holds the focus in its field.
+  const palette = document.body.appendChild(Object.assign(document.createElement('div'), { role: 'dialog' }));
+  palette.setAttribute('aria-modal', 'true');
+  const field = palette.appendChild(document.createElement('input'));
+  field.focus();
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  field.dispatchEvent(escape);
+  await settle();
+  expect(escape.defaultPrevented).toBe(false);
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+  palette.remove();
 });
 
 test('a failed refresh keeps the rows already read on screen under the error', async () => {

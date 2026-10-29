@@ -35,10 +35,13 @@
   const placeOf = (machineId: string, projectId: string) => JSON.stringify([machineId, projectId]);
   /** Rows keep the entry they were read under; a project renamed since shows under its current name. */
   const current = $derived(new Map(entries.map(entry => [placeOf(entry.machine.id, entry.project.id), entry])));
+  /** A prompt can finish after its archive was loaded. Follow each owning store's live summaries without rereading history. */
+  const live = $derived(new Map([...new Set(entries.map(entry => entry.machine.store))].map(store => [store, new Map(store.threads.map(thread => [thread.id, thread]))])));
   const rows = $derived(loaded.flatMap(entry => {
     const now = current.get(placeOf(entry.machine.id, entry.project.id));
     if (!now) return [];
-    return now.project === entry.project && now.machine === entry.machine ? [entry] : [{ ...entry, machine: now.machine, project: now.project }];
+    const thread = live.get(now.machine.store)?.get(entry.thread.id) ?? entry.thread;
+    return [{ ...now, thread }];
   }).filter(({ thread, project, machine }) => !query || [thread.title, projectName(project), thread.branch, machine.label].some(value => value?.toLocaleLowerCase().includes(query))));
   const multi = $derived(new Set(entries.map(entry => entry.machine.id)).size > 1);
   /** Under one project's header its name would only repeat it; the Recent list of every project names it. */

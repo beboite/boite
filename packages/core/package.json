@@ -11,7 +11,7 @@
   "scripts": {
     "start": "bun run bin/core.ts",
     "dev": "bun run --watch src/main.ts",
-    "build": "bun run bin/clean.ts && bun build src/main.ts src/artifact-retention-worker.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun '--env=BOITE_RELEASE_*' --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext] --minify-whitespace --minify-syntax && bun build src/platform/linux-tcp-worker.ts --target bun --outfile dist/linux-tcp-worker.js --minify-whitespace --minify-syntax",
+    "build": "bun run bin/clean.ts && bun build src/main.ts src/artifact-retention-worker.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun '--env=BOITE_RELEASE_*' --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext] --minify-whitespace --minify-syntax --minify-identifiers && bun build src/platform/linux-tcp-worker.ts --target bun --outfile dist/linux-tcp-worker.js --minify-whitespace --minify-syntax --minify-identifiers",
     "build:exe": "bun run build && bun run bin/compile.ts",
     "build:linux": "bun run build && bun run bin/compile.ts --target=bun-linux-x64-baseline --outfile=dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
     "check": "tsc -p tsconfig.json",
@@ -23,6 +23,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.302",
     "@boite/contracts": "workspace:*",
     "@modelcontextprotocol/server": "2.3.1",
+    "diff": "9.0.0",
     "fflate": "0.8.3",
     "web-push": "^3.6.7",
     "zod": "4.6.7"

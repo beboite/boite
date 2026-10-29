@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { Channel, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE } from '@boite/contracts';
+import { APP_ORIGIN, FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_ROUTE, SUBSCRIBED_EVENTS, agentHearsEvent } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
@@ -10,8 +10,11 @@ import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { JOIN_ROUTE } from './group.ts';
-import { CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, type ContactSocketData } from './contacts/store.ts';
+import { CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE } from './contacts/store.ts';
+import type { ContactSocketData } from './contacts/link-hello.ts';
 import { LAZY_MCP_ROUTE } from './mcp/lazy.ts';
+import { tailnetAddress } from './group/addresses.ts';
+import { encryptedLink, isLoopbackAddress, isLoopbackHost, RELAYED_LINK_HEADER } from './server/peer.ts';
 import { parseRelayPath, RelayHub, type RelaySocketData } from './group/relay.ts';
 import type { Connection } from './router.ts';
 import type { EventFrames, SocketData } from './server/connection.ts';
@@ -24,6 +27,7 @@ import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
 import { ticketedFile, viewPage } from './server/tickets.ts';
 export { ServerConnection } from './server/connection.ts';
+export { encryptedLink, isLoopbackAddress, isLoopbackHost } from './server/peer.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
 /** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
@@ -142,21 +146,17 @@ function servedOrigin(core: Core, origin: string | null, host: string | null): v
 }
 
 /**
- * The name the client dialled, from its `Host` header. A tunnel or a reverse
- * proxy on this machine connects from 127.0.0.1 too, so the peer address says
- * nothing; the name it forwards is the public one.
+ * Who a stranger's request to a peer route is counted under, or null for one
+ * never counted. Tailscale Funnel hands what it receives from the internet
+ * over from loopback, marked `Tailscale-Funnel-Request` and with the sender in
+ * `X-Forwarded-For`, both set by tailscaled whatever the sender wrote
+ * (`contacts/funnel.ts`): those count under the sender. Other loopback
+ * requests are this machine's own.
  */
-export function isLoopbackHost(header: string | null): boolean {
-  if (header === null) return false;
-  const name = header.trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-  return name === '127.0.0.1' || name === 'localhost' || name === '::1';
-}
-
-/** The peer address `Server.requestIP` gives, IPv4-mapped IPv6 included. */
-export function isLoopbackAddress(address: string | null): boolean {
-  if (address === null) return false;
-  const bare = address.toLowerCase().replace(/^::ffff:/, '');
-  return bare === '::1' || /^127\.\d+\.\d+\.\d+$/.test(bare);
+export function strangerAddress(address: string | null, headers: Pick<Headers, 'get'>): string | null {
+  if (address === null || !isLoopbackAddress(address)) return address;
+  if (headers.get('tailscale-funnel-request') !== '?1') return null;
+  return headers.get('x-forwarded-for')?.split(',').pop()?.trim() || 'funnel';
 }
 
 /**
@@ -473,8 +473,8 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE || url.pathname === CONTACT_JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
         // A stranger's requests are counted against its address from the moment they arrive, before any body is read.
-        const address = self.requestIP(request)?.address ?? null;
-        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        const address = strangerAddress(self.requestIP(request)?.address ?? null, request.headers);
+        const answered = address === null ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const named = request.headers.get('x-boite-peer') ?? '';
         const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : url.pathname === CONTACT_JOIN_ROUTE ? core.contacts.http(request) : core.coordination.http(request)).then((answer) => {
@@ -493,8 +493,8 @@ export function startServer(options: ServerOptions): RunningServer {
       // A contact's core keeps this socket open: this core's requests to it go down it (contacts/store.ts).
       if (url.pathname === CONTACT_LINK_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        const address = self.requestIP(request)?.address ?? null;
-        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        const address = strangerAddress(self.requestIP(request)?.address ?? null, request.headers);
+        const answered = address === null ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const verdict = core.contacts.hello(request);
         if (verdict instanceof Response) {
@@ -555,7 +555,8 @@ export function startServer(options: ServerOptions): RunningServer {
             core.log('warn', `refused a relayed websocket: ${refusal}`, { source: 'connections', event: 'connection.preauth-refused' });
             return new Response('too many connections waiting for hello', { status: 503 });
           }
-          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')));
+          const encrypted = encryptedLink(self.requestIP(request)?.address ?? null, request.headers.get('host'), origin, request.headers.get(RELAYED_LINK_HEADER), tailnetAddress() !== null);
+          const pipe = relays.pipe(relayed.coreId, peer, !isLoopbackHost(request.headers.get('host')), encrypted);
           if (self.upgrade(request, { data: { relay: pipe } })) return undefined;
           pipe.close(1000);
           return new Response('expected a websocket upgrade', { status: 400 });
@@ -578,6 +579,7 @@ export function startServer(options: ServerOptions): RunningServer {
         // this machine is served there, and the others of its group accept that origin from now on. Learned
         // before any hello, so a phone's first page, which holds no key yet, already opens the way to the others.
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
+        connection.encrypted = encryptedLink(self.requestIP(request)?.address ?? null, request.headers.get('host'), origin, request.headers.get(RELAYED_LINK_HEADER), tailnetAddress() !== null);
         if (self.upgrade(request, { data: { connection, peer } })) {
           // A page of this machine, at an origin it trusts itself and that names the host the socket asked for:
           // this machine is served there, and the others of its group accept that origin from now on. Learned at
@@ -780,6 +782,8 @@ export function startServer(options: ServerOptions): RunningServer {
   };
 
   const broadcast = (name: RpcEventName, payload: EventPayload): void => {
+    // These invalidations belong to explicit association watches, never the global bus.
+    if (name === 'sharedProjects.changed') return;
     const scoped =
       name === 'threads.pullRequestsChanged' ||
       name.startsWith('message.') ||
@@ -792,6 +796,8 @@ export function startServer(options: ServerOptions): RunningServer {
       name === 'browser.remoteChanged' ||
       // That thread's Device panel sessions.
       name === 'devices.changed' ||
+      // That thread's Window panel.
+      name === 'windows.changed' ||
       // Every grandchild's record, command line included: only that thread's
       // trace panel reads it.
       name.startsWith('process.');
@@ -801,19 +807,29 @@ export function startServer(options: ServerOptions): RunningServer {
     const parentId = threadId !== null && (name.startsWith('question.') || name.startsWith('permission.'))
       ? core.journal.getThread(threadId)?.parentThreadId ?? null
       : null;
+    // Agent conversations draw their hidden session's cards without opening
+    // its transcript. They need both new questions and their resolution.
+    const agentQuestion = threadId !== null && name.startsWith('question.') && !!core.journal.getThread(threadId)?.agentSessionId;
     const loadRow = name === 'thread.load' ? loadRowSender(core, payload as RpcEvents['thread.load']) : null;
     // Serialized once per projection, not once per socket.
     const frames: EventFrames = new Map();
     for (const connection of connections) {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
-      if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
-      if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
-      if (scoped && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
+      if (connection.identity.principal === 'agent' && !agentHearsEvent(name, payload, connection.identity.threadId, id => core.journal.getThread(id)?.projectId ?? null)) continue;
+      if (SUBSCRIBED_EVENTS.has(name) && !connection.subscriptions.has(threadId ?? '')) continue;
+      if (scoped && !agentQuestion && (threadId === null || !(connection.subscriptions.has(threadId) || (parentId !== null && connection.subscriptions.has(parentId))))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.
       if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
+      if (name === 'todos.updated' && connection.identity.principal === 'agent') {
+        const event = payload as RpcEvents['todos.updated'];
+        if (connection.identity.threadId === null) continue;
+        // Local cards stay readable when remote coordination/model policy closes the shared projection.
+        connection.sendEvent(name, {...event, todos: core.sharedBoard.visibleTodos(connection.identity.threadId, event.todos, connection)});
+        continue;
+      }
       // A shell's bytes go to the windows that attached it. Its exit still goes to every owner window: one
       // that lays the pane out without having attached it, a background tab say, drops the pane then.
       if (name === 'terminal.output' && !core.terminals.watches((payload as RpcEvents['terminal.output']).id, connection.id)) continue;

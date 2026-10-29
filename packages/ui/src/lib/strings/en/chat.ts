@@ -30,6 +30,7 @@ export const strings = {
     findPrevious: 'Previous match (Shift+Enter)',
     findNext: 'Next match (Enter)',
     finishedAt: 'done {time}',
+    failedAt: 'failed {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
     forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
@@ -102,10 +103,26 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
+    /** Beside a compaction a copy of the session made while the conversation went on. */
+    compactionBackground: 'in the background',
     /** The accent line on the first message after a move: the agent was told where it works now. */
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
     moveHide: 'Hide what the agent was told',
+    wake: { routine: 'Routine', event: 'Woken up' },
+    wakeShow: 'Show what the bot read',
+    wakeHide: 'Hide what the bot read',
+    /** A bot's finished turn: its steps folded above its answer, or a wake that had nothing for the user. */
+    fold: {
+      worked: 'Worked {time}', workedBare: 'Worked',
+      stepOne: '1 step', stepMany: '{count} steps',
+      seconds: '{count} s', minutes: '{count} min', hours: '{hours} h {minutes} min',
+      quiet: 'Nothing to report',
+      showSteps: 'Show the steps', hideSteps: 'Hide the steps',
+      showTurn: 'Show the whole turn', hideTurn: 'Fold this turn',
+      memory: { running: 'Updating its memory', done: 'Memory updated', unchanged: 'Memory checked, nothing to change', error: 'Memory update failed' },
+      memoryOpen: 'See its memory on the desk',
+    },
     /** At the foot of a thread the user moved: the note rides on the next prompt, not sent yet. */
     movePending: 'Moved to {project} · the agent will be told with your next message',
     movePendingShow: 'Show what the agent will be told',
@@ -200,6 +217,10 @@ export const strings = {
     planSaveHint: "Write the plan as a markdown file at the root of this thread's folder",
     planSaved: 'Saved as {name}',
     copyMessage: 'Copy message',
+    /** The menu of a file, folder or thread link in an answer, opened by a right click or a long press. */
+    openLink: 'Open',
+    copyPath: 'Copy path',
+    copyThreadAddress: 'Copy thread address',
     editMessage: 'Edit and send again from here',
     retry: 'Retry this answer',
     fork: 'Fork from here',
@@ -207,6 +228,26 @@ export const strings = {
     forkWorktree: 'Fork into a new worktree',
     /** A prompt's exact time, under its bubble: `Sent Tue 28 Sep 2026, 10:31:05`. */
     sentAt: 'Sent {time}',
-    error: 'Error'
+    error: 'Error',
+    errorTitle: "The agent couldn't continue",
+    errorSubscriptionTitle: 'No subscription available',
+    errorSubscriptionHint: 'Connect an account or wait for its quota to reset.',
+    errorRateTitle: 'Rate limit reached',
+    errorRateHint: 'The provider is limiting requests for now. Send your message again in a few minutes.',
+    errorServerTitle: 'The provider is unavailable',
+    errorServerHint: 'Try again in a moment.',
+    errorDetails: 'Technical details',
+    failedAttempts: '{count} failed attempts',
+    /** A Mermaid block of an answer, drawn (`lib/rich-markdown.ts`). */
+    diagram: {
+      label: 'Diagram',
+      showCode: 'Code',
+      showDiagram: 'Diagram',
+      enlarge: 'Enlarge',
+      failed: 'This diagram could not be drawn: {reason}',
+      unavailable: 'The diagram could not be drawn here.'
+    },
+    /** The tooltip of a formula Temml could not read, its source left as written. */
+    formulaFailed: 'This formula could not be read: {reason}'
   }
 } as const;

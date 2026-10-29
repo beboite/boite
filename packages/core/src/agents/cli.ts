@@ -1,72 +1,55 @@
-import { AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
-import type { AgentHistoryCursor, AgentHistoryKind, AgentMemory, AgentRecord, AgentsHistoryPage, RpcParams } from '@boite/contracts';
+import type { AgentSchedule, RpcParams } from '@boite/contracts';
 import type { CoreClient } from '../client.ts';
+import { targetOf } from '../control-cli.ts';
 
-const oldest = (records: AgentRecord[]) => records.reduce<AgentHistoryCursor | null>((min, r) => !min || r.updatedAt < min.updatedAt || r.updatedAt === min.updatedAt && r.id < min.id ? { updatedAt: r.updatedAt, id: r.id } : min, null);
+export const BOT_ACTIONS = 'memory, remember, routines, schedule, unschedule, watch or unwatch';
 
-/** Older pages of one kind behind the records the snapshot carried. Only an explicit command walks them. */
-async function* older(client: CoreClient, threadId: string, kind: AgentHistoryKind, held: AgentRecord[]): AsyncGenerator<AgentsHistoryPage> {
-  let before = oldest(held);
-  for (;;) {
-    const page = await client.call('agents.history', { threadId, kind, limit: AGENT_HISTORY_MAX_PAGE, ...(before ? { before } : {}) });
-    yield page;
-    const records = [...page.messages, ...page.work, ...page.memories];
-    if (!page.more || !records.length) return;
-    before = oldest(records);
-  }
-}
-
-/** Provider-independent tools. Authentication stays in the existing boite CLI. */
-export async function agentCommand(client: CoreClient, threadId: string, args: string[], requestId: string): Promise<unknown> {
+/** `boite bot ...` (`boite agent` before) from a bot's own thread. Authentication stays in the existing boite CLI. */
+export async function botCommand(client: CoreClient, threadId: string, args: string[]): Promise<unknown> {
   const [action, ...rest] = args;
   const snapshot = await client.call('agents.snapshot', { threadId });
-  const session = snapshot.sessions.find(s => s.threadId === threadId);
-  if (!session) throw new Error('this thread is not a persistent agent session');
+  const agent = snapshot.profiles[0];
+  if (!agent) throw new Error('this thread is not a bot\'s');
   const need = (index: number, name: string): string => {
     const value = rest[index];
-    if (!value) throw new Error(`agent ${action} needs ${name}`);
+    if (!value) throw new Error(`bot ${action} needs ${name}`);
     return value;
   };
   const json = <T>(): T => {
     try { return JSON.parse(rest.join(' ')) as T; }
-    catch { throw new Error(`agent ${action} needs a JSON object`); }
+    catch { throw new Error(`bot ${action} needs a JSON object`); }
   };
   switch (action) {
-    case 'context': return snapshot;
-    case 'inbox': return { messages: snapshot.messages, deliveries: snapshot.deliveries };
-    case 'missions': return { missions: snapshot.missions, tasks: snapshot.tasks };
-    case 'routines': return snapshot.routines;
-    case 'schedule': {
-      const value = json<{ name: string; prompt: string; schedule: RpcParams<'agents.routine.save'>['value']['schedule']; id?: string; expectedRevision?: number; enabled?: boolean }>();
-      return client.call('agents.routine.save', { threadId, ...(value.id ? { id: value.id, expectedRevision: value.expectedRevision } : {}), value: { agentId: session.agentId, name: value.name, prompt: value.prompt, schedule: value.schedule, enabled: value.enabled ?? true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
-    }
-    case 'send': return client.call('agents.message.send', { threadId, scope: session.scope, recipientIds: need(0, 'recipient ids separated by commas, or -') === '-' ? [] : rest[0]!.split(','), text: rest.slice(1).join(' '), requestId });
-    case 'reply': {
-      const id = need(0, 'an incoming message id');
-      let parent = snapshot.messages.find(m => m.id === id);
-      if (!parent && snapshot.more.message) for await (const page of older(client, threadId, 'message', snapshot.messages)) if ((parent = page.messages.find(m => m.id === id))) break;
-      if (!parent) throw new Error('message is not in this conversation');
-      return client.call('agents.message.send', { threadId, scope: session.scope, recipientIds: parent.senderId ? [parent.senderId] : [], text: rest.slice(1).join(' '), replyTo: parent.id, requestId });
-    }
-    case 'acquire': {
-      const task = snapshot.tasks.find(t => t.id === need(0, 'a task id'));
-      if (!task) throw new Error('task is not in this mission');
-      return client.call('agents.task.acquire', { threadId, agentId: session.agentId, taskId: task.id, expectedRevision: task.revision });
-    }
-    case 'submit': return client.call('agents.task.submit', { threadId, taskId: need(0, 'a task id'), generation: Number(need(1, 'the assignment generation')), result: rest.slice(2).join(' ') });
-    case 'artifact': return client.call('agents.artifact.add', { threadId, requestId, value: json<RpcParams<'agents.artifact.add'>['value']>() });
-    case 'decide': return client.call('agents.decision.request', { ...json<Pick<RpcParams<'agents.decision.request'>, 'prompt' | 'options'>>(), threadId, requestId });
     case 'memory': {
-      const query = rest.join(' ').toLocaleLowerCase();
-      const matches = (m: AgentMemory) => `${m.title}\n${m.text}`.toLocaleLowerCase().includes(query);
-      const found = snapshot.memories.filter(matches);
-      if (snapshot.more.memory) for await (const page of older(client, threadId, 'memory', snapshot.memories)) found.push(...page.memories.filter(matches));
-      return found.sort((a, b) => a.createdAt - b.createdAt);
+      const brain = await client.call('agents.brain.get', { threadId, agentId: agent.id });
+      return { memory: `${brain.path}/MEMORY.md`, text: brain.memory };
     }
     case 'remember': {
-      const value = json<{ title: string; text: string; id?: string; expectedRevision?: number }>();
-      return client.call('agents.memory.save', { threadId, ...(value.id ? { id: value.id, expectedRevision: value.expectedRevision } : {}), value: { scope: session.scope, title: value.title, text: value.text, sourceScopes: [session.scope], sourceRunId: null, expiresAt: null } });
+      const text = rest.join(' ').trim();
+      if (!text) throw new Error('bot remember needs the fact to note');
+      const brain = await client.call('agents.memory.note', { threadId, text });
+      return { noted: text, memory: `${brain.path}/MEMORY.md`, characters: brain.memory.length };
     }
-    default: throw new Error('agent expects context, inbox, send, reply, missions, acquire, submit, artifact, decide, memory, remember, routines or schedule');
+    case 'routines': return snapshot.routines;
+    case 'schedule': {
+      const value = json<{ name: string; prompt: string; schedule: AgentSchedule; id?: string; expectedRevision?: number; enabled?: boolean }>();
+      const previous = value.id ? snapshot.routines.find(r => r.id === value.id) : undefined;
+      if (value.id && !previous) throw new Error(`bot schedule: no routine ${value.id}; boite bot routines lists yours`);
+      const params: RpcParams<'agents.routine.save'> = {
+        threadId,
+        ...(previous ? { id: previous.id, expectedRevision: value.expectedRevision ?? previous.revision } : {}),
+        value: { agentId: agent.id, name: value.name, prompt: value.prompt, schedule: value.schedule, enabled: value.enabled ?? true, nextAt: null, lastTurnId: null, lastScheduledAt: null },
+      };
+      return client.call('agents.routine.save', params);
+    }
+    case 'unschedule': return client.call('agents.routine.remove', { threadId, routineId: need(0, 'a routine id (boite bot routines lists them)') });
+    case 'watch':
+    case 'unwatch': {
+      // `<machine>/<thread-id>`: a thread of a project another machine of the group entrusted to the bot.
+      const { target, machine } = targetOf(need(0, 'a thread id'));
+      const watched = await client.call('agents.watch', { threadId, watchThreadId: target, watched: action === 'watch', ...(machine === undefined ? {} : { machine }) });
+      return watched ?? { unwatched: rest[0] };
+    }
+    default: throw new Error(`bot expects ${BOT_ACTIONS}`);
   }
 }

@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
 import { rejection, thrown } from './settle.ts';
@@ -272,6 +272,79 @@ describe('a thread in its own worktree', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  test('a branch name git could not look up is refused, not taken as free', async () => {
+    const accountId = await echoAccount();
+    const project = await repoProject('lookup');
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    // The lookup fails the way a damaged repository does: exit 128, not the 1 of an absent ref.
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) =>
+      spawn(scope, command, command === 'git' && args.includes('rev-parse') && args.some((arg) => arg.startsWith('refs/heads/')) ? ['--git-dir=/nonexistent', ...args] : args, options));
+    try {
+      expect(await thrown(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'lookup', worktree: {} })))
+        .toThrow('cannot tell whether branch boite/');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).not.toContain('refs/heads/boite/');
+  });
+
+  test('concurrent registrations share the repository gate across linked checkouts but leave other repositories free', async () => {
+    const project = await repoProject('registration'), other = await repoProject('independent');
+    const row = harness.core.projects.require(project.id), otherRow = harness.core.projects.require(other.id);
+    const linked = await harness.core.worktrees.add('thr_linked', row, 'boite/linked');
+    const paused = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+    const firstPath = harness.core.worktrees.pathFor(row, 'boite/registration-first');
+    let cancelledSpawns = 0;
+    const spy = spyOn(harness.core.procs, 'spawn').mockImplementation((threadId, command, args, options) => {
+      if (threadId === 'thr_registration_cancelled') cancelledSpawns++;
+      const child = spawn(threadId, command, args, options);
+      if (command !== 'git' || !args.includes('add') || !args.includes('boite/registration-first')) return child;
+      return {...child, exited: child.exited.then(async code => {
+        if (code !== 0) {paused.reject(new Error('first registration failed')); return code;}
+        // Reproduce Git's visible half-written commondir before registration completes.
+        const file = join(project.path, '.git', 'worktrees', basename(firstPath), 'commondir');
+        const saved = readFileSync(file);
+        writeFileSync(file, ''); paused.resolve();
+        try {await release.promise;} finally {writeFileSync(file, saved);}
+        return code;
+      })};
+    });
+    const first = harness.core.worktrees.add('thr_registration_first', row, 'boite/registration-first');
+    const completed = Promise.allSettled([first]);
+    let results: Awaited<ReturnType<typeof Promise.allSettled>> = [];
+    try {
+      await paused.promise;
+      let active = true;
+      const cancelled = harness.core.worktrees.ensure('thr_registration_cancelled', row, linked.branch, linked.path,
+        {beforeMutation() {}, assertActive() {if (!active) throw new Error('queued registration cancelled');}});
+      const cancelledResult = Promise.allSettled([cancelled]); active = false;
+      // Expiry must return while the first owner is still paused, without releasing its slot.
+      const expired = harness.core.worktrees.ensure('thr_registration_expired', row, linked.branch, linked.path,
+        {beforeMutation() {}, assertActive() {}, timeoutMs: 10});
+      expect(await thrown(expired)).toThrow('did not finish within 10 ms');
+      const same = harness.core.worktrees.add('thr_registration_second', {...row, path: linked.path}, 'boite/registration-second');
+      const registrations = Promise.allSettled([first, same]);
+      let independentDone = false;
+      const independent = harness.core.worktrees.add('thr_registration_other', otherRow, 'boite/registration-other')
+        .finally(() => {independentDone = true;});
+      const independentResult = Promise.allSettled([independent]);
+      try {await waitFor(() => independentDone, 5000);} finally {release.resolve();}
+      results = [...await registrations, ...await independentResult];
+      const [cancelledOutcome] = await cancelledResult;
+      expect(cancelledOutcome).toMatchObject({status: 'rejected', reason: new Error('queued registration cancelled')});
+      expect(cancelledSpawns).toBe(0);
+    } finally {release.resolve(); await completed; spy.mockRestore();}
+    expect(results.map(result => result.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled']);
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/boite/registration-second');
+    // A rejected registration releases its slot instead of poisoning later work.
+    const recovery = await Promise.allSettled([
+      harness.core.worktrees.add('thr_registration_bad', row, 'boite/registration-bad', undefined, undefined, 'missing-base'),
+      harness.core.worktrees.add('thr_registration_after', row, 'boite/registration-after'),
+    ]);
+    expect(recovery.map(result => result.status)).toEqual(['rejected', 'fulfilled']);
   });
 
   test('storage changes affect new worktrees only and separate repositories with the same name', async () => {

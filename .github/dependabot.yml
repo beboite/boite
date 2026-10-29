@@ -1,11 +1,11 @@
 version: 2
 # The workflow actions, the agent CLIs and the shell's Cargo dependencies share
-# one weekly pull request, majors included as before, so a week of their updates
+# one monthly pull request, majors included as before, so a month of their updates
 # costs one CI run instead of three.
 multi-ecosystem-groups:
-  weekly:
+  monthly:
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: chore
       include: scope
@@ -13,20 +13,27 @@ updates:
   - package-ecosystem: github-actions
     # The composite actions pin their own actions; `/` alone skips them.
     directories: ['/', '/.github/actions/*']
-    multi-ecosystem-group: weekly
+    multi-ecosystem-group: monthly
     patterns: ['*']
   - package-ecosystem: npm
     directory: /docker/agents
-    multi-ecosystem-group: weekly
+    multi-ecosystem-group: monthly
     patterns: ['*']
   - package-ecosystem: cargo
     directory: /apps/shell/src-tauri
-    multi-ecosystem-group: weekly
+    multi-ecosystem-group: monthly
     patterns: ['*']
+    ignore:
+      # windows and windows-core must stay on the line webview2-com uses; for a
+      # 0.x crate Dependabot counts 0.62 -> 0.100 as minor, so ignore both.
+      - dependency-name: windows
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: windows-core
+        update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: bun
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     ignore:
       # svelte-check's --tsgo needs TypeScript 6 beside @typescript/native 7.
       - dependency-name: typescript
@@ -39,7 +46,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     ignore:
       # Move to a new Node major after it enters LTS; keep digest updates enabled.
       - dependency-name: node

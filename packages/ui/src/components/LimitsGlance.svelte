@@ -7,8 +7,11 @@
   import { gatewayReader, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import QuotaPopup from './QuotaPopup.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
+  import QuotaPin from './QuotaPin.svelte';
 
   /**
    * The sidebar's gauge: the tray's glance at every account's subscription
@@ -17,6 +20,9 @@
    * sends monitoring and accounts to the Limits page.
    */
   let { store }: { store: Store } = $props();
+  /** Providers is a desktop settings page and the owner's: a phone is offered no way to it. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
 
   const popover = new Closing();
   let trigger = $state<HTMLButtonElement>();
@@ -84,8 +90,17 @@
     trigger?.focus({ preventScroll: true });
   }
 
-  function onkeydown(event: KeyboardEvent) {
+  /**
+   * Captured on the window: the focus stays on the trigger after a press, so
+   * the Escape that shuts the glance never reaches the dialog, and it is
+   * spent here rather than also stopping the running turn. Only from the
+   * trigger, the glance or no focus at all: the palette opened over it keeps
+   * its own Escape.
+   */
+  function closeOnEscape(event: KeyboardEvent) {
     if (event.key !== 'Escape' || !popover.open) return;
+    const target = event.target;
+    if (target !== document.body && target !== trigger && !(target instanceof Node && content?.contains(target))) return;
     event.preventDefault();
     event.stopPropagation();
     close();
@@ -110,15 +125,18 @@
   }
 </script>
 
+<svelte:window onkeydowncapture={closeOnEscape} />
+
 <button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={() => void open()}><Gauge size={16} /></button>
 
 {#if popover.shown}
-  <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
+  <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance"
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
     <QuotaPopup {rows} loading={reader.busy} completed={reader.landed} error={failed} outdated={reader.outdated} owner={store.owner}
       order={store.settings?.quotaOrder ?? []} reorder={store.owner ? (quotaOrder) => store.saveSettings({ quotaOrder }) : undefined}
-      refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
+      refresh={() => read(true)} connect={providersReachable ? () => page('accounts') : undefined} settings={() => page('limits')} {close} testPrefix="limits-glance">
       {#snippet title()}<QuotaMachineScope {store} />{/snippet}
+      {#snippet actions()}<QuotaPin />{/snippet}
     </QuotaPopup>
   </div>
 {/if}

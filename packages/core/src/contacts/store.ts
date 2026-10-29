@@ -2,37 +2,45 @@
  * Contacts: other owners' Boites, linked so their agents and this core's work
  * together on the projects each side opens to the other, and on nothing else.
  *
- * The inviting core (`host`) shares its machine through Tailscale and hands
- * out a one-time link. The invitee (`guest`) spends it on the host's join
- * route, each side keeps the other's signing and sealing keys, and the guest
- * keeps a WebSocket open to the host: a shared machine answers connections
- * but opens none, so the host's requests to the guest go down that link as a
- * coordination bridge route. Every request between contacts is signed and
+ * The inviting core (`host`) shares its machine through Tailscale, or opens
+ * its contact routes to the internet through Tailscale Funnel for an invitee
+ * on another network (`funnel.ts`), and hands out a one-time link. The
+ * invitee (`guest`) spends it on the host's join route, each side keeps the
+ * other's signing and sealing keys, and the guest keeps a WebSocket open to
+ * the host: a shared machine answers connections but opens none, so the
+ * host's requests to the guest go down that link as a coordination bridge
+ * route. Every request between contacts is signed and
  * sealed (`group/seal.ts`), whichever way it travels.
  *
  * What a contact reaches is decided here, on the core that answers: the
  * threads of the projects opened to it, each with its own coordination
  * settings, and a thread that wrote to it in the last 7 days.
  */
-import { randomUUID, verify } from 'node:crypto';
-import type { AgentContact, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AgentContact, AgentLetter, Contact, ContactGrant, ContactInvite, ContactOffer, ContactRequest, ContactSettings, ContactsState, ContactTailscale, CoordinationBridgeResponse, CoordinationPeer, ModelTier, RpcEvents, RpcParams, RpcResult } from '@boite/contracts';
 import { text } from '../coordination-letter.ts';
 import type { BridgeRoute } from '../coordination-bridge.ts';
-import { PeerRefusal } from '../coordination-wire.ts';
+import { PeerRefusal, ROUTE } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
-import { magicName, tailnetAddress } from '../group/addresses.ts';
+import { tailnetAddress } from '../group/addresses.ts';
 import { SyncBackoff } from '../group/backoff.ts';
 import { seal, type Sealing } from '../group/seal.ts';
-import { newId, newToken } from '../ids.ts';
+import { newId } from '../ids.ts';
 import { Concierge } from './concierge.ts';
+import { ContactFunnel } from './funnel.ts';
+import { ContactMembers, type LinkedContacts } from './members.ts';
 import { checkNormalizedRemote, gitRemoteOf } from './git-remote.ts';
-import { encodeInvite, INVITE_TTL_MS, tokenHash, type ContactCard } from './invite.ts';
-import { joinContact, joinRequest } from './join.ts';
-import { evaluatePolicy, TailscaleClient } from './tailscale.ts';
-import { attestedTier, checkTier, modelTier, tierAllowed } from './tier.ts';
+import { checkTailnetName, type ContactCard } from './invite.ts';
+import { createInvite, INVITES, liveInvites, tailnetOrigin } from './invitations.ts';
+import { CONTACT_JOIN_ROUTE, joinContact, joinRequest } from './join.ts';
+import { TailscaleClient } from './tailscale.ts';
+import { ContactReach } from './reach.ts';
+import { checkTier } from './tier.ts';
 import { fingerprintWords } from './words.ts';
 import { TextSocket } from '../ws-client.ts';
+import { contactHello, HELLO_INPUT, type ContactSocketData } from './link-hello.ts';
+import { checkedContactOffers, contactOffers } from './offers.ts';
 
 export { CONTACT_JOIN_ROUTE } from './join.ts';
 export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
@@ -40,17 +48,11 @@ export const CONTACT_LINK_ROUTE = '/coordination/contact/link';
 const CONTACTS = 'contacts';
 const SETTINGS = 'contacts:settings';
 const REQUESTS = 'contacts:requests';
-const INVITES = 'contacts:invites';
-const RECENT = 'contacts:recent';
 const MAX_CONTACTS = 32;
-const MAX_INVITES = 16;
 /** Requests waiting at once, per contact and direction. */
 const MAX_PENDING = 32;
 const DECIDED_KEPT = 50;
-/** How long a thread that wrote to a contact may hear back from it, outside the projects opened to it. */
-export const REPLY_WINDOW_MS = 7 * 24 * 3_600_000;
 const SKEW_MS = 60_000;
-const HELLO_INPUT = 'boite-contact-hello\n';
 const TICK_MS = 1000;
 /** How long the upgrade to a host may take before the link counts as failed. */
 const LINK_DIAL_MS = 8000;
@@ -71,19 +73,24 @@ interface StoredContact extends Omit<Contact, 'link'> {
  */
 type StoredRequest = ContactRequest & { pendingSend?: true; remoteId?: string };
 type Frame = { t: 'req'; id: string; body: string; signature: string } | { t: 'res'; id: string; status: number; body: string; signature: string };
-/** What the server keeps on a contact's link socket. */
-export interface ContactSocketData { contact: { coreId: string; routeId: string } }
 /** What a contact reads when the concierge refuses: never the model's own words. */
 const CONCIERGE_REFUSAL = 'Nothing on this Boite fits this request.';
 
 interface LinkSocket { send(data: string): unknown; close(code?: number, reason?: string): void }
 
-export class ContactStore {
+export class ContactStore implements LinkedContacts {
   readonly tailscale: TailscaleClient;
   readonly concierge: Concierge;
+  readonly funnel: ContactFunnel;
+  /** Projects of the other machines of the group, opened through this core, and the contacts other members hold (`members.ts`). */
+  readonly members: ContactMembers;
+  /** What a contact reaches on this core, and the tiers its traffic takes (`reach.ts`). */
+  readonly reach: ContactReach;
   readonly maxContacts = MAX_CONTACTS;
   /** The origin an invitation gives: this machine's tailnet name. Tests point it at loopback. */
-  selfUrl: () => Promise<string> = () => this.tailnetUrl();
+  selfUrl: (share: boolean) => Promise<string> = share => tailnetOrigin(this, this.core, share);
+  /** The origin an invitation for another network gives: the contact routes on Tailscale Funnel. Tests point it at loopback. */
+  internetUrl: () => Promise<string> = () => this.funnel.open();
   /** Guest side: the link this core keeps to each host. */
   private readonly dialed = new Map<string, { socket: TextSocket | null; state: 'connecting' | 'connected' }>();
   /** Host side: the link each guest keeps to this core, by the guest's id. */
@@ -91,23 +98,34 @@ export class ContactStore {
   /** Join and hello nonces already used, until they would be stale anyway. */
   private readonly nonces = new Map<string, number>();
   private readonly backoff = new SyncBackoff(TICK_MS, 60_000);
-  private readonly flushing = new Set<string>();
+  /** Contacts with a flush in flight; true once a change during it asked for another, run when it ends. */
+  private readonly flushing = new Map<string, boolean>();
   private readonly deciding = new Set<string>();
   private readonly pending = new Set<Promise<unknown>>();
   /** Cores this one is joining right now: each holds a contact slot until its join ends. */
   private readonly joining = new Set<string>();
   private peerCache: CoordinationPeer[] | null = null;
+  /** The peers `peers()` lists for contacts another member holds: reached through it, never answered directly. */
+  private relayPeers = new WeakSet<CoordinationPeer>();
   private tailscaleCache: { at: number; value: ContactTailscale } | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   /** What `wantsTailnet` last told the group's listener. */
   private listening: boolean | null = null;
   private ticks = 0;
+  /** Open invitations at the last tick: one that expires tells the clients. */
+  private openSeen = 0;
   private started = false;
   private closed = false;
 
   constructor(private readonly core: Core) {
     this.tailscale = new TailscaleClient(core.dataDir);
     this.concierge = new Concierge(core);
+    this.funnel = new ContactFunnel(core, [CONTACT_JOIN_ROUTE, CONTACT_LINK_ROUTE, ROUTE]);
+    this.funnel.changed = () => this.changed();
+    this.members = new ContactMembers(core, this);
+    this.reach = new ContactReach(core, this);
+    // A member that leaves the group takes the contacts it relayed out of `peers()`.
+    core.bus.onAny(name => { if (name === 'group.updated') this.reset(); });
   }
 
   // -- Storage.
@@ -115,6 +133,13 @@ export class ContactStore {
   list(): StoredContact[] { return (this.core.journal.getSetting(CONTACTS) as StoredContact[] | undefined) ?? []; }
   find(coreId: string | null | undefined): StoredContact | undefined { return coreId ? this.list().find(contact => contact.coreId === coreId) : undefined; }
   has(coreId: string | null | undefined): boolean { return this.find(coreId) !== undefined; }
+  /** A contact of this core, or one another member of the group holds and opened some of this core's projects to. */
+  isContact(coreId: string | null | undefined): boolean { return this.has(coreId) || (!!coreId && this.members.relayedOf(coreId).length > 0); }
+  /** The name this owner gives a contact, wherever it is linked. */
+  known(coreId: string | null | undefined): { coreId: string; name: string } | undefined {
+    const contact = this.find(coreId) ?? (coreId ? this.members.relayedOf(coreId)[0] : undefined);
+    return contact ? { coreId: contact.coreId, name: contact.name } : undefined;
+  }
   /**
    * Cores that hold a slot: stored contacts and outgoing joins, each counted
    * once since a reciprocal join can store a core it is still joining, and
@@ -150,6 +175,10 @@ export class ContactStore {
   }
 
   private requests(): StoredRequest[] { return (this.core.journal.getSetting(REQUESTS) as StoredRequest[] | undefined) ?? []; }
+  /** Only this core mints request-answer letters; peer-origin contact letters remain forbidden. */
+  ownsAnswer(letter: AgentLetter): boolean {
+    return letter.origin === 'contact' && this.has(letter.from.coreId) && this.requests().some(r => r.direction === 'out' && r.status !== 'pending' && r.coreId === letter.from.coreId && r.id === letter.from.threadId && r.from.threadId === letter.to.threadId);
+  }
 
   /** Every pending request and what is still to send, then the last decided ones. */
   private saveRequests(requests: StoredRequest[]): void {
@@ -164,7 +193,7 @@ export class ContactStore {
     return { minTier: saved?.minTier === 2 || saved?.minTier === 3 ? saved.minTier : 1 };
   }
 
-  private changed(): void { this.core.bus.emit('contacts.updated', {}); }
+  changed(): void { this.core.bus.emit('contacts.updated', {}); }
 
   private background(job: Promise<unknown>): void {
     this.pending.add(job);
@@ -173,13 +202,34 @@ export class ContactStore {
 
   // -- What other parts of the core ask.
 
-  /** Contacts as coordination peers: a host is reached through the link its guest keeps, a guest dials its host's URL. */
+  /**
+   * Contacts as coordination peers: a host is reached through the link its
+   * guest keeps, a guest dials its host's URL, and a contact another member
+   * holds is reached through that member (`members.ts`).
+   */
   peers(): CoordinationPeer[] {
-    this.peerCache ??= this.list().map(contact => ({
-      coreId: contact.coreId, name: contact.name, url: contact.url ?? '', publicKey: contact.publicKey, readThreads: false, viaClient: contact.role === 'host',
-    }));
+    if (this.peerCache === null) {
+      const own = this.list();
+      const direct: CoordinationPeer[] = own.map(contact => ({
+        coreId: contact.coreId, name: contact.name, url: contact.url ?? '', publicKey: contact.publicKey, readThreads: false, viaClient: contact.role === 'host',
+      }));
+      const relayed: CoordinationPeer[] = [];
+      for (const entry of this.members.relayed()) {
+        if (own.some(contact => contact.coreId === entry.coreId) || relayed.some(peer => peer.coreId === entry.coreId)) continue;
+        const peer: CoordinationPeer = { coreId: entry.coreId, name: entry.name, url: '', publicKey: '', readThreads: false };
+        this.relayPeers.add(peer);
+        relayed.push(peer);
+      }
+      this.peerCache = [...direct, ...relayed];
+    }
     return this.peerCache;
   }
+
+  /** A peer `peers()` lists for a contact another member holds: it never signs a request to this core. */
+  isRelayPeer(peer: CoordinationPeer): boolean { return this.relayPeers.has(peer); }
+
+  /** The relayed copies changed. */
+  reset(): void { this.peerCache = null; this.changed(); }
 
   /** A signed message sealed to a contact, or null for a core that is not one. */
   sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
@@ -200,69 +250,16 @@ export class ContactStore {
     return this.list().some(contact => contact.role === 'host') || this.liveInvites().length > 0;
   }
 
-  private grantFor(coreId: string, threadId: string): ContactGrant | undefined {
-    const projectId = this.core.journal.getThread(threadId)?.projectId;
-    return projectId ? this.find(coreId)?.grants.find(grant => grant.projectId === projectId) : undefined;
+  granted(coreId: string): string[] { return this.reach.granted(coreId); }
+  mayReach(coreId: string, threadId: string): boolean { return this.reach.mayReach(coreId, threadId); }
+  mayRead(coreId: string, threadId: string): boolean { return this.reach.mayRead(coreId, threadId); }
+  noteSent(threadId: string, coreId: string): void { this.reach.noteSent(threadId, coreId); }
+  checkSendTier(threadId: string, coreId?: string): void { this.reach.checkSendTier(threadId, coreId); }
+  checkAttestedTier(agent: string | undefined, coreId?: string): void { this.reach.checkAttestedTier(agent, coreId); }
+  linkOf(coreId: string): Contact['link'] {
+    const contact = this.find(coreId);
+    return contact ? this.linkState(contact) : this.members.relayedOf(coreId).some(entry => entry.link === 'connected') ? 'connected' : 'offline';
   }
-
-  /** Projects opened to this contact. */
-  granted(coreId: string): string[] { return this.find(coreId)?.grants.map(grant => grant.projectId) ?? []; }
-
-  /** A contact's letter may reach this thread: its project is opened to the contact, or the thread wrote to it lately. */
-  mayReach(coreId: string, threadId: string): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    if (!thread || thread.archived || !this.has(coreId)) return false;
-    if (this.grantFor(coreId, threadId)) return true;
-    const at = this.recent()[threadId]?.[coreId];
-    return typeof at === 'number' && Date.now() - at <= REPLY_WINDOW_MS;
-  }
-
-  mayRead(coreId: string, threadId: string): boolean { return this.grantFor(coreId, threadId)?.readThreads === true; }
-
-  private recent(): Record<string, Record<string, number>> { return (this.core.journal.getSetting(RECENT) as Record<string, Record<string, number>> | undefined) ?? {}; }
-
-  /** This thread wrote to a contact: it may hear back for 7 days. */
-  noteSent(threadId: string, coreId: string): void {
-    const now = Date.now();
-    const recent = this.recent();
-    for (const [thread, contacts] of Object.entries(recent)) {
-      for (const [id, at] of Object.entries(contacts)) if (now - at > REPLY_WINDOW_MS || !this.has(id)) delete contacts[id];
-      if (Object.keys(contacts).length === 0) delete recent[thread];
-    }
-    recent[threadId] = { ...recent[threadId], [coreId]: now };
-    this.core.journal.setSetting(RECENT, recent);
-  }
-
-  /** The threads `which` names no longer hear back from this contact. */
-  private forgetReplies(coreId: string, which: (threadId: string) => boolean): void {
-    const recent = this.recent();
-    let changed = false;
-    for (const [thread, contacts] of Object.entries(recent)) {
-      if (!(coreId in contacts) || !which(thread)) continue;
-      delete contacts[coreId];
-      if (Object.keys(contacts).length === 0) delete recent[thread];
-      changed = true;
-    }
-    if (changed) this.core.journal.setSetting(RECENT, recent);
-  }
-
-  /** Refused when this thread's model is below the tier the owner set for contact traffic. */
-  checkSendTier(threadId: string): void {
-    const thread = this.core.threads.require(threadId);
-    const tier = modelTier(thread.providerId, thread.model);
-    const { minTier } = this.settings();
-    if (!tierAllowed(tier, minTier)) {
-      throw refused(`threadId: this thread runs ${thread.providerId} ${thread.model ?? '(default model)'}, tier ${tier}; contacts take tier ${minTier} or better, set in Contacts`, { field: 'threadId', expected: `a thread on a model of tier ${minTier} or better` });
-    }
-  }
-
-  /** Refused when the model a contact's core attests for its agent is below this owner's tier. */
-  checkAttestedTier(agent: string | undefined): void {
-    const tier = attestedTier(agent);
-    const { minTier } = this.settings();
-    if (!tierAllowed(tier, minTier)) throw refused(`from.agent: ${agent ?? 'an unknown model'} is tier ${tier}; this owner takes tier ${minTier} or better from contacts`);
-  }
-
   private linkState(contact: StoredContact): Contact['link'] {
     if (contact.role === 'host') return this.hosted.has(contact.coreId) ? 'connected' : 'offline';
     return this.dialed.get(contact.coreId)?.state ?? (this.started && !this.closed ? 'connecting' : 'offline');
@@ -278,14 +275,17 @@ export class ContactStore {
     return shown;
   }
 
-  /** A contact by name (any case) or core id; the agent's `boite agents ask` takes either. */
+  /** A contact by name (any case) or core id; the agent's `boite threads ask` takes either. */
   private named(value: unknown): StoredContact {
-    if (typeof value !== 'string' || !value.trim()) throw invalidParams('contact: expected the name or core id of a contact; see boite agents contacts', { field: 'contact' });
+    if (typeof value !== 'string' || !value.trim()) throw invalidParams('contact: expected the name or core id of a contact; see boite threads contacts', { field: 'contact' });
     const wanted = value.trim().toLowerCase();
     const contacts = this.list();
     const found = contacts.find(contact => contact.coreId === wanted)
       ?? contacts.filter(contact => contact.name.toLowerCase() === wanted || contact.name.replace(/\s+/g, '-').toLowerCase() === wanted)[0];
-    if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite agents contacts`, { field: 'contact' });
+    const relayed = found ? undefined : this.members.relayed().find(entry => entry.coreId === wanted || entry.name.toLowerCase() === wanted || entry.name.replace(/\s+/g, '-').toLowerCase() === wanted);
+    const via = relayed ? this.core.group.peers().find(peer => peer.coreId === relayed.via) : undefined;
+    if (via) throw refused(`contact: ${relayed!.name} is linked to ${via.name}; ask it from a thread there`, { field: 'contact' });
+    if (!found) throw invalidParams(`contact: ${value} is not one of this core's contacts; see boite threads contacts`, { field: 'contact' });
     return found;
   }
 
@@ -301,6 +301,9 @@ export class ContactStore {
       requests: [...pending, ...decided],
       settings: this.settings(),
       tailscale: await this.tailscaleState(),
+      invitations: this.liveInvites().length,
+      internet: true,
+      funnel: this.funnel.state(),
     };
   }
 
@@ -311,68 +314,24 @@ export class ContactStore {
     return { coreId, publicKey, box: this.core.group.boxPublic(), machine: this.machine() };
   }
 
-  liveInvites(): [string, { expiresAt: number }][] {
-    const now = Date.now();
-    return Object.entries((this.core.journal.getSetting(INVITES) as Record<string, { expiresAt: number }> | undefined) ?? {}).filter(([, invite]) => invite.expiresAt > now);
-  }
+  liveInvites(): [string, { expiresAt: number }][] { return liveInvites(this.core); }
 
-  async invite(): Promise<ContactInvite> {
-    const room = (): void => {
-      if (this.list().length >= MAX_CONTACTS) throw refused(`at most ${MAX_CONTACTS} contacts; remove one first`);
-      if (this.liveInvites().length >= MAX_INVITES) throw refused(`at most ${MAX_INVITES} open invitations; wait for one to be used or to expire`);
-    };
-    room();
-    const url = await this.selfUrl();
-    const share = await this.share();
-    // Read again after the awaits: another invitation may have been made meanwhile.
-    room();
-    const token = newToken();
-    const expiresAt = Date.now() + INVITE_TTL_MS;
-    this.core.journal.setSetting(INVITES, Object.fromEntries([...this.liveInvites(), [tokenHash(token), { expiresAt }]]));
-    // Dialled from now on: the tailnet listener opens before the link leaves this machine.
+  /** `share` false: the invitee is on this Tailscale already; `internet`: on another network, reached through Funnel (`invitations.ts`). */
+  invite(share: unknown = true, internet: unknown = false): Promise<ContactInvite> { return createInvite(this, this.core, share, internet); }
+
+  /** Every open invitation spent unused: a join with one is refused like a used one. The listener closes when nothing else needs it. */
+  cancelInvites(): { cancelled: number } {
+    const cancelled = this.liveInvites().length;
+    this.core.journal.setSetting(INVITES, {});
     this.relisten();
-    this.arm();
-    const link = encodeInvite({ ...this.card(), url, token, share: share.status === 'created' ? share.url : null, expiresAt });
-    return { link, expiresAt, share };
-  }
-
-  /** The Tailscale share of this machine, made with the owner's key, or why the owner shares it by hand. */
-  private async share(): Promise<ContactInvite['share']> {
-    if (!this.tailscale.hasKey()) return { status: 'manual', reason: 'No Tailscale API key is stored: share this machine with the invitee from the Tailscale admin console.' };
-    const ip = tailnetAddress();
-    if (ip === null) return { status: 'manual', reason: 'This machine is not on a tailnet.' };
-    try {
-      const device = await this.tailscale.device(ip);
-      return { status: 'created', url: await this.tailscale.createShare(device.id) };
-    } catch (error) {
-      return { status: 'manual', reason: `The share could not be created (${messageOf(error)}): share this machine from the Tailscale admin console.` };
-    }
-  }
-
-  private async tailnetUrl(): Promise<string> {
-    const { fqdn } = await this.tailscaleState(true);
-    if (fqdn === null) throw unavailable('contacts.invite: this machine has no tailnet name; connect it to Tailscale with MagicDNS on');
-    return `http://${fqdn}:${this.core.boundEndpoint().port}`;
+    this.changed();
+    return { cancelled };
   }
 
   async tailscaleState(fresh = false): Promise<ContactTailscale> {
     const now = Date.now();
     if (!fresh && this.tailscaleCache !== null && now - this.tailscaleCache.at < TAILSCALE_CACHE_MS) return this.tailscaleCache.value;
-    const apiKey = this.tailscale.hasKey();
-    const ip = tailnetAddress();
-    let value: ContactTailscale = { fqdn: null, apiKey, policy: 'unknown' };
-    if (ip !== null) {
-      if (apiKey) {
-        try {
-          const device = await this.tailscale.device(ip);
-          const policy = evaluatePolicy(await this.tailscale.policy(), device, this.core.boundEndpoint().port);
-          value = { fqdn: device.name, apiKey, ...policy };
-        } catch (error) {
-          this.core.log('warn', `contacts: the Tailscale API could not be read: ${messageOf(error)}`, { source: 'contacts' });
-        }
-      }
-      if (value.fqdn === null) value = { ...value, fqdn: await magicName(ip) };
-    }
+    const value = await this.tailscale.state(tailnetAddress(), this.core.boundEndpoint().port, message => this.core.log('warn', message, { source: 'contacts' }));
     this.tailscaleCache = { at: now, value };
     return value;
   }
@@ -393,6 +352,8 @@ export class ContactStore {
     if (!(hash in invites)) return false;
     delete invites[hash];
     this.core.journal.setSetting(INVITES, invites);
+    // The join may still be refused after this: the count changes either way.
+    this.changed();
     return true;
   }
 
@@ -419,7 +380,7 @@ export class ContactStore {
     for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${card.machine} ${n}`;
     const contact: StoredContact = {
       coreId: card.coreId, name, machine: card.machine, fingerprint: fingerprintWords(this.core.coordination.card().publicKey, card.publicKey),
-      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(),
+      role, ...(url === undefined ? {} : { url }), trusted: false, grants: [], offers: [], lastSeenAt: null, addedAt: Date.now(), syncPending: 1,
       publicKey: card.publicKey, box: card.box,
     };
     this.save([...contacts, contact]);
@@ -436,17 +397,44 @@ export class ContactStore {
       if (name !== undefined) entry.name = name;
       if (params.trusted !== undefined) entry.trusted = params.trusted;
     });
+    if (name !== undefined) this.members.mark(this.members.holdersOf(contact.coreId));
     // Trusted now: what waits is answered without the owner.
     if (params.trusted === true) for (const request of this.requests()) if (request.coreId === contact.coreId && request.direction === 'in' && request.status === 'pending') this.autoDecide(request.id);
     return this.view(contact);
   }
 
-  grant(params: RpcParams<'contacts.grant'>): Contact {
+  private policyKey(coreId: string, projectId: string): string { return `contact-policy-revoked:${JSON.stringify([coreId, projectId])}`; }
+  policyRevoked(coreId: string, projectId: string): boolean { return this.core.journal.getSetting(this.policyKey(coreId, projectId)) === true; }
+  restoreForOwner(coreId: string, projectId: string): void { this.core.journal.deleteSetting(this.policyKey(coreId, projectId)); }
+  revokeForPolicy(params: RpcParams<'contacts.revoke'>): void {
+    this.core.journal.setSetting(this.policyKey(params.coreId, params.projectId), true);
+    if (this.has(params.coreId)) this.revoke(params);
+    else { this.reach.closed(params.coreId, [params.projectId]); this.reset(); }
+  }
+  async grant(params: RpcParams<'contacts.grant'>): Promise<Contact> {
     if (params.readThreads !== undefined && typeof params.readThreads !== 'boolean') throw invalidParams('readThreads: expected a boolean', { field: 'readThreads' });
+    const member = this.members.member(params.machine);
+    if (member === null) return this.grantHere(params);
+    if (!this.has(params.coreId)) throw invalidParams('coreId: expected the core id of one of this core\'s contacts', { field: 'coreId' });
+    const project = await this.members.project(member, params.projectId);
+    const contact = this.mutate(params.coreId, entry => {
+      const existing = entry.grants.find(grant => grant.projectId === project.projectId && grant.machine === member.coreId);
+      if (existing) Object.assign(existing, { readThreads: params.readThreads ?? existing.readThreads, name: project.name });
+      else entry.grants.push({ projectId: project.projectId, readThreads: params.readThreads ?? false, grantedAt: Date.now(), machine: member.coreId, name: project.name });
+      entry.syncPending = (entry.syncPending ?? 0) + 1;
+    });
+    this.members.mark([member.coreId]);
+    this.flush(contact.coreId);
+    return this.view(contact);
+  }
+
+  private grantHere(params: Omit<RpcParams<'contacts.grant'>, 'machine'>, automatic = false): Contact {
     const project = typeof params.projectId === 'string' ? this.core.journal.getProject(params.projectId) : null;
     if (!project || project.archived) throw invalidParams('projectId: expected an unarchived project of this core', { field: 'projectId' });
+    if (automatic && this.policyRevoked(params.coreId, project.id)) throw refused('projectId: policy-revoked access requires an explicit owner grant');
     const contact = this.mutate(params.coreId, entry => {
-      const existing = entry.grants.find(grant => grant.projectId === project.id);
+      if (!automatic) this.core.journal.deleteSetting(this.policyKey(params.coreId, project.id));
+      const existing = entry.grants.find(grant => grant.projectId === project.id && !grant.machine);
       if (existing) existing.readThreads = params.readThreads ?? existing.readThreads;
       else entry.grants.push({ projectId: project.id, readThreads: params.readThreads ?? false, grantedAt: Date.now() });
       entry.syncPending = (entry.syncPending ?? 0) + 1;
@@ -455,28 +443,38 @@ export class ContactStore {
     return this.view(contact);
   }
 
+  /** A member that left the group may still be named: its grants are closed all the same. */
   revoke(params: RpcParams<'contacts.revoke'>): Contact {
     if (typeof params.projectId !== 'string') throw invalidParams('projectId: expected a project id', { field: 'projectId' });
+    const machine = params.machine === undefined || params.machine === null || params.machine === '' || params.machine === this.core.coordination.card().coreId ? undefined : text(params.machine, 'machine', 100);
     const contact = this.mutate(params.coreId, entry => {
-      entry.grants = entry.grants.filter(grant => grant.projectId !== params.projectId);
+      entry.grants = entry.grants.filter(grant => grant.projectId !== params.projectId || grant.machine !== machine);
       entry.syncPending = (entry.syncPending ?? 0) + 1;
     });
-    // Its threads stop hearing back from this contact too; only a later letter of theirs opens that again.
-    this.forgetReplies(contact.coreId, threadId => this.core.journal.getThread(threadId)?.projectId === params.projectId);
-    this.core.coordination.rejectContactLetters(contact.coreId, 'Project closed to this contact');
+    if (machine !== undefined) this.members.mark([machine]);
+    else {
+      // Its threads stop hearing back from this contact too; only a later letter of theirs opens that again.
+      this.reach.forgetReplies(contact.coreId, threadId => this.core.journal.getThread(threadId)?.projectId === params.projectId);
+      this.core.coordination.rejectContactLetters(contact.coreId, 'Project closed to this contact');
+    }
     this.flush(contact.coreId);
     return this.view(contact);
   }
 
+  /** A member no longer opens these of its projects to a contact another member holds, or none (`null`). */
+  projectsClosed(coreId: string, projectIds: string[] | null): void { this.reach.closed(coreId, projectIds); }
+
   remove(coreId: string): { ok: true } {
     const contact = this.find(coreId);
     if (!contact) throw invalidParams('coreId: expected the core id of one of this core\'s contacts', { field: 'coreId' });
+    const holders = this.members.holdersOf(coreId);
     this.unlink(coreId);
     this.save(this.list().filter(entry => entry.coreId !== coreId));
     this.saveRequests(this.requests().filter(request => request.coreId !== coreId));
-    this.forgetReplies(coreId, () => true);
+    this.reach.forgetReplies(coreId, () => true);
     // No longer trusted anywhere: pending letters both ways are rejected and the bridge route is dropped.
     this.core.coordination.untrust(coreId, true);
+    this.members.mark(holders);
     this.relisten();
     return { ok: true };
   }
@@ -486,6 +484,7 @@ export class ContactStore {
     const minTier: ModelTier = checkTier(settings.minTier, 'settings.minTier');
     this.core.journal.setSetting(SETTINGS, { minTier });
     this.changed();
+    this.members.mark(new Set(this.list().flatMap(contact => this.members.holdersOf(contact.coreId))));
     return { minTier };
   }
 
@@ -504,7 +503,7 @@ export class ContactStore {
       const project = typeof projectId === 'string' ? this.core.journal.getProject(projectId) : null;
       if (!project || project.archived) throw invalidParams('projectId: expected the unarchived project to open', { field: 'projectId' });
       // An existing read grant stays as the owner set it; a new grant never reads conversations.
-      this.grant({ coreId: request.coreId, projectId: project.id });
+      this.grantHere({ coreId: request.coreId, projectId: project.id }, decidedBy !== 'owner');
       Object.assign(request, { status: 'accepted', project: { id: project.id, name: project.name.slice(0, 200) }, decidedBy, decidedAt: now, pendingSend: true });
     } else {
       const why = reason === undefined || reason === null || reason === '' ? 'The owner declined this request.' : text(reason, 'reason', 500);
@@ -525,10 +524,12 @@ export class ContactStore {
       .map(project => ({ id: project.id, name: project.name.slice(0, 200), ...(() => { const remote = gitRemoteOf(project.path); return remote ? { gitRemote: remote } : {}; })() }));
     if (request.gitRemote) {
       const matches = projects.filter(project => project.gitRemote === request.gitRemote);
-      if (matches.length === 1) { this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
+      if (matches.length === 1) { if (!this.policyRevoked(request.coreId, matches[0]!.id)) this.settle(id, true, matches[0]!.id, undefined, 'match'); return; }
     }
+    const allowed = projects.filter(project => !this.policyRevoked(request.coreId, project.id));
+    if (!allowed.length) return;
     this.deciding.add(id);
-    this.background(this.concierge.decide(this.requestView(request), projects).then(verdict => {
+    this.background(this.concierge.decide(this.requestView(request), allowed).then(verdict => {
       const current = this.requests().find(entry => entry.id === id);
       if (current?.status !== 'pending' || !this.find(current.coreId)?.trusted) return;
       if (verdict.accept) { this.settle(id, true, verdict.projectId, undefined, 'concierge'); return; }
@@ -548,7 +549,15 @@ export class ContactStore {
     this.core.threads.require(threadId);
     const config = this.core.coordination.config(threadId);
     if (config.mode === 'off' || !config.remote) return [];
-    return this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
+    return this.available();
+  }
+
+  /** Public summaries only, also carried to another member of this owner's group. */
+  available(): RpcResult<'collaboration.contacts'> {
+    const own = this.list().map(contact => ({ name: contact.name, coreId: contact.coreId, projects: contact.offers.map(offer => offer.name), link: this.linkState(contact) }));
+    const relayed = this.members.relayed().filter((entry, index, all) => !own.some(contact => contact.coreId === entry.coreId) && all.findIndex(other => other.coreId === entry.coreId) === index)
+      .map(entry => ({ name: entry.name, coreId: entry.coreId, projects: entry.offers, link: entry.link }));
+    return [...own, ...relayed];
   }
 
   ask(params: RpcParams<'collaboration.ask'>): ContactRequest {
@@ -558,18 +567,23 @@ export class ContactStore {
     if (config.paused) throw refused('coordination paused by the owner');
     const contact = this.named(params.contact);
     this.checkSendTier(params.threadId);
-    const body = text(params.text, 'text', 4000);
+    return this.askFrom(from, contact.coreId, params.text, gitRemoteOf(this.core.threads.require(params.threadId).cwd) ?? undefined);
+  }
+
+  /** A virtual mailbox carries a group member's attested sender without a real local thread. */
+  askFrom(from: AgentContact, coreId: string, value: string, gitRemote?: string): ContactRequest {
+    const contact = this.named(coreId);
+    const body = text(value, 'text', 4000);
     const requests = this.requests();
     if (requests.filter(request => request.coreId === contact.coreId && request.direction === 'out' && request.status === 'pending').length >= MAX_PENDING) {
       throw refused(`at most ${MAX_PENDING} requests may wait at ${contact.name}; wait for an answer`);
     }
-    const gitRemote = gitRemoteOf(this.core.threads.require(params.threadId).cwd);
     const request: StoredRequest = {
       id: newId('creq_'), direction: 'out', coreId: contact.coreId, contact: contact.name, from, text: body,
       ...(gitRemote ? { gitRemote } : {}), createdAt: Date.now(), status: 'pending', pendingSend: true,
     };
     this.saveRequests([...requests, request]);
-    this.noteSent(params.threadId, contact.coreId);
+    this.noteSent(from.threadId, contact.coreId);
     this.changed();
     this.flush(contact.coreId);
     return this.requestView(request);
@@ -579,13 +593,14 @@ export class ContactStore {
 
   /** The projects the contact opened to this core. */
   synced(coreId: string, payload: unknown): { ok: true } {
-    const offers = (payload as { offers?: unknown } | null)?.offers;
-    if (!Array.isArray(offers) || offers.length > 256) throw invalidParams('sync.offers: expected up to 256 projects');
-    const checked: ContactOffer[] = offers.map((offer: Partial<ContactOffer>, index) => ({
-      projectId: text(offer?.projectId, `sync.offers[${index}].projectId`, 128), name: text(offer?.name, `sync.offers[${index}].name`, 200),
-    }));
+    const checked = checkedContactOffers(coreId, payload);
     const contact = this.find(coreId);
-    if (contact && JSON.stringify(contact.offers) !== JSON.stringify(checked)) this.mutate(coreId, entry => { entry.offers = checked; });
+    const rawCaps = (payload as { capabilities?: { sharedProjects?: unknown; humanLetters?: unknown } }).capabilities;
+    const capabilities = { ...(rawCaps?.sharedProjects === 1 ? { sharedProjects: 1 as const } : {}), ...(rawCaps?.humanLetters === 1 ? { humanLetters: 1 as const } : {}) };
+    if (contact && (JSON.stringify(contact.offers) !== JSON.stringify(checked) || JSON.stringify(contact.capabilities) !== JSON.stringify(capabilities))) {
+      this.mutate(coreId, entry => { entry.offers = checked; entry.capabilities = capabilities; });
+      this.members.mark(this.members.holdersOf(coreId));
+    }
     return { ok: true };
   }
 
@@ -597,7 +612,7 @@ export class ContactStore {
     const requests = this.requests();
     // A retry of the same ask: the contact's id is only unique among its own requests.
     if (requests.some(request => request.remoteId === ask.id && request.coreId === coreId && request.direction === 'in')) return { id: ask.id };
-    this.checkAttestedTier(from.agent);
+    this.reach.checkAttestedTier(from.agent);
     if (requests.filter(request => request.coreId === coreId && request.direction === 'in' && request.status === 'pending').length >= MAX_PENDING) {
       throw refused(`at most ${MAX_PENDING} of your requests may wait here; wait for the owner to answer`);
     }
@@ -642,20 +657,15 @@ export class ContactStore {
 
   // -- Telling the contact: grants, asks and answers, retried until heard.
 
-  private offersFor(contact: StoredContact): ContactOffer[] {
-    return contact.grants.flatMap(grant => {
-      const project = this.core.journal.getProject(grant.projectId);
-      return project && !project.archived ? [{ projectId: project.id, name: project.name.slice(0, 200) }] : [];
-    });
-  }
-
   private flush(coreId: string): void {
-    if (this.closed || !this.started || this.flushing.has(coreId) || !this.linked(coreId)) return;
-    this.flushing.add(coreId);
-    this.background(this.tell(coreId).finally(() => this.flushing.delete(coreId)));
+    if (this.closed || !this.started || !this.linked(coreId)) return;
+    if (this.flushing.has(coreId)) { this.flushing.set(coreId, true); return; }
+    this.flushing.set(coreId, false);
+    this.background(this.tell(coreId).finally(() => { const again = this.flushing.get(coreId); this.flushing.delete(coreId); if (again) this.flush(coreId); }));
   }
 
   private async tell(coreId: string): Promise<void> {
+    await this.core.sharedProjects.flush(coreId);
     const peer = (): CoordinationPeer => {
       const found = this.peers().find(entry => entry.coreId === coreId);
       if (!found) throw new Error('no longer a contact');
@@ -665,7 +675,7 @@ export class ContactStore {
     if (!contact) return;
     if (contact.syncPending) {
       const version = contact.syncPending;
-      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: this.offersFor(contact) }); }
+      try { await this.core.coordination.request(peer(), 'contact.sync', { offers: contactOffers(this.core, contact), capabilities: { sharedProjects: 1, humanLetters: 1 } }); }
       catch (error) { if (!(error instanceof PeerRefusal)) throw error; }
       if (this.find(coreId)?.syncPending === version) this.mutate(coreId, entry => { delete entry.syncPending; });
     }
@@ -695,6 +705,8 @@ export class ContactStore {
       this.changed();
       if (refusedAsk) this.core.coordination.contactAnswer(this.requestView(current), this.find(coreId)?.name ?? current.contact, []);
     }
+    // A grant can change while this flush awaited sync/answers; send its queued revision now.
+    await this.core.sharedProjects.flush(coreId);
   }
 
   // -- Join: the host's side.
@@ -717,28 +729,7 @@ export class ContactStore {
 
   // -- The link: the host's side.
 
-  /**
-   * Checks the hello a guest dials with, before the upgrade: signed by the
-   * contact's key, to this core, current and never seen. A Response is the
-   * refusal to send back.
-   */
-  hello(request: Request): ContactSocketData['contact'] | Response {
-    if (this.closed || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
-    const guest = request.headers.get('x-boite-peer') ?? '';
-    const contact = this.find(guest);
-    if (!contact || contact.role !== 'host') return new Response('not a contact that dials this core', { status: 403 });
-    try {
-      const hello = Buffer.from(request.headers.get('x-boite-hello') ?? '', 'base64url').toString('utf8');
-      const signature = request.headers.get('x-boite-signature') ?? '';
-      if (!hello || !verify(null, Buffer.from(`${HELLO_INPUT}${hello}`), contact.publicKey, Buffer.from(signature, 'base64'))) throw refused('signature: expected the contact\'s key to sign the hello');
-      const parsed = JSON.parse(hello) as { v?: unknown; from?: unknown; to?: unknown; at?: unknown; nonce?: unknown };
-      if (parsed.v !== 1 || parsed.from !== guest || parsed.to !== this.core.coordination.card().coreId) throw refused('hello: expected v 1, from the dialling contact, to this core');
-      this.fresh(guest, typeof parsed.nonce === 'string' && parsed.nonce.length <= 100 ? parsed.nonce : '', parsed.at);
-    } catch (error) {
-      return new Response(error instanceof RpcFailure ? error.message : 'invalid hello', { status: 403 });
-    }
-    return { coreId: guest, routeId: `contact:${randomUUID()}` };
-  }
+  hello(request: Request): ContactSocketData['contact'] | Response { return contactHello(this.core, this, request); }
 
   /** The guest's socket is open: it becomes the bridge route for that contact, replacing an older one. */
   attach(data: ContactSocketData['contact'], socket: LinkSocket): void {
@@ -757,7 +748,8 @@ export class ContactStore {
       },
     };
     this.core.coordination.bridge.register(data.coreId, true, route);
-    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); });
+    this.mutate(data.coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
+    this.members.mark(this.members.holdersOf(data.coreId));
     this.flush(data.coreId);
   }
 
@@ -773,7 +765,7 @@ export class ContactStore {
     this.core.coordination.bridge.disconnect(data.routeId);
     if (this.hosted.get(data.coreId)?.routeId !== data.routeId) return;
     this.hosted.delete(data.coreId);
-    if (!this.closed) this.changed();
+    if (!this.closed) { this.changed(); this.members.mark(this.members.holdersOf(data.coreId)); }
   }
 
   // -- The link: the guest's side.
@@ -795,15 +787,18 @@ export class ContactStore {
       if (this.dialed.get(coreId) !== link) return;
       this.dialed.delete(coreId);
       this.backoff.failed(coreId, 'link', this.backoff.mark());
-      if (!this.closed) this.changed();
+      if (!this.closed) { this.changed(); if (link.state === 'connected') this.members.mark(this.members.holdersOf(coreId)); }
     };
-    // The hello rides in the upgrade's headers, before any frame.
-    TextSocket.connect(`${contact.url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers }).then(socket => {
+    // The hello rides in the upgrade's headers, before any frame. The name is checked
+    // again at each dial: its DNS answer may have left the tailnet since the join.
+    const url = contact.url;
+    checkTailnetName(url, 'contact.url').then(() => TextSocket.connect(`${url.replace(/^http/, 'ws')}${CONTACT_LINK_ROUTE}`, LINK_DIAL_MS, { headers })).then(socket => {
       if (this.closed || this.dialed.get(coreId) !== link) { socket.close(1000); return; }
       link.socket = socket;
       link.state = 'connected';
       this.backoff.heard(coreId);
-      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); });
+      if (this.has(coreId)) this.mutate(coreId, entry => { entry.lastSeenAt = Date.now(); entry.syncPending = (entry.syncPending ?? 0) + 1; });
+      this.members.mark(this.members.holdersOf(coreId));
       this.flush(coreId);
       socket.onMessage(text => { this.background(this.serve(coreId, socket, text)); });
       socket.onClose(lost);
@@ -841,7 +836,9 @@ export class ContactStore {
     if (this.closed) return;
     this.started = true;
     this.listening = this.wantsTailnet();
-    if (this.list().length > 0 || this.liveInvites().length > 0) this.arm();
+    this.funnel.start(this.listening);
+    if (this.list().length > 0 || this.liveInvites().length > 0 || this.members.behind()) this.arm();
+    this.members.push();
   }
 
   arm(): void {
@@ -856,19 +853,27 @@ export class ContactStore {
     const contacts = this.list();
     // An invitation that expired may have been the last reason to listen on the tailnet.
     this.relisten();
-    if (contacts.length === 0 && this.liveInvites().length === 0) {
+    const open = this.liveInvites().length;
+    if (open < this.openSeen) this.changed();
+    this.openSeen = open;
+    // A member's copy still to push keeps the timer, even once the last contact went.
+    if (contacts.length === 0 && open === 0 && !this.members.behind()) {
       if (this.timer !== null) clearInterval(this.timer);
       this.timer = null;
       return;
     }
     this.ticks += 1;
     for (const contact of contacts) if (contact.role === 'guest' && !this.dialed.has(contact.coreId) && !this.backoff.waiting(contact.coreId, 'link')) this.dial(contact);
-    if (this.ticks % FLUSH_TICKS === 0) for (const contact of contacts) this.flush(contact.coreId);
+    if (this.ticks % FLUSH_TICKS === 0) {
+      for (const contact of contacts) this.flush(contact.coreId);
+      this.members.push();
+    }
   }
 
-  /** Opens or closes the tailnet listener when `wantsTailnet` changed. */
+  /** Opens or closes the tailnet listener when `wantsTailnet` changed, and takes Funnel down once nothing needs it. */
   relisten(): void {
     const wants = this.wantsTailnet();
+    if (!wants && !this.closed) this.funnel.release();
     if (wants === this.listening) return;
     this.listening = wants;
     this.core.group.relisten();
@@ -877,17 +882,19 @@ export class ContactStore {
   beginClose(): void {
     if (this.closed) return;
     this.closed = true;
+    this.funnel.stop();
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
     for (const { socket } of this.dialed.values()) socket?.close(1001, 'core stopping');
     this.dialed.clear();
     for (const { socket } of this.hosted.values()) socket.close(1001, 'core stopping');
     this.hosted.clear();
+    this.members.beginClose();
     this.concierge.close();
   }
 
   async close(): Promise<void> {
     this.beginClose();
-    await Promise.allSettled([...this.pending]);
+    await Promise.allSettled([...this.pending, this.funnel.settled(), this.members.settled()]);
   }
 }

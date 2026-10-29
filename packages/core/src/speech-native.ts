@@ -6,8 +6,10 @@ import type { SpawnedPipedProcess } from './procs.ts';
 import { refused } from './errors.ts';
 import { SPEECH_IDLE_MS } from './speech-server.ts';
 import { speechThreads } from './speech-server.ts';
+import { EngineSlot } from './speech-engine.ts';
 
-interface Running {
+/** A loaded engine: `ensure` leases it, and a request names the one it was leased. */
+export interface NativeEngine {
   id: string;
   key: string;
   child: SpawnedPipedProcess;
@@ -19,49 +21,53 @@ interface Pending { resolve(value: any): void; reject(error: Error): void }
 export class SpeechNative {
   commandOverride: string[] | null = null;
   idleMs = SPEECH_IDLE_MS;
-  private current: Running | null = null;
-  private shutdown: Promise<unknown> = Promise.resolve();
+  private readonly slot = new EngineSlot<NativeEngine>(async (running) => {
+    this.rejectAll(refused('speech: transcription cancelled'));
+    await running.child.stop();
+  });
   private pending = new Map<string, Pending>();
   private idle: ReturnType<typeof setTimeout> | undefined;
   constructor(private core: Core, private cwd: string) {}
 
-  async ensure(runtime: string, model: string, signal?: AbortSignal): Promise<void> {
-    await this.shutdown;
+  async ensure(runtime: string, model: string, signal?: AbortSignal): Promise<NativeEngine> {
     signal?.throwIfAborted();
-    const key = JSON.stringify([runtime, model]);
-    if (this.current && this.current.key !== key) await this.stop();
+    const running = await this.slot.acquire(JSON.stringify([runtime, model]), () => this.launch(runtime, model));
     signal?.throwIfAborted();
-    if (!this.current) {
-      mkdirSync(this.cwd, { recursive: true });
-      const entry = ['./main.ts', './main.js'].map(path => fileURLToPath(new URL(path, import.meta.url))).find(existsSync);
-      const command = this.commandOverride ?? [process.execPath, ...(entry ? [entry] : []), '--speech-worker'];
-      const id = `speech:${crypto.randomUUID()}`;
-      const env = { ...process.env, LD_LIBRARY_PATH: [runtime, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter), DYLD_LIBRARY_PATH: [runtime, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(delimiter), PATH: [runtime, process.env.PATH].filter(Boolean).join(delimiter) };
-      const child = this.core.procs.spawnPiped(id, command[0]!, command.slice(1), { cwd: this.cwd, env });
-      const running: Running = { id, key, child, ready: Promise.resolve() };
-      this.current = running;
-      void this.read(running);
-      // Drain diagnostic output without retaining or journaling audio, text or native configuration.
-      void (async () => { for await (const _chunk of child.proc.stderr) {} })().catch(() => {});
-      void child.exited.then(() => {
-        if (this.current !== running) return;
-        this.current = null;
-        this.rejectAll(refused('speech: native engine stopped; try recording again'));
-      });
-      running.ready = this.request('init', { runtime, model, threads: Math.min(4, speechThreads()) }, AbortSignal.timeout(120_000)).then(() => {});
-    }
-    const running = this.current;
     try { await running.ready; this.touch(); }
-    catch (error) { if (this.current === running) await this.stop(); throw error; }
+    catch (error) { await this.slot.stop(running); throw error; }
+    return running;
   }
 
-  async request(operation: string, params: Record<string, unknown>, signal: AbortSignal): Promise<any> {
+  /** A request to `engine`, refused once another engine replaced it. */
+  async request(operation: string, params: Record<string, unknown>, signal: AbortSignal, engine = this.slot.current): Promise<any> {
     signal.throwIfAborted();
-    const running = this.current;
-    if (!running) throw refused('speech: native engine is not loaded');
+    if (!engine) throw refused('speech: native engine is not loaded');
+    if (engine !== this.slot.current) throw refused('speech: the voice model changed; record again');
+    return this.send(engine, operation, params, signal);
+  }
+
+  private launch(runtime: string, model: string): NativeEngine {
+    mkdirSync(this.cwd, { recursive: true });
+    const entry = ['./main.ts', './main.js'].map(path => fileURLToPath(new URL(path, import.meta.url))).find(existsSync);
+    const command = this.commandOverride ?? [process.execPath, ...(entry ? [entry] : []), '--speech-worker'];
+    const id = `speech:${crypto.randomUUID()}`;
+    const env = { ...process.env, LD_LIBRARY_PATH: [runtime, process.env.LD_LIBRARY_PATH].filter(Boolean).join(delimiter), DYLD_LIBRARY_PATH: [runtime, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(delimiter), PATH: [runtime, process.env.PATH].filter(Boolean).join(delimiter) };
+    const child = this.core.procs.spawnPiped(id, command[0]!, command.slice(1), { cwd: this.cwd, env });
+    const running: NativeEngine = { id, key: JSON.stringify([runtime, model]), child, ready: Promise.resolve() };
+    void this.read(running);
+    // Drain diagnostic output without retaining or journaling audio, text or native configuration.
+    void (async () => { for await (const _chunk of child.proc.stderr) {} })().catch(() => {});
+    void child.exited.then(() => {
+      if (this.slot.vacate(running)) this.rejectAll(refused('speech: native engine stopped; try recording again'));
+    });
+    running.ready = this.send(running, 'init', { runtime, model, threads: Math.min(4, speechThreads()) }, AbortSignal.timeout(120_000)).then(() => {});
+    return running;
+  }
+
+  private async send(running: NativeEngine, operation: string, params: Record<string, unknown>, signal: AbortSignal): Promise<any> {
     clearTimeout(this.idle);
     const id = crypto.randomUUID();
-    const abort = () => { if (this.current === running) void this.stop(); };
+    const abort = () => { void this.slot.stop(running); };
     signal.addEventListener('abort', abort, { once: true });
     try {
       return await new Promise((resolve, reject) => {
@@ -75,12 +81,12 @@ export class SpeechNative {
     }
   }
 
-  private async read(running: Running): Promise<void> {
+  private async read(running: NativeEngine): Promise<void> {
     const decoder = new TextDecoder();
     let tail = '';
     try {
       for await (const chunk of running.child.proc.stdout) {
-        if (this.current !== running) return;
+        if (this.slot.current !== running) return;
         tail += decoder.decode(chunk, { stream: true });
         if (tail.length > 64 * 1024) throw new Error('oversized speech response');
         let end: number;
@@ -93,7 +99,7 @@ export class SpeechNative {
           else pending.resolve(response.result);
         }
       }
-    } catch { if (this.current === running) await this.stop(); }
+    } catch { await this.slot.stop(running); }
   }
   private rejectAll(error: Error): void {
     for (const pending of this.pending.values()) pending.reject(error);
@@ -101,19 +107,13 @@ export class SpeechNative {
   }
   private touch(): void {
     clearTimeout(this.idle);
-    if (!this.current || this.pending.size) return;
-    this.idle = setTimeout(() => { void this.stop(); }, this.idleMs);
+    if (!this.slot.current || this.pending.size) return;
+    const engine = this.slot.current;
+    this.idle = setTimeout(() => { void this.slot.stop(engine); }, this.idleMs);
     this.idle.unref?.();
   }
   async stop(): Promise<void> {
     clearTimeout(this.idle);
-    const running = this.current;
-    this.current = null;
-    if (running) {
-      this.rejectAll(refused('speech: transcription cancelled'));
-      this.core.procs.killTree(running.id);
-      this.shutdown = running.child.exited;
-    }
-    await this.shutdown;
+    await this.slot.stop();
   }
 }

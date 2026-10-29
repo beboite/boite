@@ -8,9 +8,10 @@
 
 import { PLUGIN_MANIFEST_SCHEMA, PLUGIN_PLATFORMS } from '@boite/contracts';
 import type { PluginArtifact, PluginManifest, PluginPlatform, PluginRejected, ProviderId } from '@boite/contracts';
+import { RETIRED_PROVIDERS } from '../providers/retired.ts';
 
 /** The shipped providers an account pool may name. `echo` is the tests' fake agent. */
-export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'antigravity-cli', 'claude', 'codex', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi'];
+export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'claude', 'codex', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi'];
 /** A manifest is a few hundred bytes; anything past this is not one. */
 export const MANIFEST_MAX_BYTES = 64 * 1024;
 
@@ -160,11 +161,12 @@ class Reader {
     const expected = `a non-empty array of distinct provider ids among ${POOL_PROVIDERS.join(', ')}`;
     if (!Array.isArray(providers) || providers.length === 0) this.refuse('provides.accountPools.providers', expected, providers);
     providers.forEach((provider: unknown, index) => {
-      if (typeof provider !== 'string' || !POOL_PROVIDERS.includes(provider) || providers.indexOf(provider) !== index) {
+      if (typeof provider !== 'string' || (!POOL_PROVIDERS.includes(provider) && !RETIRED_PROVIDERS.has(provider)) || providers.indexOf(provider) !== index) {
         this.refuse(`provides.accountPools.providers[${index}]`, expected, provider);
       }
     });
-    return { providers: [...(providers as string[])] };
+    // A plugin installed under an older Boite keeps loading: a provider retired since then has no accounts to pool.
+    return { providers: (providers as string[]).filter((provider) => !RETIRED_PROVIDERS.has(provider)) };
   }
 }
 

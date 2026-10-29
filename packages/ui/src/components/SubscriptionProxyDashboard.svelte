@@ -10,6 +10,7 @@
   import { secureId } from '../lib/secure-id';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
+  import GatewaySwitch from './GatewaySwitch.svelte';
   let { store, onNative }: { store: Store; onNative?: () => void } = $props();
   let configuring = $state(false);
   let slot = $state<HTMLDivElement>();
@@ -49,6 +50,7 @@
       <GatewayOpenButton {store} />
     {/if}
   </header>
+  {#if !configuring}<GatewaySwitch {store} />{/if}
   {#if configuring}<SubscriptionProxySettings {store} />{:else if proxy?.enabled}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if !browserBridge.paints}<p class="hint" role={mixedContent ? 'alert' : undefined} data-testid="subscription-proxy-browser-hint">{mixedContent ? strings.subscriptionProxy.mixedContent : fill(strings.subscriptionProxy.signInHint, { name: subscriptionProxyName(proxy.kind) })}</p>{/if}

@@ -21,9 +21,10 @@ import type {
 } from '@boite/contracts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
 import { isOpenCode } from '../../providers/opencode.ts';
-import { normalizeAntigravityTool } from '../antigravity.ts';
+import { antigravitySubagentBatch, normalizeAntigravityTool } from '../antigravity.ts';
 import { imageDocument } from '../documents.ts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import { stringify } from '../tool-text.ts';
 
 /**
  * The prompt cache lifetime of an ACP agent's turn, from the thread's model.
@@ -58,6 +59,8 @@ interface ToolEntry {
   output: string | null;
   status: ToolStatus;
   documents: ToolDocument[];
+  /** Antigravity's `invoke_subagent`, or an MCP tool of that title, once an update said which. */
+  subagent: 'subagent' | 'mcp' | null;
 }
 
 /**
@@ -296,6 +299,8 @@ export class AcpTurn {
    * `tool_call` opens the part, `tool_call_update` replaces the same one by id.
    * `content` replaces the documents when the agent sends one, the protocol's
    * own word for that field; null or absent leaves the ones already there.
+   * `subagent` is what this update says the call is, kept from the first
+   * update that says it: the later ones carry no title.
    */
   upsertTool(
     toolCallId: string,
@@ -304,15 +309,19 @@ export class AcpTurn {
     output: unknown,
     status: ToolCallStatus | null | undefined,
     content: ToolCallContent[] | null | undefined,
+    subagent: 'subagent' | 'mcp' | null = null,
+    fallbackName: string | null = null,
   ): void {
     const entry = this.tools.get(toolCallId) ?? {
       index: this.takeIndex(),
-      name: toolCallId,
+      name: name ?? fallbackName ?? toolCallId,
       input: null,
       output: null,
       status: 'running' as ToolStatus,
       documents: [] as ToolDocument[],
+      subagent: null,
     };
+    entry.subagent ??= subagent;
     if (name !== null && name.length > 0) entry.name = name;
     // Antigravity carries a shell call's command, its cwd and its combined
     // output under half a dozen spellings, and pads `_meta` with base64
@@ -328,7 +337,15 @@ export class AcpTurn {
       if (output !== undefined && output !== null) entry.output = boundText(toolOutputText(output));
     }
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
-    if (content !== null && content !== undefined) entry.documents = documentsOf(content);
+    if (content !== null && content !== undefined) {
+      // OpenCode 2 puts stdout in ACP content and only metadata in rawOutput.
+      // Text is the tool output; images and diffs are separate documents.
+      if (this.ctx.provider.id === 'opencode-v2') {
+        const text = content.flatMap(item => item.type === 'content' && item.content.type === 'text' ? [item.content.text] : []);
+        if (text.length > 0) entry.output = boundText(text.join('\n'));
+        entry.documents = documentsOf(content.filter(item => item.type !== 'content' || item.content.type !== 'text'));
+      } else entry.documents = documentsOf(content);
+    }
     this.tools.set(toolCallId, entry);
     this.part(entry.index, {
       type: 'tool',
@@ -338,6 +355,7 @@ export class AcpTurn {
       output: entry.output,
       status: entry.status,
       ...(entry.documents.length > 0 ? { documents: entry.documents } : {}),
+      ...(entry.subagent === 'subagent' ? { nativeAgents: [antigravitySubagentBatch(toolCallId, entry.status, entry.output)] } : {}),
     });
   }
 }
@@ -351,7 +369,7 @@ export class AcpTurn {
  */
 export function toolOutputText(output: unknown): string {
   if (typeof output === 'string') return output;
-  if (output === null || typeof output !== 'object' || Array.isArray(output)) return stringify(output);
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) return stringify(output) ?? '';
   const record = output as Record<string, unknown>;
   const inner = record['output'];
   if (typeof inner === 'string') return inner;
@@ -366,7 +384,7 @@ export function toolOutputText(output: unknown): string {
       if (typeof content === 'string') return content;
     }
   }
-  return stringify(output);
+  return stringify(output) ?? '';
 }
 
 function toolStatus(status: ToolCallStatus): ToolStatus {
@@ -402,12 +420,3 @@ function mapUsage(usage: AcpUsage | null, costUsdEquivalent: number | null): Usa
   };
 }
 
-function stringify(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === null || value === undefined) return '';
-  try {
-    return JSON.stringify(value) ?? '';
-  } catch {
-    return String(value);
-  }
-}

@@ -15,26 +15,25 @@
   import RecentDone from './RecentDone.svelte';
 
   /**
-   * The rows of the fold under the project list (ProjectShelf.svelte draws
-   * the fold and loads this on its own, out of the entry chunk): the idle
-   * projects, with no open conversation, then the archived ones, a step
-   * quieter and marked with the archive glyph. One compact row per project;
-   * choosing it starts a conversation there, restoring an archived project
-   * first. A row's one quick action shows under the pointer (archive an idle
-   * project, restore an archived one, in the archive glyph's place) and its
+   * The rows of a fold under the project list (ProjectShelf.svelte draws the
+   * fold and loads this on its own, out of the entry chunk): the idle
+   * projects, with nothing to do, or the archived ones, a step quieter. One
+   * compact row per project; choosing it starts a conversation there,
+   * restoring an archived project first. A row's one quick action shows under
+   * the pointer (archive an idle project, restore an archived one) and its
    * full menu, removal included, opens with a right click or a long press.
-   * Removal never sits on the row: a pointer reaching for the archive glyph
-   * would land on it when the hover swaps the buttons in. An idle project that still has done or
-   * archived conversations shows their counts, which unfold that history
+   * Removal never sits on the row: a pointer reaching for the quick action
+   * would land on it when the hover swaps the buttons in. An idle project that
+   * still has done conversations shows their count, which unfolds that history
    * under its row. With several machines the rows group under their machine.
    * `onopen` runs once a draft or a conversation opens from the fold, so the
    * phone can show it. `onrows` receives the history conversations drawn, in
    * order, for Alt+digit, none while the fold is shut.
    */
   type Row = { store: Store; threadId: ThreadId };
-  let { idle, archived, open, multi, now, scrollRoot, onopen, onrows }: {
-    idle: ProjectEntry[];
-    archived: ProjectEntry[];
+  let { kind, projects, open, multi, now, scrollRoot, onopen, onrows }: {
+    kind: ProjectShelfKind;
+    projects: ProjectEntry[];
     open: boolean;
     multi: boolean;
     now: number;
@@ -49,21 +48,13 @@
 
   const byName = (a: Project, b: Project) => projectName(a).localeCompare(projectName(b));
   let groups = $derived.by(() => {
-    const byMachine = new Map<string, { machine: Machine; idle: Project[]; archived: Project[] }>();
-    for (const [kind, entries] of [['idle', idle], ['archived', archived]] as const) {
-      for (const { machine, project } of entries) {
-        const group = byMachine.get(machine.id) ?? { machine, idle: [], archived: [] };
-        group[kind].push(project);
-        byMachine.set(machine.id, group);
-      }
+    const byMachine = new Map<string, { machine: Machine; projects: Project[] }>();
+    for (const { machine, project } of projects) {
+      const group = byMachine.get(machine.id) ?? { machine, projects: [] };
+      group.projects.push(project);
+      byMachine.set(machine.id, group);
     }
-    return [...byMachine.values()].map(group => ({
-      machine: group.machine,
-      rows: [
-        ...group.idle.sort(byName).map(project => ({ kind: 'idle' as ProjectShelfKind, project })),
-        ...group.archived.sort(byName).map(project => ({ kind: 'archived' as ProjectShelfKind, project }))
-      ]
-    }));
+    return [...byMachine.values()].map(group => ({ machine: group.machine, rows: group.projects.sort(byName) }));
   });
 
   const key = (machine: Machine, project: Project) => dropKey(machine.id, project.id);
@@ -79,7 +70,7 @@
   }
   let reported: Row[] = [];
   $effect(() => {
-    const visible = !open ? [] : groups.flatMap(({ machine, rows }) => rows.flatMap(({ kind, project }) => kind !== 'idle' ? [] : history.flatMap(list => {
+    const visible = !open || kind !== 'idle' ? [] : groups.flatMap(({ machine, rows }) => rows.flatMap(project => history.flatMap(list => {
       const entry = { machine, project };
       return archiveCount(project, list) > 0 && projectThreadView.isOpen(entry, list) ? historyRows[historyKey(entry, list)] ?? [] : [];
     })));
@@ -100,7 +91,7 @@
     }
   }
 
-  function start(event: MouseEvent, kind: ProjectShelfKind, machine: Machine, project: Project) {
+  function start(event: MouseEvent, machine: Machine, project: Project) {
     const owner = machine.store;
     // No conversation can start in a folder that is gone: the menu offers what can still be done with it.
     if (kind === 'idle' && project.missing === true) return projectMenu(event, owner, project);
@@ -113,7 +104,7 @@
   }
 
   /** What choosing the row does, above the folder it points at: the machine is already the group's header. */
-  function rowTitle(kind: ProjectShelfKind, project: Project): string {
+  function rowTitle(project: Project): string {
     if (project.missing === true) return kind === 'idle' ? strings.sidebar.projectMissing : `${strings.sidebar.restoreProject} ${projectName(project)}`;
     return fill(kind === 'idle' ? strings.sidebar.newThreadIn : strings.sidebar.restoreAndStart, { project: projectName(project) });
   }
@@ -122,12 +113,12 @@
 {#each groups as { machine, rows } (machine.id)}
   {#if multi}
     <div class="machine" data-testid="project-shelf-machine" title={machine.label}>
-      <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={11} />
+      <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={13} />
       <span class="machine-name ui-label">{machine.label}</span>
     </div>
   {/if}
   <ul>
-    {#each rows as { kind, project }, index (`${kind}:${project.id}`)}
+    {#each rows as project (project.id)}
       {@const here = key(machine, project)}
       {@const entry = { machine, project }}
       {@const kept = kind === 'idle' ? history.filter(list => archiveCount(project, list) > 0) : []}
@@ -135,7 +126,6 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <li
         class={kind}
-        class:first-archived={kind === 'archived' && index > 0 && rows[index - 1]?.kind === 'idle'}
         data-testid="{kind}-project"
         data-project-id={project.id}
         data-machine-id={machine.id}
@@ -152,9 +142,9 @@
             type="button"
             class="ghost main"
             data-testid="{kind}-project-open"
-            title={`${rowTitle(kind, project)}\n${project.path}`}
+            title={`${rowTitle(project)}\n${project.path}`}
             disabled={busy !== null}
-            onclick={(event) => start(event, kind, machine, project)}
+            onclick={(event) => start(event, machine, project)}
           >
             <span class="tile" aria-hidden="true"><ProjectTile {project} store={machine.store} size={16} /></span>
             <span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span>
@@ -169,7 +159,6 @@
               {#if list === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}<span class="ui-label">{formatCount(count)}</span>
             </button>
           {/each}
-          {#if kind === 'archived'}<span class="archived-mark" title={strings.sidebar.archivedProject}><Archive size={12} aria-label={strings.sidebar.archivedProject} /></span>{/if}
           <span class="actions">
             {#if kind === 'idle'}
               {#if project.kind !== 'drafts'}
@@ -212,10 +201,11 @@
   .machine {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 6px var(--fold-inset) 2px var(--fold-indent);
-    color: var(--color-subtle);
+    gap: 6px;
+    padding: 8px var(--fold-inset) 4px var(--fold-indent);
+    color: var(--color-muted-foreground);
     font-size: var(--text-xs);
+    font-weight: 500;
   }
   .machine :global(svg) {
     flex: none;
@@ -272,7 +262,6 @@
   .tile {
     display: flex;
     flex: none;
-    opacity: 0.75;
   }
   .row:hover .tile,
   .row:focus-within .tile {
@@ -295,15 +284,11 @@
     flex: none;
     gap: 2px;
   }
-  /* An archived project reads a step quieter than an idle one and carries the archive glyph; under the pointer it wakes. */
+  /* An archived project reads a step quieter than an idle one; under the pointer it wakes. */
   li.archived .row { color: var(--color-subtle); }
-  li.archived .tile { opacity: 0.5; }
+  li.archived .tile { opacity: 0.55; filter: grayscale(0.6); }
   li.archived .row:hover, li.archived .row:focus-within { color: var(--color-foreground); }
-  li.archived .row:hover .tile, li.archived .row:focus-within .tile { opacity: 1; }
-  /* The first archived row leaves a little air and a hairline after the idle ones. */
-  li.first-archived { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--color-border); border-radius: 0; }
-  .archived-mark { display: flex; flex: none; padding: 0 6px; color: var(--color-subtle); }
-  .row:hover .archived-mark, .row:focus-within .archived-mark { display: none; }
+  li.archived .row:hover .tile, li.archived .row:focus-within .tile { opacity: 1; filter: none; }
   li { -webkit-touch-callout: none; }
   .actions button {
     border-color: transparent;
@@ -329,8 +314,13 @@
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
   }
+  /* The project cards' pill, a size smaller: the same tint says the same thing. */
   .counter.done {
+    height: 22px;
+    border-radius: var(--radius-full);
     color: var(--color-success);
+    background-color: color-mix(in oklch, var(--color-success) 14%, transparent);
+    background-clip: padding-box;
   }
   .counter.active {
     background: var(--color-active);
@@ -347,6 +337,9 @@
       padding: 0 7px;
       gap: 5px;
     }
+    /* The 44px target stays; the transparent border leaves the 22px pill drawn inside it, its open ring included. */
+    .counter.done { border-width: 11px 0; }
+    .counter.done.active { border-color: transparent; background-clip: padding-box; box-shadow: inset 0 0 0 1px var(--color-edge); }
   }
   /* A dragged thread can land on an idle project: same dashed edge and accent fill as a project section. */
   :global(html.thread-dragging) li:not(.candidate) {

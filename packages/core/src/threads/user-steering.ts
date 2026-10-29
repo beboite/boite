@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams, type ThreadCapabilityReason, type Turn } from '@boite/contracts';
+import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams, type SentFrom, type ThreadCapabilityReason, type Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { prepareAttachments } from '../attachments.ts';
 import { messageOf, refused } from '../errors.ts';
@@ -13,7 +13,6 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
   const thread = threads.require(threadId);
   if (core.stopping) return 'stopping';
   if (thread.archived) return 'archived';
-  if (thread.agentSessionId) return 'agent-session';
   const handle = threads.runner.handles.get(threadId);
   if (thread.status !== 'running' || !turn || turn.threadId !== threadId || turn.status !== 'running') return 'not-running';
   if (turn.execution?.operation === 'compact' || turn.execution?.operation === 'keepalive' || threads.runner.steering.has(threadId)) return 'busy';
@@ -24,10 +23,10 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
 }
 
 /** User input keeps its own provenance and receipt while sharing the active provider turn. */
-export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>): Promise<{ accepted: boolean }> {
+export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>, sentFrom: SentFrom | null = null): Promise<{ accepted: boolean }> {
   const { threadId, turnId, prompt, clientRequestId, expectedSelectionVersion } = params;
   const thread = threads.require(threadId);
-  if (core.stopping || thread.archived || thread.agentSessionId) throw refused('user steering requires an active, unarchived conversation');
+  if (core.stopping || thread.archived) throw refused('user steering requires an active, unarchived conversation');
   if (typeof prompt !== 'string') throw refused('prompt must be a string', { field: 'prompt', expected: 'a string' });
   if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
   const attachments = params.attachments ?? [];
@@ -49,21 +48,23 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
   const handle = runner.handles.get(threadId);
   const submit = handle?.steerUser?.bind(handle) ?? handle?.steer?.bind(handle);
   if (userSteeringUnavailable(core, threads, threadId, turn) !== null || !submit) return { accepted: false };
-  const prepared = prepareAttachments(core.dataDir, { prompt: previewPrompt(prompt, references), attachments });
+  const expanded = core.brain.expandPrompt(prompt, threads.agentState.commands.get(threadId));
+  const offset = expanded.length - prompt.length;
+  const expandedReferences = references.map(reference => reference.mention ? {
+    ...reference, mention: { start: reference.mention.start + offset, end: reference.mention.end + offset },
+  } : reference);
+  const text = previewPrompt(expanded, expandedReferences);
+  const prepared = prepareAttachments(core.dataDir, { prompt: text, attachments });
   const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt: Date.now(), parts: [
-    { type: 'text', text: previewPrompt(prompt, references), ...(references.length ? { displayText: prompt, previewReferences: structuredClone(references) } : {}) },
+    { type: 'text', text, ...(sentFrom ? { sentFrom } : {}), ...(references.length ? { displayText: expanded, previewReferences: structuredClone(expandedReferences) } : {}) },
     ...attachments.map((attachment): MessagePart => attachment.kind === 'file'
       ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
       : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name }),
   ] };
   runner.steering.add(threadId);
-  try {
-    // Reserve before crossing the native boundary. A lost acknowledgement or crash cannot cause duplicate work.
-    core.journal.putTurnRequest(threadId, clientRequestId, `steer:pending:${fingerprint}`, turnId);
-    if (!await submit(prepared.prompt, prepared.attachments)) {
-      core.journal.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND request_id = ?').run(threadId, clientRequestId);
-      return { accepted: false };
-    }
+  let published = false;
+  const publish = (): void => {
+    if (published) return;
     core.bus.afterCommit(() => core.journal.db.transaction(() => {
       core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
         core.journal.putMessage(message);
@@ -75,7 +76,17 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
       saveThread(core, threads.require(threadId), 'thread.userInput');
     })());
     // A `/goal2`'s checklist reads what the user adds, drops or changes.
-    core.activity.userMessage(threadId, prompt);
+    core.activity.userMessage(threadId, expanded);
+    published = true;
+  };
+  try {
+    // Reserve before crossing the native boundary. A lost acknowledgement or crash cannot cause duplicate work.
+    core.journal.putTurnRequest(threadId, clientRequestId, `steer:pending:${fingerprint}`, turnId);
+    if (!await submit(prepared.prompt, prepared.attachments, publish) && !published) {
+      core.journal.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND request_id = ?').run(threadId, clientRequestId);
+      return { accepted: false };
+    }
+    publish();
     return { accepted: true };
   } catch (error) {
     throw refused(`delivery of this message is unconfirmed: ${messageOf(error)}`, { reason: 'delivery-uncertain', threadId });

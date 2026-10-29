@@ -1,6 +1,13 @@
 export const strings = {
 
   quotas: {
+    pin: 'Pin model quotas',
+    unpin: 'Unpin model quotas',
+    pinnedTitle: 'Model quotas',
+    pinnedEmpty: 'No quota reading for this model provider.',
+    position: 'Move quota card',
+    dragHint: 'Drag to a corner or the sidebar. Use arrow keys to move, Home to dock.',
+    positions: { 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right', dock: 'Dock below threads' },
     machineAccounts: 'Account limits for {machine}',
     outdated: 'Update Boite on this machine to see its limits on this device.',
     usingCredits: 'Using credits',
@@ -34,12 +41,13 @@ export const strings = {
     trayQuit: 'Quit',
     names: { muse: 'Muse Code', claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     noReading: 'Unavailable',
-    cliSource: 'agy command-line login',
     connect: 'Connect account',
     noReset: 'Reset time not reported',
     heading: 'Provider quotas',
     intro: 'Subscription limits reported by your providers. Separate from tokens used in Boite.',
     remaining: '{percent}% left',
+    /** After the large figure of a card's primary window, in a smaller type: the same reading as `remaining`. */
+    remainingUnit: '% left',
     resets: 'Resets {time}',
     /** The limit windows the core names in English: `5 hours`, `Weekly`, `Monthly`, `Credits`, alone or on one side of ` · `. */
     windowHours: '{hours} hours',
@@ -52,7 +60,6 @@ export const strings = {
     unsupported: 'This provider does not expose subscription quotas here.',
     disabled: 'Quota monitoring is off for this account.',
     loading: 'Reading provider limits',
-    slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite only asks the accounts switched on here.',
     autoResume: 'Resume threads after a usage limit',
@@ -67,5 +74,19 @@ export const strings = {
     /** A read of the limits failed; the core's reason follows. */
     readFailed: "Couldn't read the limits: {error}",
     quit: 'Quit Boite',
+    /** The bell of an account's card and the alert choices it opens. */
+    alerts: 'Alerts',
+    alertsOf: 'Alerts for {account}',
+    alertsHint: 'A notification each time a window falls to a share left you picked, once per window. Pick several, or add your own. The limits are read every five minutes while an alert is set.',
+    /** Beside the heading: the chips are shares left, as the bars show them. */
+    alertsLeft: '% left',
+    alertAt: '{percent}%',
+    alertCustom: 'Custom',
+    alertCustomLabel: 'Custom share left, 0 to 99',
+    alertCustomPlaceholder: '0-99',
+    alertRemove: 'Remove {percent}%',
+    alertPeriods: { fiveHour: '5 hours', weekly: 'Weekly' },
+    alertSet: '{period}: {percents} left',
+    alertFailed: "Couldn't save the alert: {error}",
   }
 } as const;

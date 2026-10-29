@@ -18,12 +18,14 @@
   import { work } from '../lib/work-prefs.svelte';
   import { projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { projectDrag, startProjectDrag } from '../lib/project-drag.svelte';
-  import { activeProject, archiveCount, projectListMap, projectThreadView, type ArchiveKind } from '../lib/project-threads.svelte';
+  import { activeProject, archiveCount, projectListMap, projectSections, projectThreadView, type ArchiveKind, type ProjectSection } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
+  import SharedProjectThreads from './shared/SharedProjectThreadsLoader.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
+  import ProjectCardsSection from './ProjectCardsSection.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import AgentAvatar from './agents/AgentAvatar.svelte';
@@ -58,19 +60,33 @@
   let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   /** An archived project leaves the list for the fold under it; its threads keep running. */
   let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
-  let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
-  let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
-  let previousLeader: { key: string; activity: number } | undefined;
+  /** At work on top when working grouping is on, open, then set aside; idle projects go to their fold. Each stays a card when its grouping is off. */
+  let sections = $derived(projectSections(groups, recentPreferences.groupOtherProjects, recentPreferences.groupWorking));
+  /** The cards in drawn order, the folded sections included: Alt+digit skips the rows a folded section hides. */
+  let activeGroups = $derived([...sections.working, ...sections.open, ...sections.later]);
+  /** A set-aside card shows its archived conversations as its body: their pill shows only while it is folded. */
+  const laterLists = ['archived'] as const;
+  /** The first card drawn, and the first open one: a prompt can lead either, the Working section sitting above the open cards. */
+  const leaders = () => [activeGroups[0], sections.open[0]] as const;
+  let previousLeaders: ({ key: string; activity: number } | undefined)[] = [];
   $effect(() => {
-    const first = activeGroups[0];
-    const next = first && { key: projectKey(first), activity: projectActivity(first) };
-    const promoted = next && previousLeader && next.key !== previousLeader.key && next.activity > previousLeader.activity;
-    previousLeader = next;
-    // Follow a new prompt in the selected project; removing rows keeps the reading position.
+    const now = leaders().map(first => first && { entry: first, key: projectKey(first), activity: projectActivity(first) });
+    const promoted = now.find((next, index) => {
+      const before = previousLeaders[index];
+      return next && before && next.key !== before.key && next.activity > before.activity;
+    });
+    previousLeaders = now.map(next => next && { key: next.key, activity: next.activity });
+    // Follow a new prompt in the selected project; removing rows keeps the reading position. Leading the list, it brings
+    // the list to its top; leading the open cards under a Working section, its card comes into view, wherever that is.
     if (promoted && workspace.view === 'projects' && projectView.order === 'recent'
-      && untrack(() => first.machine.store === workspace.active && first.project.id === store.openProject?.id)) {
-      savedScroll = 0;
-      void tick().then(() => { if (scrollRoot && activeGroups[0] && projectKey(activeGroups[0]) === next.key) scrollRoot.scrollTop = 0; });
+      && untrack(() => promoted.entry.machine.store === workspace.active && promoted.entry.project.id === store.openProject?.id)) {
+      const first = now[0]?.key === promoted.key;
+      if (first) savedScroll = 0;
+      void tick().then(() => {
+        if (!scrollRoot || !leaders().some(leader => leader && projectKey(leader) === promoted.key)) return;
+        if (first) scrollRoot.scrollTop = 0;
+        else [...scrollRoot.querySelectorAll<HTMLElement>('section[data-testid=project]')].find(card => card.dataset['projectKey'] === promoted.key)?.scrollIntoView({ block: 'nearest' });
+      });
     }
   });
   let shelved = $derived(all.filter(({ project }) => project.archived === true));
@@ -113,10 +129,12 @@
     for (const entry of activeGroups) {
       if (rows.length >= 9) break;
       if (entry.machine.store.isCollapsed(entry.project.id)) continue;
+      const later = sections.later.includes(entry);
+      if (later ? !projectThreadView.laterOpen : sections.working.includes(entry) && !projectThreadView.workingOpen) continue;
       const open = projectThreadView.isOpen(entry, 'working');
       const { lists } = projectLists.get(projectKey(entry))!;
       for (const thread of open ? [...lists.attention, ...lists.working] : lists.attention) rows.push({ store: entry.machine.store, threadId: thread.id });
-      for (const kind of ['done', 'archived'] as const) if (projectThreadView.isOpen(entry, kind)) rows.push(...projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? []);
+      for (const kind of ['done', 'archived'] as const) if ((later && kind === 'archived') || projectThreadView.isOpen(entry, kind)) rows.push(...projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? []);
     }
     return rows;
   }
@@ -130,22 +148,23 @@
   function addProject() {
     store.projectPickerOpen = true;
   }
-  function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
+  /** `list` is the section the card sits in: a project moves among its neighbours there, as the sections place it themselves. */
+  function openProjectMenu(event: MouseEvent, machine: Machine, project: Project, list: ProjectEntry[]) {
     const key = projectKey({ machine, project });
     projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
-      up: activeGroups[0] !== undefined && projectKey(activeGroups[0]) !== key,
-      down: activeGroups.at(-1) !== undefined && projectKey(activeGroups.at(-1)!) !== key,
-      move: direction => projectView.step(activeGroups, key, direction)
+      up: list[0] !== undefined && projectKey(list[0]) !== key,
+      down: list.at(-1) !== undefined && projectKey(list.at(-1)!) !== key,
+      move: direction => projectView.step(list, key, direction)
     } : undefined);
   }
-  /** A project header dragged to a new place among the listed projects, in the manual order; idle projects sit in their fold as rows. */
-  function dragProject(event: PointerEvent, entry: ProjectEntry) {
+  /** A project header dragged to a new place among the cards of its section, in the manual order; idle projects sit in their fold as rows. */
+  function dragProject(event: PointerEvent, entry: ProjectEntry, list: ProjectEntry[]) {
     const key = projectKey(entry);
     startProjectDrag(event, {
       key,
       look: { name: projectName(entry.project), project: entry.project, store: entry.machine.store },
-      order: () => activeGroups.map(projectKey),
-      drop: (target, after) => projectView.move(activeGroups, key, target, after),
+      order: () => list.map(projectKey),
+      drop: (target, after) => projectView.move(list, key, target, after),
     });
   }
 </script>
@@ -183,13 +202,13 @@
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      <!-- Idle projects sit as compact rows in their fold below, so Alt+digit and reordering count only these. -->
-      {#each activeGroups as entry (projectKey(entry))}
+      {#snippet card(entry: ProjectEntry, list: ProjectEntry[], section: ProjectSection)}
         {@const { machine, project } = entry}
         {@const owner = machine.store}
         {@const workingOpen = projectThreadView.isOpen(entry, 'working')}
+        {@const later = section === 'later'}
         {@const doneOpen = archiveCount(project, 'done') > 0 && projectThreadView.isOpen(entry, 'done')}
-        {@const archivedOpen = archiveCount(project, 'archived') > 0 && projectThreadView.isOpen(entry, 'archived')}
+        {@const archivedOpen = archiveCount(project, 'archived') > 0 && (later || projectThreadView.isOpen(entry, 'archived'))}
         {@const { lists } = projectLists.get(projectKey(entry))!}
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
@@ -215,13 +234,13 @@
           aria-label={threadDrag.over === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
         >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="head" oncontextmenu={(e) => openProjectMenu(e, machine, project)}>
+          <div class="head" oncontextmenu={(e) => openProjectMenu(e, machine, project, list)}>
             <button
               class="ghost toggle"
               class:grab={projectView.order === 'manual'}
               data-testid="project-row"
               data-project-id={project.id}
-              onpointerdown={(event) => dragProject(event, entry)}
+              onpointerdown={(event) => dragProject(event, entry, list)}
               ondragstart={(event) => event.preventDefault()}
               aria-expanded={!collapsed}
               title={multi ? `${project.path} · ${machine.label}` : project.path}
@@ -242,17 +261,18 @@
                 <AgentAvatar kind="profile" id={resident.id} name={resident.name} avatar={resident.avatar} size={18} />
               </button>
             {/each}
-            <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} {away} />
+            <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} {away} body={later ? laterLists : undefined} />
             <button
               class="ghost small icon project-actions"
               data-testid="project-menu"
               title={strings.sidebar.projectMenu}
               aria-label={strings.sidebar.projectMenu}
-              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
+              onclick={(e) => openProjectMenu(e, machine, project, list)}><Ellipsis size={15} /></button
             >
           </div>
           <div class="disclosure-fold" class:open={!collapsed} inert={collapsed}>
             <div>
+              <SharedProjectThreads store={owner} projectId={project.id} active={!collapsed && !away}>
               {#each draftsHere as draft (draft.id)}<DraftRow {owner} entry={draft} />{/each}
               <WindowList items={lists.attention} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
                 {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
@@ -270,18 +290,32 @@
                   onrows={doneObserver(entry, 'done')} />
               </div>
               <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
-                {#if archivedOpen}<GroupLabel kind="archived" count={archiveCount(project, 'archived')} />{/if}
-                <RecentDone kind="archived" entries={[entry]} {scrollRoot} {now} open={archivedOpen && !collapsed} header={false}
+                {#if archivedOpen && !later}<GroupLabel kind="archived" count={archiveCount(project, 'archived')} />{/if}
+                <RecentDone kind="archived" entries={[entry]} {scrollRoot} {now} open={archivedOpen && !collapsed && (!later || projectThreadView.laterOpen)} header={false}
                   onrows={doneObserver(entry, 'archived')} />
               </div>
               {#if lists.attention.length === 0 && lists.working.length === 0 && !project.archivedThreads && draftsHere.length === 0}<p class="none">{strings.sidebar.noThreads}</p>{/if}
+              </SharedProjectThreads>
             </div>
           </div>
         </section>
-      {/each}
-      {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
+      {/snippet}
+      <!-- Idle projects sit as compact rows in their fold below, so Alt+digit and reordering count only the cards. -->
+      {#if sections.working.length > 0}
+        <ProjectCardsSection kind="working" count={sections.working.length}>
+          {#each sections.working as entry (projectKey(entry))}{@render card(entry, sections.working, 'working')}{/each}
+        </ProjectCardsSection>
+      {/if}
+      {#each sections.open as entry (projectKey(entry))}{@render card(entry, sections.open, 'open')}{/each}
+      {#if groups.length > 0 && sections.working.length + sections.open.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
       <div class="project-folds">
-        <ProjectShelf idle={otherGroups} archived={shelved} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
+        {#if sections.later.length > 0}
+          <ProjectCardsSection kind="later" count={sections.later.length}>
+            {#each sections.later as entry (projectKey(entry))}{@render card(entry, sections.later, 'later')}{/each}
+          </ProjectCardsSection>
+        {/if}
+        <ProjectShelf projects={sections.idle} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
+        <ProjectShelf kind="archived" projects={shelved} {multi} {now} {scrollRoot} />
       </div>
     {/if}
     {/if}

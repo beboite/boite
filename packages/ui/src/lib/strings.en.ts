@@ -43,6 +43,7 @@ import { strings as imports } from './strings/en/imports';
 import { strings as agentShape } from './strings/en/agentShape';
 import { strings as media } from './strings/en/media';
 import { strings as btw } from './strings/en/btw';
+import { strings as secrets } from './strings/en/secrets';
 import { strings as slash } from './strings/en/slash';
 import { strings as activity } from './strings/en/activity';
 import { strings as mention } from './strings/en/mention';
@@ -50,7 +51,6 @@ import { strings as notify } from './strings/en/notify';
 import { strings as permissionMode } from './strings/en/permissionMode';
 import { strings as permissionModeLong } from './strings/en/permissionModeLong';
 import { strings as permissionModeCodex } from './strings/en/permissionModeCodex';
-import { strings as permissionModeAgy } from './strings/en/permissionModeAgy';
 import { strings as thread } from './strings/en/thread';
 import { strings as chat } from './strings/en/chat';
 import { strings as agentMessages } from './strings/en/agentMessages';
@@ -84,6 +84,7 @@ import { strings as features } from './strings/en/features';
 import { strings as quotas } from './strings/en/quotas';
 import { strings as harnessUpdates } from './strings/en/harnessUpdates';
 import { strings as providerSettings } from './strings/en/providerSettings';
+import { strings as localAcp } from './strings/en/localAcp';
 import { strings as plugins } from './strings/en/plugins';
 import { strings as time } from './strings/en/time';
 import { strings as errors } from './strings/en/errors';
@@ -93,6 +94,8 @@ import { strings as parts } from './strings/en/parts';
 import { strings as common } from './strings/en/common';
 import { strings as onboarding } from './strings/en/onboarding';
 import { strings as contacts } from './strings/en/contacts';
+import { strings as shared } from './strings/en/shared';
+import { strings as windows } from './strings/en/windows';
 
 export const strings = {
   ...subscriptionProxy,
@@ -132,6 +135,7 @@ export const strings = {
   ...agentShape,
   ...media,
   ...btw,
+  ...secrets,
   ...slash,
   ...activity,
   ...mention,
@@ -139,7 +143,6 @@ export const strings = {
   ...permissionMode,
   ...permissionModeLong,
   ...permissionModeCodex,
-  ...permissionModeAgy,
   ...thread,
   ...chat,
   ...agentMessages,
@@ -173,6 +176,7 @@ export const strings = {
   ...quotas,
   ...harnessUpdates,
   ...providerSettings,
+  ...localAcp,
   ...plugins,
   ...time,
   ...errors,
@@ -182,6 +186,8 @@ export const strings = {
   ...common,
   ...onboarding,
   ...contacts,
+  ...shared,
+  ...windows,
 } as const;
 
 export type Strings = typeof strings;

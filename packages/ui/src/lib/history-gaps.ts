@@ -1,5 +1,5 @@
 import type { Message, MessageId } from '@boite/contracts';
-import { ESTIMATE } from './message-window';
+import { ESTIMATE, atOrBefore } from './message-window';
 import type { TimelineRow } from './timeline-rows';
 import type { MissingStretch } from './store/message-positions.svelte';
 
@@ -142,7 +142,7 @@ export async function loadKeepingReader(
   if (!view) return added;
   const node = view.querySelector<HTMLElement>(`[data-mid="${CSS.escape(kept.id)}"]`);
   const drift = node ? node.getBoundingClientRect().top - view.getBoundingClientRect().top - kept.offset : 0;
-  if (Math.abs(drift) > 1) view.scrollTop += drift;
+  if (drift !== 0) view.scrollTop += drift;
   // The window was put where the rows say the reader is; the page says where it is.
   moved(view.scrollTop);
   return added;
@@ -191,6 +191,27 @@ export function wantedRange(total: number[], gaps: readonly GapAt[], top: number
  * page lands before its gap reaches the screen.
  */
 export const READ_AHEAD = 3;
+
+/**
+ * How many of the newest `messages` draw a row within `reach` of the bottom of
+ * `rows`, whose tops `total` holds, or a view one of those rows' turns placed
+ * (`views` by turn: an answer draws it inline, with no row of its own): what
+ * the live end keeps (`releaseOlder`), so the history it lets go of is never
+ * on screen or about to be read.
+ */
+export function heldNear(total: number[], rows: readonly TimelineRow[], messages: readonly Message[], reach: number, views: ReadonlyMap<string, readonly Message[]>): number {
+  const at = new Map(messages.map((message, index) => [message.id, index]));
+  const turns = new Set<string>();
+  let oldest = messages.length;
+  for (let row = atOrBefore(total, rows.length, (total[rows.length] ?? 0) - reach); row < rows.length; row += 1) {
+    for (const message of rows[row]!.failures ?? [rows[row]!.message]) {
+      oldest = Math.min(oldest, at.get(message.id) ?? oldest);
+      turns.add(message.turnId);
+    }
+  }
+  for (const turn of turns) for (const view of views.get(turn) ?? []) oldest = Math.min(oldest, at.get(view.id) ?? oldest);
+  return messages.length - oldest;
+}
 
 /**
  * Asks for a range a frame after the view moved, with what the view is by

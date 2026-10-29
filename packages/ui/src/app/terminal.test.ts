@@ -3,6 +3,7 @@ import { flushSync } from 'svelte';
 import { type RpcMethodName } from '@boite/contracts';
 import { store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
+import type { FakeClient } from '../lib/fake-client';
 import { mountOnFake, openProviderDetails, query, test, waitFor } from '../test/app';
 
 vi.mock('@tauri-apps/plugin-opener', () => import('../test/opener'));
@@ -155,7 +156,7 @@ test('the guided connection signs OpenCode in from a terminal too, then hands it
   expect(store.accountOf('a-opencode')?.status).toBe('ok');
 });
 
-test('a remote terminal keeps output arriving while its opening response is in flight', async () => {
+test('a remote terminal keeps live output and answers new cursor queries while its opening response is in flight', async () => {
   await mountOnFake('/?fake=1&machines=1');
   await waitFor(() => workspace.machines.length === 2 && store.openThread !== null);
   const remote = workspace.machines.find(machine => machine.store !== store)!;
@@ -164,17 +165,28 @@ test('a remote terminal keeps output arriving while its opening response is in f
   const call = client.call.bind(client);
   let release!: () => void;
   let snapshotReady = false;
+  const writes: string[] = [];
   const gate = new Promise<void>(resolve => { release = resolve; });
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'terminals.write') writes.push((params as { data: string }).data);
     const result = await call<RpcMethodName>(method, params);
-    if (method === 'terminals.open') { snapshotReady = true; await gate; }
+    if (method === 'terminals.open') {
+      // A query from the old screen was answered already and stays muted on replay.
+      (result as { output: string }).output = '\x1b[6n' + (result as { output: string }).output;
+      snapshotReady = true;
+      await gate;
+    }
     return result;
   });
   try {
     remote.store.toggleTerminal();
     await waitFor(() => snapshotReady);
     await call('terminals.write', { id: `terminal:${remote.store.openThread!.id}`, data: 'remote-prompt-marker' });
+    // PowerShell can ask for the cursor while the opening snapshot travels back.
+    // This is live output: suppressing its answer leaves the shell waiting forever.
+    (client as FakeClient).emitTerminalOutput(`terminal:${remote.store.openThread!.id}`, '\x1b[6n');
     release();
     await waitFor(() => document.querySelector('[data-testid=terminal-drawer]')?.textContent?.includes('remote-prompt-marker') === true);
+    await vi.waitFor(() => expect(writes.filter(data => /^\x1b\[\d+;\d+R$/.test(data))).toHaveLength(1), { timeout: 8000 });
   } finally { release(); spy.mockRestore(); }
 });

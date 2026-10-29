@@ -1,4 +1,5 @@
 import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
+import { FenceScan, openFence } from './fences';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -18,15 +19,9 @@ export function visibleAnswer(text: string): string {
   const index = from + tail.index;
   const start = index + (text[index] === '\n' ? 1 : 0);
   // A terminal marker inside an unfinished fenced example is still answer content.
-  let fence: string | null = null;
-  for (const line of text.slice(0, start).split('\n')) {
-    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (!match) continue;
-    const delimiter = match[1]!;
-    if (!fence) fence = delimiter;
-    else if (delimiter[0] === fence[0] && delimiter.length >= fence.length && !match[2]!.trim()) fence = null;
-  }
-  return fence ? text : text.slice(0, start);
+  const fences = new FenceScan();
+  for (const line of text.slice(0, start).split('\n')) fences.line(line);
+  return fences.inside ? text : text.slice(0, start);
 }
 
 export function messagePreview(message: Message): string {
@@ -109,6 +104,20 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 }
 
 /**
+ * A block as the renderer must see it: blank lines and trailing space go. The
+ * first line's indent stays on a fence opener, whose code the renderer
+ * outdents by that indent, and on a marker indented past one, which trimming
+ * would turn into a fence the scanner never saw. Anywhere else, a heading
+ * included, it goes as it always did.
+ */
+function blockText(text: string): string {
+  const block = text.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
+  const cut = block.indexOf('\n');
+  const first = cut < 0 ? block : block.slice(0, cut);
+  return openFence(first.trimStart()) ? block : block.trimStart();
+}
+
+/**
  * paragraphBlocks for a text that grows: a new text that extends the last one
  * resumes at the last complete line, so a delta reads only its own lines. The
  * same array comes back until a paragraph completes. Only complete lines are
@@ -117,7 +126,7 @@ export function paragraphBlocks(text: string, live: boolean): string[] {
 export class ParagraphScan {
   #read = '';
   #start = 0;
-  #fence = '';
+  #fences = new FenceScan();
   #done: string[] = [];
   #tail = '';
   #result: string[] | null = null;
@@ -129,28 +138,24 @@ export class ParagraphScan {
     if (!text.startsWith(this.#read)) {
       this.#read = '';
       this.#start = 0;
-      this.#fence = '';
+      this.#fences.reset();
       this.#done = [];
       this.#result = null;
     }
     let offset = this.#read.length;
     let grew = false;
     for (let end = text.indexOf('\n', offset); end !== -1; end = text.indexOf('\n', offset)) {
-      const trimmed = text.slice(offset, end + 1).trim();
+      const line = text.slice(offset, end);
       offset = end + 1;
-      const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
-      if (marker) {
-        if (!this.#fence) this.#fence = marker;
-        else if (marker[0] === this.#fence[0] && marker.length >= this.#fence.length && trimmed === marker) this.#fence = '';
-      }
-      if (!this.#fence && !trimmed) {
-        const block = text.slice(this.#start, offset).trim();
+      this.#fences.line(line);
+      if (!this.#fences.inside && !line.trim()) {
+        const block = blockText(text.slice(this.#start, offset));
         if (block) { this.#done.push(block); grew = true; }
         this.#start = offset;
       }
     }
     this.#read = text.slice(0, offset);
-    const tail = live ? '' : text.slice(this.#start).trim();
+    const tail = live ? '' : blockText(text.slice(this.#start));
     if (this.#result && !grew && tail === this.#tail) return this.#result;
     this.#tail = tail;
     this.#result = tail ? [...this.#done, tail] : [...this.#done];

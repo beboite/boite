@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { checkSettingsPatch } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_DELEGATION_CONFIG, effectiveCompaction, followedPatch, effectiveSetting, type CompactionPolicy } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { AUTO_COMPACT } from '../src/threads/auto-compact.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoDriver } from '../src/drivers/echo.ts';
+import { makeAgent, settled } from './agent-fixture.ts';
 let h: TestCore;
 beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { await h.stop(); });
@@ -22,7 +23,7 @@ test('coordination instructions never become native compaction arguments', async
     let done = client.next('turn.finished', t => t.threadId === threadId);
     await client.call('turns.start', { threadId, prompt: 'remember this' });
     await done;
-    expect(prompts[0]).toContain('boite agents');
+    expect(prompts[0]).toContain('boite threads send');
     done = client.next('turn.finished', t => t.threadId === threadId);
     await client.call('threads.compact', { threadId });
     await done;
@@ -179,6 +180,169 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('a thread left above a limit set later compacts once when a client shows it, not at its next prompt', async () => {
+    // A thread idle at 212k before a 200k limit existed made its next prompt wait a minute for the agent's own compaction.
+    // Its turn armed the cache's moment minutes ahead: the lower limit must not wait for that timer.
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
+    await turn(client, threadId, 'x'.repeat(950));
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: ['cache-expiry'] } });
+    await pause(120);
+    expect(await compactions(client, threadId)).toEqual([]);
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await client.call('threads.focus', { threadId });
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
+    client.close();
+  });
+
+  test('a shown thread whose last turn was stopped is left to the user, over its limit or not', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    const stopped = client.next('turn.finished', t => t.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: `[sleep:5000] ${'x'.repeat(950)}` });
+    await client.call('turns.stop', { threadId });
+    expect((await stopped).status).toBe('stopped');
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    expect((await client.call('threads.get', { threadId })).context?.tokens ?? 0).toBeGreaterThanOrEqual(1000);
+    await client.call('threads.focus', { threadId });
+    await pause(150);
+    expect(await compactions(client, threadId)).toEqual([]);
+    client.close();
+  });
+
+  test('a failed cache keepalive ping does not stand for the conversation\'s last turn', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    const pinged = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'keepalive');
+    h.core.threads.startTurn(threadId, '[error]', { kind: 'keepalive' });
+    expect((await pinged).status).toBe('error');
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    expect((await client.call('threads.get', { threadId })).context?.tokens ?? 0).toBeGreaterThanOrEqual(1000);
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await client.call('threads.focus', { threadId });
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
+    client.close();
+  });
+
+  test('a compaction that keeps more than the limit is not chained by the next looks', async () => {
+    // Each look brings a new context reading; without a guard every one compacted again, with no prompt between.
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation !== 'compact') return echoDriver.startTurn(ctx);
+      return echoDriver.startTurn({ ...ctx, context: (use) => ctx.context({ ...use, tokens: 1_500 }) });
+    } });
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      await turn(client, threadId, 'x'.repeat(950));
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+      const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+      await client.call('threads.focus', { threadId });
+      await compacted;
+      expect((await client.call('threads.get', { threadId })).context?.tokens).toBe(1_500);
+      for (let look = 0; look < 3; look++) {
+        await client.call('threads.focus', { threadId: null });
+        await client.call('threads.focus', { threadId });
+        await pause(60);
+      }
+      expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    } finally { restore(); client.close(); }
+  });
+
+  test('a shown thread whose agent names its compact command only after preparing still compacts', async () => {
+    // An ACP session restored after a restart advertises `/compact` once prepared, after the focus that showed it.
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await turn(client, threadId, 'x'.repeat(950));
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+    const threads = h.core.threads;
+    const refusal = threads.compactRefusal.bind(threads);
+    threads.compactRefusal = () => 'this agent has not advertised a compact command';
+    await client.call('threads.focus', { threadId });
+    await pause(120);
+    expect(await compactions(client, threadId)).toEqual([]);
+    threads.compactRefusal = refusal;
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    threads.agentState.noteCommands(threadId, [{ name: 'compact', description: null, hint: null }]);
+    expect(await compacted).toMatchObject({ status: 'done', execution: { automatic: true } });
+    client.close();
+  });
+
+  test('the token limit does not wait for the cache-expiry moment', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 1000, moments: ['cache-expiry'] } });
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await turn(client, threadId, 'x'.repeat(950));
+    expect((await compacted).status).toBe('done');
+    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    client.close();
+  });
+
+  test('cache expiry compacts a context below the independent token limit', async () => {
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: 100_000, moments: ['cache-expiry'] } });
+    AUTO_COMPACT.cacheMarginMs = 300_000 - 50;
+    const compacted = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'compact');
+    await turn(client, threadId, 'short');
+    expect((await compacted).status).toBe('done');
+    expect((await compactions(client, threadId)).map(t => t.status)).toEqual(['done']);
+    client.close();
+  });
+
+  test('working children do not block compaction, and their result waits until it finishes', async () => {
+    let finishChild: (() => void) | undefined;
+    let compactContext: Parameters<typeof echoDriver.startTurn>[0] | undefined;
+    const compact = Promise.withResolvers<Awaited<ReturnType<typeof echoDriver.startTurn>['done']>>();
+    const steered: string[] = [];
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation === 'compact') {
+        compactContext = ctx;
+        return { done: compact.promise, stop() {}, async steer(text) { steered.push(text); return true; } };
+      }
+      if (ctx.thread.parentThreadId) {
+        const child = Promise.withResolvers<Awaited<ReturnType<typeof echoDriver.startTurn>['done']>>();
+        finishChild = () => {
+          const id = ctx.emit.startMessage('assistant');
+          ctx.emit.part(id, 0, { type: 'text', text: 'child result after compaction' });
+          ctx.emit.complete(id, 'complete');
+          child.resolve({ status: 'done', sessionId: 'child', usage: null });
+        };
+        return { done: child.promise, stop() { child.resolve({ status: 'stopped', sessionId: 'child', usage: null }); } };
+      }
+      return echoDriver.startTurn(ctx);
+    } });
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      const { accountId, model } = h.core.threads.require(threadId);
+      await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+        profiles: [{ id: 'worker', name: 'Worker', providerId: 'echo', accountId, model: model!, effort: null }] } });
+      await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'Wait', requestId: 'child' });
+      await waitFor(() => finishChild !== undefined);
+      await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
+      await turn(client, threadId, 'parent waits');
+      await waitFor(() => compactContext !== undefined);
+      expect(h.core.threads.canSteer(threadId)).toBe(false);
+      expect(await h.core.threads.steer(threadId, 'must wait')).toBe(false);
+      const delivered = client.next('turn.finished', t => t.threadId === threadId && t.execution?.operation === 'delegation');
+      finishChild!();
+      await waitFor(() => h.core.delegation.hasMail(threadId));
+      expect(compactContext!.coordination?.()).toBeNull();
+      expect(steered).toEqual([]);
+      // Disable future automatic compactions so only this held one is observed.
+      await client.call('settings.set', { autoCompact: null });
+      compact.resolve({ status: 'done', sessionId: compactContext!.sessionId, usage: null });
+      expect((await delivered).status).toBe('done');
+      expect(h.core.delegation.hasMail(threadId)).toBe(false);
+      const thread = await client.call('threads.get', { threadId });
+      expect(thread.messages.some(m => m.parts.some(p => p.type === 'text' && p.text.includes('child result after compaction')))).toBe(true);
+    } finally { restore(); client.close(); }
+  });
+
   test('an active goal keeps its next iteration: the core does not compact under it', async () => {
     const client = await h.connect();
     const { threadId } = await quiet(client);
@@ -191,8 +355,89 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('type policies inherit live defaults, normalize complete overrides and reject malformed policies', async () => {
+    const client = await h.connect();
+    try {
+      const policy: CompactionPolicy = { autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] }, backgroundCompaction: true };
+      const next = await client.call('settings.set', { compactionByType: { subagent: policy } });
+      expect(next.compactionByType?.subagent?.autoCompact?.moments).toEqual(['turn-end', 'cache-expiry']);
+      for (const bad of [null, [], { worker: policy }, { bot: {} }, { bot: { autoCompact: null } }, { bot: { autoCompact: 'on', backgroundCompaction: false } }, { bot: { autoCompact: null, backgroundCompaction: 1 } }]) {
+        expect(checkSettingsPatch({ compactionByType: bad } as never)).toMatchObject({ ok: false, field: 'compactionByType' });
+      }
+      expect(checkSettingsPatch({ compactionByType: {} })).toEqual({ ok: true, patch: { compactionByType: {} } });
+      expect(followedPatch(next, { compactionByType: {} })).toEqual({ compactionByType: {} });
+      expect(effectiveSetting(h.core.settings.get(), 'compactionByType')).toEqual(next.compactionByType);
+      const common = { autoCompact: { tokens: 3000, moments: [] }, backgroundCompaction: false } satisfies CompactionPolicy;
+      const settings = { ...common, compactionByType: next.compactionByType };
+      expect(effectiveCompaction(settings, {})).toEqual(common);
+      expect(effectiveCompaction(settings, { agentSessionId: 'bot' })).toEqual(common);
+      expect(effectiveCompaction(settings, { parentThreadId: 'parent', agentSessionId: 'bot' })).toEqual(next.compactionByType!.subagent!);
+    } finally { client.close(); }
+  });
+
+  test('a real delegated child inherits the common limit and compaction never delivers a second result', async () => {
+    const client = await h.connect();
+    try {
+      const { threadId } = await quiet(client);
+      const { accountId, model } = h.core.threads.require(threadId);
+      await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+        profiles: [{ id: 'worker', name: 'Worker', providerId: 'echo', accountId, model: model!, effort: null }] } });
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] } });
+      const child = await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'x'.repeat(1100), requestId: 'compact-child' });
+      const childId = child.thread.id;
+      await waitFor(() => h.core.journal.lastTurn(childId)?.status === 'done');
+      await pause(180);
+      expect(await compactions(client, childId)).toHaveLength(1);
+      await waitFor(() => !h.core.delegation.hasMail(threadId) && h.core.threads.require(threadId).status === 'idle');
+      const view = await client.call('delegation.get', { threadId });
+      const member = view.agents.find(a => a.thread.id === childId)!;
+      expect(member.lastTurn?.execution?.operation).not.toBe('compact');
+      expect(member.result).toContain('x'.repeat(1100));
+      expect(view.messages.filter(letter => letter.origin === 'result' && letter.from.threadId === childId)).toHaveLength(1);
+    } finally { client.close(); }
+  });
+
+  test('resolved driver and idle policies differ by type, explicit off and removal restore live inheritance', async () => {
+    const client = await h.connect();
+    const seen = new Map<string, (number | null | undefined)[]>();
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      if (ctx.turn.execution?.operation !== 'compact') seen.set(ctx.thread.id, [...(seen.get(ctx.thread.id) ?? []), ctx.autoCompactTokens?.()]);
+      return echoDriver.startTurn(ctx);
+    } });
+    try {
+      const { threadId } = await quiet(client);
+      const { threadId: botId } = await makeAgent(h, client);
+      await client.call('settings.set', { autoCompact: { tokens: 1000, moments: [] }, compactionByType: {
+        agent: { autoCompact: { tokens: 2000, moments: [] }, backgroundCompaction: false },
+        bot: { autoCompact: { tokens: null, moments: ['turn-end'] }, backgroundCompaction: false },
+      } });
+      await turn(client, threadId, 'x'.repeat(1100));
+      await turn(client, botId, 'bot work');
+      await pause(180);
+      expect(await compactions(client, threadId)).toHaveLength(0);
+      expect(await compactions(client, botId)).toHaveLength(1);
+      expect(seen.get(threadId)?.at(-1)).toBe(2000);
+      expect(seen.get(botId)?.at(-1)).toBeNull();
+      const before = (await client.call('agents.snapshot', {})).status[0]!.last;
+      expect(before?.text).toContain('bot work');
+      await client.call('settings.set', { compactionByType: { bot: { autoCompact: null, backgroundCompaction: false } } });
+      await turn(client, botId, 'x'.repeat(1100));
+      await pause(100);
+      expect(await compactions(client, botId)).toHaveLength(1);
+      expect(seen.get(botId)?.at(-1)).toBeNull();
+      await client.call('settings.set', { autoCompact: { tokens: 1500, moments: [] }, compactionByType: {} });
+      await turn(client, botId, 'x'.repeat(1500));
+      await pause(180);
+      expect(await compactions(client, botId)).toHaveLength(2);
+      expect(seen.get(botId)?.at(-1)).toBe(1500);
+      expect(settled(h, botId)).toBe(true);
+    } finally { restore(); client.close(); }
+  });
+
   test('the setting refuses a threshold out of range and an empty or unknown list of moments', () => {
     expect(checkSettingsPatch({ autoCompact: null }).ok).toBe(true);
+    expect(checkSettingsPatch({ autoCompact: { tokens: 200_000, moments: [] } }))
+      .toEqual({ ok: true, patch: { autoCompact: { tokens: 200_000, moments: [] } } });
     expect(checkSettingsPatch({ autoCompact: { tokens: 200_000, moments: ['cache-expiry', 'turn-end', 'turn-end'] } }))
       .toEqual({ ok: true, patch: { autoCompact: { tokens: 200_000, moments: ['turn-end', 'cache-expiry'] } } });
     for (const bad of [{ tokens: 999, moments: ['turn-end'] }, { tokens: 1.5e3 + 0.5, moments: ['turn-end'] }, { tokens: null, moments: [] }, { tokens: null, moments: ['mid-turn'] }, 'on']) {

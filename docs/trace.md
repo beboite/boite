@@ -71,7 +71,15 @@ a job that still reports members remains held. A pid that could not join its
 job, or any pid of a thread with no job, is stopped by `taskkill /T /F` started
 asynchronously, so the core keeps serving while it starts. The child's own kill
 runs once taskkill ends, since `/T` needs the root alive to find the tree, and
-`killAll` at shutdown waits for both.
+`killAll` at shutdown waits for both. Taskkill gets only a pid the core
+spawned and has not seen exit, held as described under managed stops below; a
+process the core did not spawn or saw exit gets only its own kill.
+
+Independent cores in one process share the native drain, with an opaque job
+scope per registry and thread. Starts, exits, guards and controls use that same
+scope. Equal public thread IDs in different cores stay independent; closing a
+registry removes only its routes, jobs and guarded PIDs. A restarted registry
+gets fresh scopes, so delayed events cannot attach to its replacement.
 
 Codex initialization can temporarily use normal priority for at most 30 seconds.
 The driver restores below-normal priority on ready, failure or Stop; the registry
@@ -92,6 +100,34 @@ rows and load while remaining in totals, known by their image name or, when
 that read fails on a host caught as it starts, by a command line that starts
 the system's own `conhost.exe`. Terminating a job requires explicit
 exit reconciliation because the port may report only the empty-job event.
+A job nested inside a thread's job, such as the one a test suite's own core
+gives the CLIs it starts, posts no exit to the thread's job when it is
+terminated. Each load sample therefore reads the exit code of every tracked
+handle, and a process that has exited is reported as it would be from its
+exit packet. A packet that arrives later matches no live record.
+
+After root-exit telemetry settles, protected tools wait up to five seconds for
+every thread of their captured capability to drain. Native membership can retain
+a console after its exit notification. Each pass queries the held job and checks
+the live registry; an empty job reconciles captured exits through the normal
+handle and creation-identity checks, without waiting for completion-port delivery.
+The final synchronous publication gate still refuses an occupied or unreadable
+job at the deadline. Root telemetry has its own five-second budget. Replacing or
+revoking the captured capability interrupts publication; an old tool cannot
+publish through or revoke the replacement preparing on the same thread.
+
+For a native ordering investigation, `BOITE_DIAGNOSE_JOB_EVENTS=1` writes
+`WINDOWS_JOB_EVENT` records to host stderr: worker packet/action/sequence,
+main-thread receipt, captured creation identity and registry admission or
+rejection. Protection records identify the captured capability, native and
+registry membership, refusal phase, revocation and process-stop requests. Probe
+records distinguish deadline termination from a completed command. The native
+protected-tools and provider/shared CI steps enable it for both helpers.
+Publication snapshots include the PID list from that same native membership
+query and the existing captured and ignored PID sets, without reopening a PID.
+It records no commands, environment or paths and changes no exit, wait or
+publication decision. A later PID lookup without a valid creation time cannot
+identify the incarnation retained by the registry.
 
 `process.started` and `process.exited` carry the available PID, parent PID,
 executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
@@ -106,6 +142,7 @@ as many as `trace.get` returns without a `limit`.
 | `trace.get` | One thread's recorded processes, newest first |
 | `resources.list` | Threads with live processes, their last sampled `ThreadLoad`, busiest first |
 | `resources.usage` | Agent identity and cached CPU, memory, storage and TCP readings, without process arguments or paths |
+| `resources.machine` | The machine's own CPU, memory, GPUs and fixed disks, and on Windows each agent's GPU share; model names, sizes and loads, no path beyond a drive letter or mount point |
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
 | `thread.load` | A thread's new `ThreadLoad` alone, sent to a connection whose `hello` `accepts` it; any other connection gets the whole row as `thread.updated` |
@@ -137,8 +174,11 @@ A command line belongs in this authorized trace view, not diagnostic logs.
 
 ## Agent task manager
 
-Settings > Task manager shows this machine's live processes grouped by agent,
-with search and sorting by memory, CPU, disk or network activity. Desktop owners
+Settings > Task manager opens with one card per connected machine: CPU and
+GPU over the last minute, memory with the share Boite's agents hold, and the
+free space of each fixed disk, red under 10%. Picking a card lists that
+machine's live processes grouped by agent, with search and sorting by memory,
+CPU, GPU, disk or network activity. Desktop owners
 can stop an agent's processes after confirming. Paired phones can read the same
 measurements and open the owning conversation, but cannot stop processes.
 
@@ -166,6 +206,21 @@ UDP traffic and protocol overhead are outside these TCP counters. Disk activity
 does not describe folder size.
 A failed TCP dump displays unavailable; a later valid reading can recover the
 actual byte delta only when the socket and process identities still match.
+
+Each card asks its own machine's core for `resources.machine` every two
+seconds while visible. Callers within a second share one reading, and the
+first reading waits 200 ms so CPU has an interval to measure. A core that
+predates the method says so on its card and is not asked again.
+
+| Platform | CPU and memory | GPU | Disks |
+| --- | --- | --- | --- |
+| Windows | `os.cpus()` deltas, `GlobalMemoryStatusEx` | DXGI adapters, PDH `GPU Engine` and `GPU Adapter Memory`; the busiest engine, summed over its processes as Task Manager counts it; per-agent share from the pid in each instance | Fixed drives from `GetLogicalDrives` |
+| Linux | `os.cpus()` deltas, `/proc/meminfo` | `nvidia-smi` with a 2 s timeout, then amdgpu sysfs; other DRM cards listed without a load | Disk filesystems in `/proc/self/mounts`, one row per device at its shortest mount point, `/boot` and snaps left out |
+| macOS | `os.cpus()` deltas, total memory only | Not measured: IOKit statistics are private API | `/` and `/Volumes` |
+
+The PDH query opens on the first GPU read and closes after 30 seconds without
+one. A GPU reader that fails marks the GPU "not measured" and the rest of the
+reading still arrives.
 
 Windows supplies job CPU and memory measurements. macOS supplies readable
 physical footprint measurements, with CPU unavailable. Storage and network
@@ -279,7 +334,7 @@ grouped problems, threads, log file sizes, the ends of `core-output.log` and
 `shell-error.log`, then the timeline oldest first, one `formatLogLine` per
 record. It covers the last 24 hours by default, at most 20,000 records.
 
-`diagnostics.issue` drafts a GitHub issue for `beboite/boite`: the user's
+`diagnostics.issue` drafts a GitHub issue for `mtsu-dev/boite`: the user's
 description, the environment, the problems and as many of the newest log lines
 as fit. With `submit: true` it runs `gh issue create` under the core's own
 `gh` login and returns the issue URL; without a signed-in `gh` it returns a
@@ -506,7 +561,22 @@ required. The notice follows `memoryProtection` and stops nothing.
 Registered POSIX children start detached in their own process group.
 `resources.killTree` sends group SIGTERM, probes every 100 ms and sends SIGKILL
 two seconds later only if the group remains. It can reach members after the
-leader exits. A child that starts its own session escapes that group. Normal
+leader exits. A child that starts its own session escapes that group.
+Each spawn also returns its own `stop`, bound to that process: it stops the
+process and, on Linux and macOS, its group, even after the process exited and
+left the registry, and resolves once the stop ended and the process exited.
+It never reaches the scope's other processes. A short system command
+(`tailscale`, the firewall, device SDK tools) runs through `runCommand`
+(`packages/core/src/run-command.ts`): at its deadline it is stopped that way
+and its pipes are given half a second to close, so a helper holding them
+cannot hold the caller. On Windows the stop goes through `taskkill /T` only
+while the root has not exited: until Bun reports the exit it holds the
+process's handle, so the pid is still the root's. In that same tick the
+backend opens a handle of its own on the root and keeps it until taskkill
+ended (`platform/windows/tree-kill.ts`), so a root that exits meanwhile keeps
+its pid. After the exit, the pid may be another process's, and only the
+root's own kill runs. A helper of a root that
+already exited is not reached there. Normal
 shutdown waits for escalation; a hard shell kill does not guarantee core exit
 on Linux/macOS. `TraceCapability` exposes OS, mode (`events`, `poll`, `none`) and
 failure notes; clients must read it before promising native capabilities.

@@ -107,6 +107,15 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     return { raw, at, id };
   });
   const steps = declared.map(({ raw, at, id }): CheckedStep => {
+    let compute: WorkflowStepPlan['compute'];
+    if (raw.compute !== undefined) {
+      const c = raw.compute;
+      if (!isRecord(c) || !isRecord(c.host) || typeof c.host.ownerCoreId !== 'string' || !/^[a-f0-9]{64}$/.test(c.host.ownerCoreId) || typeof c.host.coreId !== 'string' || !/^[a-f0-9]{64}$/.test(c.host.coreId)
+        || typeof c.baseCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(c.baseCommit)) fail(`${at}.compute: expected a shared-project endpoint and full base commit`);
+      if (raw.model != null || raw.profile != null || raw.effort != null || raw.context != null || raw.worktree != null && raw.worktree !== false) fail(`${at}.compute: the host owns model, effort, permissions, context and checkout`);
+      compute = {sharedProjectId: text(c.sharedProjectId, `${at}.compute.sharedProjectId`, 100), host: {ownerCoreId: c.host.ownerCoreId, coreId: c.host.coreId, projectId: text(c.host.projectId, `${at}.compute.host.projectId`, 128)},
+        profileId: text(c.profileId, `${at}.compute.profileId`, 128), baseCommit: c.baseCommit};
+    }
     const profile = raw.profile === undefined || raw.profile === null ? undefined : text(raw.profile, `${at}.profile`, 64);
     if (profile !== undefined && profile !== CONVERSATION_PROFILE && !options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not a profile of this thread; ${options.profiles.length ? `expected one of ${options.profiles.join(', ')}, or` : 'none is configured:'} leave profile out to run the step on the conversation's model`);
     const model = raw.model === undefined || raw.model === null ? undefined : text(raw.model, `${at}.model`, 256);
@@ -144,7 +153,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (context !== undefined) {
       try { resolveContext(context); } catch (error) { if (error instanceof ContextRequestError) fail(`${at}.${error.message}`); throw error; }
     }
-    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(context !== undefined ? { context } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}), ...(raw.worktree === true ? { worktree: true } : {}) };
+    return { id, ...(compute ? {compute} : {}), ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(context !== undefined ? { context } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}), ...(raw.worktree === true ? { worktree: true } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);
@@ -160,16 +169,17 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
   return steps;
 }
 
-export function checkLimits(value: unknown): WorkflowLimits {
-  if (value === undefined) return { ...DEFAULT_WORKFLOW_LIMITS };
+export function checkLimits(value: unknown, sharedCompute = false): WorkflowLimits {
+  const defaults = {...DEFAULT_WORKFLOW_LIMITS, ...(sharedCompute ? {maxConcurrent: Number.MAX_SAFE_INTEGER} : {})};
+  if (value === undefined) return defaults;
   if (!isRecord(value)) fail('limits: expected { maxConcurrent, maxSteps }');
   const limit = (key: keyof WorkflowLimits, max: number): number => {
     const n = value[key];
-    if (n === undefined) return DEFAULT_WORKFLOW_LIMITS[key];
+    if (n === undefined) return defaults[key];
     if (!Number.isSafeInteger(n) || (n as number) < 1 || (n as number) > max) fail(`limits.${key}: expected an integer from 1 to ${max}`);
     return n as number;
   };
-  return { maxConcurrent: limit('maxConcurrent', WORKFLOW_LIMITS.maxConcurrent), maxSteps: limit('maxSteps', WORKFLOW_LIMITS.maxSteps) };
+  return { maxConcurrent: limit('maxConcurrent', sharedCompute ? Number.MAX_SAFE_INTEGER : WORKFLOW_LIMITS.maxConcurrent), maxSteps: limit('maxSteps', WORKFLOW_LIMITS.maxSteps) };
 }
 
 export interface CheckedPlan {
@@ -182,8 +192,12 @@ export function checkPlan(value: unknown, options: CheckOptions): CheckedPlan {
   if (!isRecord(value)) fail('plan: expected { name, steps }');
   const name = text(value.name, 'name', 80);
   const steps = checkSteps(value.steps, options);
-  const limits = checkLimits(value.limits);
-  const plan: WorkflowPlan = { name, steps: steps.map(({ deps: _deps, ...step }) => step), ...(value.limits ? { limits } : {}) };
+  const limits = checkLimits(value.limits, steps.some(s => s.compute !== undefined));
+  const explicitLimits = isRecord(value.limits) ? {
+    ...(value.limits.maxConcurrent === undefined ? {} : {maxConcurrent: limits.maxConcurrent}),
+    ...(value.limits.maxSteps === undefined ? {} : {maxSteps: limits.maxSteps}),
+  } : undefined;
+  const plan: WorkflowPlan = { name, steps: steps.map(({ deps: _deps, ...step }) => step), ...(explicitLimits ? { limits: explicitLimits } : {}) };
   return { plan, steps, limits };
 }
 
@@ -268,10 +282,46 @@ export function shapeMismatch(value: unknown, shape: WorkflowShape, path = 'outp
   return null;
 }
 
-/** The last fenced ```json block of an answer, or the whole answer when it is JSON. */
+/** The last valid fenced JSON block, or the whole answer when it is JSON. */
 export function extractJson(answer: string): { value: unknown } | null {
-  const blocks = [...answer.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)```/g)];
-  const candidates = [...blocks.reverse().map(m => m[1]!), answer.trim()];
+  const blocks: string[] = [];
+  let cursor = 0;
+  while (cursor < answer.length) {
+    const opening = answer.indexOf('```', cursor);
+    if (opening === -1) break;
+    let header = opening + 3;
+    if (answer.startsWith('json', header)) header += 4;
+    while (answer[header] === ' ' || answer[header] === '\t') header++;
+    if (answer[header] === '\r') header++;
+    if (answer[header] !== '\n') { cursor = opening + 1; continue; }
+    const body = header + 1;
+    let line = body;
+    let closed = false;
+    // Only physical LF/CRLF lines close a block; Unicode separators remain JSON string data.
+    while (line <= answer.length) {
+      const newline = answer.indexOf('\n', line);
+      const end = newline === -1 ? answer.length : newline;
+      let fence = line;
+      while (answer[fence] === ' ' || answer[fence] === '\t') fence++;
+      if (answer.startsWith('```', fence)) {
+        let tail = fence + 3;
+        while (answer[tail] === '`') tail++;
+        while (answer[tail] === ' ' || answer[tail] === '\t') tail++;
+        if (answer[tail] === '\r') tail++;
+        if (tail === end) {
+          blocks.push(answer.slice(body, line));
+          cursor = end;
+          closed = true;
+          break;
+        }
+      }
+      if (newline === -1) break;
+      line = newline + 1;
+    }
+    // No later opener can find a closing line this scan has not already visited.
+    if (!closed) break;
+  }
+  const candidates = [...blocks.reverse(), answer.trim()];
   for (const candidate of candidates) {
     try {
       return { value: JSON.parse(candidate) };

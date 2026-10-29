@@ -20,8 +20,12 @@ const OFF_PARENT = 32;
 const OFF_EXE = 44;
 const EXE_CHARS = 260;
 
-export async function windowsProcessTree(rootPid: number): Promise<TreeProcess[]> {
+export async function windowsProcessTree(rootPid: number, authorized?: () => boolean): Promise<TreeProcess[]> {
   const { dlopen, FFIType, ptr } = await import('bun:ffi');
+  // Loading FFI can outlive the attempt that authorized this observation.
+  if (authorized !== undefined && !authorized()) {
+    throw Object.assign(new Error('process tree observation cancelled'), { code: 'ABORT_ERR' });
+  }
   // HANDLEs are integers here, not FFI pointers: INVALID_HANDLE_VALUE is all ones.
   const k32 = dlopen('kernel32.dll', {
     CreateToolhelp32Snapshot: { args: [FFIType.u32, FFIType.u32], returns: FFIType.u64 },

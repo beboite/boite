@@ -1,0 +1,130 @@
+name: android-server
+
+# Boite Server, the native app in apps/android-server/app that drives a core
+# running in Termux. ci builds it unsigned to prove it compiles; the nightly
+# signs it with the Boite app's key, or takes the previous release's back when
+# nothing that goes into it changed (scripts/ci/android-server-apk.ts). The
+# app carries its own version, apps/android-server/VERSION plus a patch
+# counted from the last published APK. docs/android-server.md.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build; empty builds the caller's own. The nightly passes the one whose CI passed.
+        type: string
+        default: ''
+      enabled:
+        description: Off skips the build, which still reports its check name; ci.yml turns it off when nothing in the APK changed.
+        type: boolean
+        default: true
+      release:
+        description: Sign the APK and reuse the previous release's when nothing changed.
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEYSTORE:
+        description: Base64 of the PKCS12 keystore holding the key aliased boite.
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+  workflow_dispatch:
+    inputs:
+      # Declared here too: an undeclared input reads as false and would skip the build.
+      enabled:
+        description: Build the APK.
+        type: boolean
+        default: true
+      release:
+        description: Sign the APK and reuse the previous release's when nothing changed.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  apk:
+    if: inputs.enabled
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          # The reuse probe diffs apps/android-server against the previous release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - name: Choose the version
+        id: meta
+        run: |
+          # VERSION with patch 0; a release counts the patch in the next step.
+          bun scripts/ci/android-server-apk.ts version
+          mkdir -p "$RUNNER_TEMP/apk"
+      - name: Reuse the previous APK when nothing in it changed
+        id: probe
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          bun scripts/ci/android-server-apk.ts reuse "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/apk"
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: steps.probe.outputs.reuse != 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        if: steps.probe.outputs.reuse != 'true'
+      - name: Build the APK
+        if: steps.probe.outputs.reuse != 'true'
+        working-directory: apps/android-server
+        env:
+          VERSION: ${{ steps.probe.outputs.version || steps.meta.outputs.version }}
+          CODE: ${{ steps.probe.outputs.code || steps.meta.outputs.code }}
+        run: ./gradlew --no-daemon assembleRelease "-PboiteVersion=$VERSION" "-PboiteVersionCode=$CODE"
+      - name: Keep the unsigned APK
+        if: ${{ !inputs.release }}
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: cp apps/android-server/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-server-android-$VERSION-unsigned.apk"
+      - name: Sign it
+        if: inputs.release && steps.probe.outputs.reuse != 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION: ${{ steps.probe.outputs.version }}
+        run: |
+          set -euo pipefail
+          # An unsigned APK is a file no phone installs: missing secrets fail the job.
+          if [[ -z "${KEYSTORE_B64:-}" || -z "${KEYSTORE_PASSWORD:-}" ]]; then
+            echo '::error::ANDROID_KEYSTORE or ANDROID_KEYSTORE_PASSWORD is unset: refusing to publish an unsigned APK' >&2
+            exit 1
+          fi
+          bt=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+          ks="$RUNNER_TEMP/android.p12"
+          test -n "$VERSION"
+          out="$RUNNER_TEMP/apk/boite-server-android-$VERSION.apk"
+          trap 'rm -f "$ks" "$RUNNER_TEMP/aligned.apk"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+          "$bt/zipalign" -f -p 4 apps/android-server/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          # Passwords come from the environment, so neither lands in a process list.
+          "$bt/apksigner" sign --ks "$ks" --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias boite \
+            --out "$out" "$RUNNER_TEMP/aligned.apk"
+          # Signed with another key, the next nightly's APK would be an update phones refuse.
+          bun scripts/ci/android-server-apk.ts verify "$out"
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: ${{ inputs.release && 'android-server-apk' || 'android-server-apk-unsigned' }}
+          path: ${{ runner.temp }}/apk/*.apk
+          if-no-files-found: error
+          # An APK is a zip already.
+          compression-level: 0
+          retention-days: 7

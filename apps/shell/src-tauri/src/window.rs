@@ -27,21 +27,32 @@ pub(crate) fn hidden() -> bool {
     std::env::var("BOITE_SHELL_HIDDEN").ok().as_deref() == Some("1")
 }
 
-// Webviews sharing a profile must also share environment options. Elevated
-// hosts ignore WebView2's environment variables, so each builder uses the API.
-pub(crate) fn test_browser_args() -> Option<String> {
-    if !hidden() { return None; }
-    let value = std::env::var("BOITE_SHELL_DEBUG_PORT").ok()?;
+/// The arguments of every WebView2 the shell opens, a test shell's debugging
+/// port included. Webviews sharing a profile must also share environment
+/// options, and elevated hosts ignore WebView2's environment variables, so
+/// each builder passes these through the API.
+pub(crate) fn browser_args() -> String {
+    let mut args = String::from(BROWSER_ARGS);
+    if !hidden() { return args; }
+    let Ok(value) = std::env::var("BOITE_SHELL_DEBUG_PORT") else { return args; };
     let port: u16 = value.parse().expect("BOITE_SHELL_DEBUG_PORT must be a port number");
     assert!(port > 0, "BOITE_SHELL_DEBUG_PORT must be greater than zero");
-    let mut args = format!("--remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11");
+    args.push_str(&format!(" --remote-debugging-port={port} --remote-allow-origins=* --mute-audio --use-angle=d3d11"));
     // What the browser did with a navigation that never committed: the test
     // that waited for it keeps this file (`tests/e2e/lib/shell-diagnosis.ts`).
     if let Some(logs) = crate::shell_log::directory() {
         args.push_str(&format!(" --log-net-log=\"{}\"", logs.join(TEST_NET_LOG).display()));
     }
-    Some(args)
+    args
 }
+
+/// What every WebView2 of the shell starts with. Setting any arguments replaces
+/// Wry's own, so its three disabled features stay in the one list Chromium
+/// reads (a second `--disable-features` would win over the first).
+/// `HideCursorWhileTyping`, on by default since Chromium's July 2026 change,
+/// hid the mouse pointer at every letter typed in the composer whenever
+/// Windows' "Hide pointer while typing" is on, until the mouse moved again.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HideCursorWhileTyping";
 
 /// The Chromium net log of a test shell's WebView2, in `<dataDir>/logs`.
 const TEST_NET_LOG: &str = "webview-net.json";
@@ -257,9 +268,7 @@ pub(crate) fn build_main_window<R: Runtime>(
     if let Some(directory) = webview_profile() {
         builder = builder.data_directory(directory);
     }
-    if let Some(args) = test_browser_args() {
-        builder = builder.additional_browser_args(&args);
-    }
+    builder = builder.additional_browser_args(&browser_args());
     let window = builder.build()?;
     #[cfg(target_os = "macos")]
     {
@@ -378,6 +387,17 @@ mod tests {
         // Never below the minimum size, and then pinned to the top left.
         assert_eq!(super::centred((0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
         assert_eq!(super::centred((60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
+    }
+
+    #[test]
+    fn typing_never_hides_the_pointer_and_wry_keeps_its_disabled_features() {
+        // Chromium honours one `--disable-features`: a second would drop Wry's.
+        let lists: Vec<&str> = super::BROWSER_ARGS.split_whitespace().filter_map(|arg| arg.strip_prefix("--disable-features=")).collect();
+        assert_eq!(lists.len(), 1, "{}", super::BROWSER_ARGS);
+        let features: Vec<&str> = lists[0].split(',').collect();
+        for feature in ["HideCursorWhileTyping", "msWebOOUI", "msPdfOOUI", "msSmartScreenProtection"] {
+            assert!(features.contains(&feature), "{feature} missing from {}", super::BROWSER_ARGS);
+        }
     }
 
     #[test]

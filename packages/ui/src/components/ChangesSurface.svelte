@@ -202,12 +202,9 @@
           {#if change.staged}
             <span class="staged ui-label-box" title={strings.changes.staged}><span class="ui-label">{strings.changes.stagedShort}</span></span>
           {/if}
-          {#if change.additions !== null && change.additions > 0}
-            <span class="count added ui-label">+{change.additions}</span>
-          {/if}
-          {#if change.deletions !== null && change.deletions > 0}
-            <span class="count removed ui-label">-{change.deletions}</span>
-          {/if}
+          <!-- Both counts keep their column, empty or not, so every row's figures line up. -->
+          <span class="count added ui-label">{change.additions ? `+${change.additions}` : ''}</span>
+          <span class="count removed ui-label">{change.deletions ? `-${change.deletions}` : ''}</span>
         </button>
       {/each}
     </div>
@@ -474,6 +471,8 @@
 
   .count {
     flex: none;
+    min-width: 4.5ch;
+    text-align: right;
     font-variant-numeric: tabular-nums;
   }
 

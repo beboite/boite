@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, CornerDownLeft, FileText } from '@lucide/svelte';
+  import { CornerDownLeft, FileText } from '@lucide/svelte';
   import type { Message, Turn } from '@boite/contracts';
   import { bytes, count } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
@@ -8,30 +8,35 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
-  import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
   import ChatImage from './ChatImage.svelte';
   import { THUMB_HEIGHT } from '../lib/message-window';
-  import MessageActions from './MessageActions.svelte';
+  import MessageReceipts from './MessageReceipts.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import Deferred, { parts } from './Deferred.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
    * with, and the two receipts under it. A picture opens in the viewer, with
-   * the thread's other pictures and videos a swipe away.
+   * the thread's other pictures and videos a swipe away. An agent's
+   * conversation draws its user's messages with it too, from a message whose
+   * pictures and files are read where the agent's turn keeps them.
    */
   let {
     store,
     message,
     turn,
-    progress,
+    accepted,
+    responded,
     edit
   }: {
     store: Store;
     message: Message;
     turn: Turn | undefined;
-    progress: TurnProgress;
+    /** The first tick: the core holds the prompt. */
+    accepted: boolean;
+    /** The second tick: the agent took it into a turn. */
+    responded: boolean;
     /** Rewinds the thread to before this prompt and puts it back in the composer. */
     edit?: () => void;
   } = $props();
@@ -52,6 +57,7 @@
     const owner = store, threadId = message.threadId, messageId = message.id, index = message.parts.indexOf(part);
     try {
       const data = part.dataDeferred ? await owner.loadMessageAttachment(threadId, messageId, index) : part.data;
+      if (data === null) return;
       if (window.__TAURI_INTERNALS__ === undefined) browserDownload(`data:application/octet-stream;base64,${data}`, part.name ?? strings.composer.attachAlt);
       else await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(data), true);
     } catch (error) {
@@ -94,7 +100,7 @@
 
   /** The picture as the viewer shows it, under a name a saved copy can keep; none while its original is on the core. */
   function viewed(image: ImagePart, at: number): MediaItem | null {
-    if (image.dataDeferred) return null;
+    if (image.dataDeferred || !image.data) return null;
     const extension = image.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
     const name = image.alt || `image-${at + 1}.${extension}`;
     const src = `data:${image.mimeType};base64,${image.data}`;
@@ -113,11 +119,15 @@
    * copy, so its original is fetched first, once, and then opens.
    */
   async function open(from: HTMLElement, image: ImagePart, index: number, at: number): Promise<void> {
+    let shown = image;
     if (image.dataDeferred) {
       if (opening !== null) return;
       opening = index;
       try {
-        await store.loadMessageAttachment(message.threadId, message.id, index);
+        // A message the store holds gets its bytes too; one drawn from elsewhere opens from the answer.
+        const data = await store.loadMessageAttachment(message.threadId, message.id, index);
+        if (data === null) return;
+        shown = { ...image, data, dataDeferred: undefined };
       } catch (error) {
         store.reportError(error, 'minor');
         return;
@@ -125,7 +135,7 @@
         opening = null;
       }
     }
-    const item = viewed(image, at);
+    const item = viewed(shown, at);
     if (item) show(galleryFrom(from, item));
   }
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
@@ -150,7 +160,7 @@
         {:else}
           <strong>{startedBy.title}</strong>
         {/if}
-        <span class="agent-project">{startedBy.project}</span>
+        <span class="agent-project">{startedBy.machine ? `${startedBy.project} · ${startedBy.machine}` : startedBy.project}</span>
       </span>
     </div>
   {/if}
@@ -202,22 +212,11 @@
   {/if}
 </div>
 {#if viewing}{@const view = viewing}<Deferred part={parts.ImageViewer} floating>{#snippet children(ImageViewer)}<ImageViewer items={view.items} index={view.index} onclose={() => viewing = null} />{/snippet}</Deferred>{/if}
-<div class="receipts" class:agent={!!startedBy} class:settled={!!turn && progress.responded(message.turnId)} data-testid="message-receipts">
-  <MessageActions text={copyText} at={message.createdAt} {edit} />
-  <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
-  <span class="tick" data-testid="receipt-responded" class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
-</div>
+<MessageReceipts text={copyText} at={message.createdAt} {edit} {accepted} {responded} agent={!!startedBy} />
 
 <style>
   .text-omitted { margin: 4px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 
-  .receipts { display: flex; align-items: center; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
-  .receipts .tick { display: flex; opacity: .45; }
-  .receipts .received { color: var(--color-accent); opacity: 1; }
-  /* Delivered and answered: the ticks wait for the pointer like the time beside them. A pending one stays. */
-  .receipts.settled .tick { opacity: 0; transition: opacity var(--dur-2); }
-  :global(.message:hover) .receipts.settled .tick, .receipts.settled:focus-within .tick, .receipts.settled:not(:has(button)) .tick { opacity: 1; }
-  @media (hover: none) { .receipts.settled .tick { opacity: 1; } }
   .command { color: var(--color-accent); font-weight: 600; }
 
   .bubble {
@@ -230,7 +229,7 @@
     box-shadow: var(--shadow-e1);
   }
 
-  .bubble.agent, .receipts.agent { align-self: flex-start; }
+  .bubble.agent { align-self: flex-start; }
   .bubble.agent {
     background: var(--color-surface-2);
     border-color: var(--color-border);

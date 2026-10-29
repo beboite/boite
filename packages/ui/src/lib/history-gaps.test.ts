@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { Message } from '@boite/contracts';
-import { RangeAsk, gapHeight, loadKeepingReader, rowOnScreen, wantedRange, withGaps } from './history-gaps';
+import { RangeAsk, gapHeight, heldNear, loadKeepingReader, rowOnScreen, wantedRange, withGaps } from './history-gaps';
 import { TimelineRows } from './timeline-rows';
 import { ESTIMATE } from './message-window';
 
@@ -106,8 +106,26 @@ describe('history gaps', () => {
     expect(withGaps(rows, held, gaps).rows.map((row) => row.id)).toEqual(['m-10', 'gap:11:9', 'gap:21:9', 'm-30']);
   });
 
-  test('a page landing above the reader moves the view by what the row drifted on screen, and only then', async () => {
+  test('the live end keeps what is drawn near the bottom, the files moved after an answer and the views it draws', () => {
+    const turn = (item: Message) => ({ ...item, turnId: 'turn' });
+    // A view published early in a long turn, the song, then the answer that draws the view in its text.
+    const view = turn(message('m-view', 1, 'assistant'));
+    const song = turn(message('m-song', 30, 'assistant'));
+    const answer = turn(message('m-answer', 31, 'assistant'));
+    const messages = [view, ...Array.from({ length: 28 }, (_, at) => turn(message(`m-${at + 2}`, at + 2, 'assistant'))), song, answer];
+    // The timeline draws the song after the answer, and the view inside it: neither has its row where it was published.
+    const rows = new TimelineRows().build([...messages.slice(1, -2), answer, song]);
+    const total = rows.map((_, at) => at * ESTIMATE).concat(rows.length * ESTIMATE);
+    expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map())).toBe(2);
+    expect(heldNear(total, rows, messages, 2 * ESTIMATE, new Map([['turn', [view]]]))).toBe(messages.length);
+    // A folded row still needs every original message when old pages are released.
+    const folded = [{ ...rows.at(-1)!, failures: messages.slice(-8) }];
+    expect(heldNear([0, ESTIMATE], folded, messages, ESTIMATE, new Map())).toBe(8);
+  });
+
+  test.each([340, 1, -1, 0.75, -0.75])('a page landing above the reader corrects a %s px drift, and only then', async (drift) => {
     const view = document.createElement('div');
+    view.scrollTop = 200;
     const row = document.createElement('article');
     row.dataset['mid'] = 'm-2';
     view.append(row);
@@ -117,13 +135,13 @@ describe('history gaps', () => {
     expect(rowOnScreen(view)).toEqual({ id: 'm-2', offset: 20 });
     const moved = vi.fn();
     const hold = vi.fn();
-    // The rows drawn above it pushed it 340 px down, and nothing anchored it: the view follows.
-    expect(await loadKeepingReader(async (landing) => { landing(); rowTop = 360; return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
-    expect(view.scrollTop).toBe(340);
-    expect(moved).toHaveBeenLastCalledWith(340);
+    // Even a fractional shift from the rows drawn above it moves the view by the same amount.
+    expect(await loadKeepingReader(async (landing) => { landing(); rowTop += drift; return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
+    expect(view.scrollTop).toBe(200 + drift);
+    expect(moved).toHaveBeenLastCalledWith(200 + drift);
     // Anchored by the browser already: nothing moves.
     expect(await loadKeepingReader(async (landing) => { landing(); return 3; }, () => view, hold, async () => {}, moved)).toBe(3);
-    expect(view.scrollTop).toBe(340);
+    expect(view.scrollTop).toBe(200 + drift);
     // The window was held on the row as each page went in, before it was drawn.
     expect(hold).toHaveBeenCalledTimes(2);
     expect(hold).toHaveBeenNthCalledWith(1, { id: 'm-2', offset: 20 });

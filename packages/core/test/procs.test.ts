@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -32,6 +32,48 @@ afterEach(async () => {
 });
 
 describe('procs', () => {
+  test.each([false, true])('close releases the platform after protection failure and retains release errors=%s', async releaseFails => {
+    const protectionError = new Error('protection close failed'), releaseError = new Error('platform release failed');
+    let releases = 0;
+    const platform: ProcessPlatform = {...createPosixPlatform('linux', null), release: async () => {releases++; if (releaseFails) throw releaseError;}};
+    const registry = new ProcRegistry(harness.core.journal, new Bus(), platform);
+    const close = spyOn(registry.protection, 'close').mockRejectedValue(protectionError);
+    try {
+      const closing = registry.close(); expect(registry.close()).toBe(closing);
+      const error = await closing.catch(error => error);
+      expect(releases).toBe(1);
+      if (releaseFails) {expect(error).toBeInstanceOf(AggregateError); expect(error.errors).toEqual([protectionError, releaseError]);}
+      else expect(error).toBe(protectionError);
+    } finally {close.mockRestore();}
+  });
+  test('a managed stop hands its root to the tree backend only while that root has not exited', async () => {
+    // On Windows the backend is taskkill /T /PID: a root that exited may have given its pid to a stranger.
+    const handed: number[] = [];
+    const platform: ProcessPlatform = { ...createPosixPlatform('linux', null), terminateUnassigned: (pid) => { handed.push(pid); } };
+    const registry = new ProcRegistry(harness.core.journal, new Bus(), platform);
+    try {
+      const ended = registry.spawn('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await ended.exited;
+      await ended.stop();
+      const piped = registry.spawnPiped('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await piped.exited;
+      await piped.stop();
+      const child = registry.spawnChild('stop-identity', process.execPath, ['-e', '0'], { agentRoot: false });
+      await new Promise((resolve) => child.once('exit', resolve));
+      await registry.stopChild(child);
+      expect(handed).toEqual([]);
+      const running = registry.spawn('stop-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      await running.stop();
+      expect(handed).toEqual([running.proc.pid]);
+      // A thread stop's fallback, between the exit the spawner saw and the registry's own exit callback.
+      const exiting = registry.spawnChild('tree-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      const live = registry.spawn('tree-identity', process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { agentRoot: false });
+      Object.assign(exiting, { exitCode: 0 });
+      registry.killTree('tree-identity');
+      expect(handed).toEqual([running.proc.pid, live.proc.pid]);
+      await live.exited;
+    } finally { await registry.close(); }
+  });
   test.skipIf(process.platform !== 'win32')('spawnChild keeps native exit usage after the node exit callback', async () => {
     const threadId = 'native-child-usage';
     const child = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setTimeout(() => {}, 250)'], {

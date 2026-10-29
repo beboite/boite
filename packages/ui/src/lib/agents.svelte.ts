@@ -1,164 +1,200 @@
 import { errorText } from './errors';
-import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
+import { RpcErrorCode, type AgentProfile, type AgentStatus, type AgentsSnapshot, type RpcParams, type RpcResult, type AgentsRpcMethods, type ThreadSummary } from '@boite/contracts';
+import { RpcFailure } from './rpc-error';
 import type { Store } from './store.svelte';
-import { strings } from './strings';
-import { agentThreadLive } from './agent-directory.svelte';
+import { fill, strings } from './strings';
+import { describeTool, type ToolFamily } from './tool-summary';
+import { experimentOn } from './experiments.svelte';
+import { noteUpkeep } from './agent-upkeep';
+import { agentDirectory } from './agent-directory.svelte';
 
-export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
-export type AgentSelection = { kind: AgentEntryKind; id: string };
-/** What the agents page shows: one record, or the engine settings. */
-export type AgentFocus = AgentSelection | { kind: 'engine' };
-
-export type AgentChatKind = 'profile' | 'group' | 'team';
-export type AgentChatStatus = 'waiting' | 'running' | 'paused' | 'idle';
 /**
- * One row of the chat list, the way a messenger lists its conversations. The
- * core takes messages in a direct conversation or a group only, so a team that
- * names a group folds into that group's row and brings its roles and missions;
- * a team with no group keeps a row of its own, with no conversation yet.
+ * A persistent agent is a thread with an identity: its conversation is its
+ * own thread, opened in the ordinary chat view. What this module adds is the
+ * agents snapshot of each machine (profiles, status, routines, desks) and the
+ * way from an agent to its thread.
  */
-export interface AgentChat {
-  kind: AgentChatKind;
-  id: string;
-  name: string;
-  /** The agent's own avatar text; empty for a group. */
-  avatar: string;
-  /** The agents the avatar draws: the agent itself, or a group's members. */
-  members: string[];
-  /** Where its messages go; null for a team with no group. */
-  scope: AgentScope | null;
-  /** The team a group carries. */
-  teamId: string | null;
-  status: AgentChatStatus;
-  last: AgentConversationMessage | null;
-  /** The newest activity: a message, a change in its work, or an edit. */
+
+/** What the agents page draws in its card when no agent thread is open: a form, or the engine settings. */
+export type AgentFocus = { kind: 'new' } | { kind: 'engine' };
+
+/** One row of the agents list: the agent, how it stands, and when it last did something the user would see. */
+export interface AgentRowData {
+  profile: AgentProfile;
+  status: AgentStatus | null;
+  /** The newest of its last answer and its last change: what the list sorts by. */
   at: number;
-  /** Agent messages newer than the last time this conversation was open. */
-  unread: number;
-  /** Decisions, interruptions, failures and results waiting on the user. */
-  attention: number;
-}
-type Attention = ReturnType<typeof attentionOf>;
-
-export const chatKey = (kind: AgentChatKind, id: string) => `${kind}:${id}`;
-
-/** The team each group carries: the oldest team naming it as its discussion. */
-export function teamsByGroup(snapshot: AgentsSnapshot): Map<string, AgentTeam> {
-  const groups = new Set(snapshot.groups.map(g => g.id));
-  const byGroup = new Map<string, AgentTeam>();
-  for (const team of [...snapshot.teams].sort(byCreation)) if (team.groupId && groups.has(team.groupId) && !byGroup.has(team.groupId)) byGroup.set(team.groupId, team);
-  return byGroup;
 }
 
-/** The row a mission belongs to: its team's, else its only agent's, else the group holding all its agents, else its first agent's. */
-export function missionHome(snapshot: AgentsSnapshot, mission: AgentMission, byGroup = teamsByGroup(snapshot)): string | null {
-  if (mission.teamId) {
-    for (const [groupId, team] of byGroup) if (team.id === mission.teamId) return chatKey('group', groupId);
-    return chatKey('team', mission.teamId);
-  }
-  const [first] = mission.agentIds;
-  if (!first) return null;
-  if (mission.agentIds.length === 1) return chatKey('profile', first);
-  const group = snapshot.groups.find(g => mission.agentIds.every(id => g.memberIds.includes(id)));
-  return group ? chatKey('group', group.id) : chatKey('profile', first);
+/** How an agent stands, from its snapshot's status, or idle when an older core sent none. */
+export function statusOf(snapshot: AgentsSnapshot | null, agentId: string): AgentStatus | null {
+  return snapshot?.status?.find(s => s.agentId === agentId) ?? null;
+}
+
+/** The agent whose own thread this is. */
+export function agentOfThread(snapshot: AgentsSnapshot | null, threadId: string | null | undefined): AgentProfile | null {
+  if (!snapshot || !threadId) return null;
+  const agentId = snapshot.sessions.find(s => s.threadId === threadId)?.agentId ?? snapshot.status?.find(s => s.threadId === threadId)?.agentId;
+  return agentId ? snapshot.profiles.find(a => a.id === agentId) ?? null : null;
+}
+
+/** The thread an agent talks in, once the core made it. */
+export function threadOfAgent(snapshot: AgentsSnapshot | null, agentId: string): string | null {
+  return snapshot?.sessions.find(s => s.agentId === agentId)?.threadId ?? statusOf(snapshot, agentId)?.threadId ?? null;
+}
+
+/** Every agent not archived, the one that spoke last first, the way a messenger lists its chats. */
+export function agentRows(snapshot: AgentsSnapshot | null): AgentRowData[] {
+  if (!snapshot) return [];
+  return snapshot.profiles.filter(a => a.status !== 'archived').map(profile => {
+    const status = statusOf(snapshot, profile.id);
+    return { profile, status, at: Math.max(status?.last?.at ?? 0, profile.createdAt) };
+  }).sort((a, b) => b.at - a.at || a.profile.name.localeCompare(b.profile.name));
 }
 
 /**
- * The missions a conversation shows: every mission an agent is on, a team's, or
- * for a group its team's and those shared by several of its members alone. A
- * mission with one agent reads as that agent's.
+ * How an agent stands, as the ring around its robot says it: at work, waiting
+ * for a slot, needing the user, failed, with answers not read yet, resting,
+ * or asleep (paused: nothing wakes it).
  */
-export function missionsOf(snapshot: AgentsSnapshot, chat: Pick<AgentChat, 'kind' | 'id' | 'teamId' | 'members'>): AgentMission[] {
-  return snapshot.missions.filter(m =>
-    chat.kind === 'profile' ? m.agentIds.includes(chat.id)
-    : chat.kind === 'team' ? m.teamId === chat.id
-    : chat.teamId && m.teamId === chat.teamId || !m.teamId && m.agentIds.length > 1 && m.agentIds.every(id => chat.members.includes(id)));
+export type AgentMood = 'working' | 'queued' | 'waiting' | 'error' | 'unread' | 'idle' | 'asleep';
+
+/** The ring of a state (`liveState`), with answers not read yet over a rest. */
+export function moodOf(state: AgentStatus['state'], unread = 0): AgentMood {
+  if (state === 'paused') return 'asleep';
+  if (state === 'archived') return 'idle';
+  return state === 'idle' && unread > 0 ? 'unread' : state;
 }
 
-/** The members, and the team, a mission started from this conversation begins with. */
-export function missionPreset(snapshot: AgentsSnapshot, chat: Pick<AgentChat, 'kind' | 'id' | 'teamId' | 'members'>): { memberIds: string[]; teamId: string | null } {
-  const teamId = chat.kind === 'team' ? chat.id : chat.teamId;
-  const team = teamId ? snapshot.teams.find(t => t.id === teamId) : undefined;
-  return { teamId: team?.id ?? null, memberIds: team ? chat.members.filter(id => team.members.some(m => m.agentId === id)) : chat.members };
-}
+/** What kind of step an agent is on, for the glyph beside it: a tool's family, a pause, or a phase of its turn. */
+export type ActivityKind = ToolFamily | 'sleep' | 'thinking' | 'compacting' | 'starting' | 'retrying' | 'provider' | 'writing';
 
-/** Every conversation, most recent activity first. */
-export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversationMessage[], readAt: Record<string, number>, attention: Attention): AgentChat[] {
-  const byGroup = teamsByGroup(snapshot);
-  const folded = new Set([...byGroup.values()].map(t => t.id));
-  const chats = new Map<string, AgentChat>();
-  const add = (chat: Omit<AgentChat, 'status' | 'last' | 'unread' | 'attention'>) => chats.set(chatKey(chat.kind, chat.id), { ...chat, status: 'idle', last: null, unread: 0, attention: 0 });
-  for (const a of snapshot.profiles) if (a.status !== 'archived') add({ kind: 'profile', id: a.id, name: a.name, avatar: a.avatar, members: [a.id], scope: { kind: 'agent', id: a.id }, teamId: null, at: a.updatedAt });
-  for (const g of snapshot.groups) add({ kind: 'group', id: g.id, name: g.name, avatar: '', members: g.memberIds, scope: { kind: 'group', id: g.id }, teamId: byGroup.get(g.id)?.id ?? null, at: Math.max(g.updatedAt, byGroup.get(g.id)?.updatedAt ?? 0) });
-  for (const t of snapshot.teams) if (!folded.has(t.id)) add({ kind: 'team', id: t.id, name: t.name, avatar: '', members: t.members.map(m => m.agentId), scope: null, teamId: t.id, at: t.updatedAt });
+/** A tool's name alone, the way some drivers report the running call ("Bash"), with no word on what it does. */
+const BARE_TOOL = /^[A-Za-z][\w.-]*$/;
+/** The core's activity for a call with no title: `<tool>: <what it is about>`. */
+const NAMED_STEP = /^([A-Za-z][\w.-]*): (.+)$/;
 
-  const missions = new Map(snapshot.missions.map(m => [m.id, missionHome(snapshot, m, byGroup)]));
-  const home = (scope: AgentScope): string | null =>
-    scope.kind === 'agent' ? chatKey('profile', scope.id)
-    : scope.kind === 'group' ? chatKey('group', scope.id)
-    : scope.kind === 'mission' ? missions.get(scope.id) ?? null
-    : scope.kind === 'team' ? (folded.has(scope.id) ? chatKey('group', snapshot.teams.find(t => t.id === scope.id)!.groupId!) : chatKey('team', scope.id))
-    : null;
-  const rank: Record<AgentChatStatus, number> = { idle: 0, paused: 1, running: 2, waiting: 3 };
-  const raise = (chat: AgentChat | undefined, status: AgentChatStatus) => { if (chat && rank[status] > rank[chat.status]) chat.status = status; };
+/** The first word of a call's title, when no tool name comes with it: "Run the tests", "Read App.svelte". */
+const VERBS: Record<string, ToolFamily> = {
+  run: 'command', ran: 'command', runs: 'command', running: 'command', execute: 'command', install: 'command', build: 'command', test: 'command', start: 'command',
+  read: 'read', reads: 'read', reading: 'read', view: 'read', open: 'read',
+  edit: 'edit', edits: 'edit', editing: 'edit', update: 'edit', fix: 'edit', change: 'edit', apply: 'edit',
+  write: 'write', writes: 'write', create: 'write', add: 'write',
+  search: 'search', find: 'search', list: 'search', grep: 'search', look: 'search', check: 'search',
+  fetch: 'fetch', download: 'fetch', browse: 'fetch',
+};
 
-  for (const a of snapshot.profiles) if (a.status === 'paused') raise(chats.get(chatKey('profile', a.id)), 'paused');
-  for (const g of snapshot.groups) if (g.paused || byGroup.get(g.id)?.paused) raise(chats.get(chatKey('group', g.id)), 'paused');
-  for (const t of snapshot.teams) if (t.paused && !folded.has(t.id)) raise(chats.get(chatKey('team', t.id)), 'paused');
-  for (const w of snapshot.work) {
-    const where = home(w.scope), chat = where ? chats.get(where) : undefined;
-    if (chat) chat.at = Math.max(chat.at, w.updatedAt);
-    if (w.status !== 'running' && w.status !== 'waiting') continue;
-    raise(chat, w.status);
-    raise(chats.get(chatKey('profile', w.agentId)), w.status);
-  }
-  for (const m of messages) {
-    const where = home(m.scope), chat = where ? chats.get(where) : undefined;
-    if (!chat || !chat.scope || m.scope.kind !== chat.scope.kind) continue;
-    if (!chat.last || m.createdAt >= chat.last.createdAt) chat.last = m;
-    chat.at = Math.max(chat.at, m.createdAt);
-    if (m.senderId !== null && m.createdAt > (readAt[where!] ?? 0)) chat.unread++;
-  }
-  for (const w of attention.work) { const where = home(w.scope); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
-  for (const t of attention.review) { const where = missions.get(t.missionId); const chat = where ? chats.get(where) : undefined; if (chat) chat.attention++; }
-  return [...chats.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
+function kindOfTool(name: string): ActivityKind {
+  if (/^(sleep|wait)/i.test(name)) return 'sleep';
+  const family = describeTool(name, {}).family;
+  return family === 'other' ? VERBS[name.toLowerCase()] ?? 'other' : family;
 }
 
 /**
- * The thread each conversation's agents work in right now, keyed like the
- * chat list: what a row's state and a conversation's live line read, so an
- * agent at work says so the way a thread does. One waiting on the user wins
- * over one running, which wins over one queued.
+ * What the agent is doing this second, as words and a kind: the step its
+ * running turn is on. Its thread's row, live when this client follows it,
+ * gives the phase; the snapshot gives the call's title (`AgentStatus.activity`)
+ * that a bare tool name lacks, so a row reads "Run the UI tests" rather than
+ * "Bash". Null when neither says anything.
  */
-export function liveThreads(snapshot: AgentsSnapshot, threads: readonly ThreadSummary[]): Map<string, ThreadSummary> {
-  const byGroup = teamsByGroup(snapshot);
-  const rank = (t: ThreadSummary) => (t.status === 'waiting' ? 0 : t.status === 'running' ? 1 : 2);
-  const live = new Map<string, ThreadSummary>();
-  const put = (key: string | null, thread: ThreadSummary) => {
-    if (!key) return;
-    const held = live.get(key);
-    if (!held || rank(thread) < rank(held)) live.set(key, thread);
-  };
-  for (const thread of threads) {
-    if (!agentThreadLive(thread)) continue;
-    const session = snapshot.sessions.find(s => s.id === thread.agentSessionId);
-    if (!session) continue;
-    put(chatKey('profile', session.agentId), thread);
-    if (session.scope.kind === 'group') put(chatKey('group', session.scope.id), thread);
-    if (session.scope.kind === 'mission') {
-      const mission = snapshot.missions.find(m => m.id === session.scope.id);
-      put(mission ? missionHome(snapshot, mission, byGroup) : null, thread);
-    }
+export function liveActivity(status: AgentStatus | null, thread: ThreadSummary | null | undefined): { kind: ActivityKind; text: string } | null {
+  const labels = strings.agents.activity;
+  const progress = thread?.status === 'running' ? thread.progress ?? null : null;
+  if (progress && progress.phase !== 'tool') {
+    const kind = ({ thinking: 'thinking', compacting: 'compacting', starting: 'starting', retrying: 'retrying', waiting: 'provider', working: 'writing' } as const)[progress.phase];
+    return { kind, text: labels[kind] };
   }
-  return live;
+  const activity = status?.activity?.trim() || null;
+  const named = activity ? NAMED_STEP.exec(activity) : null;
+  const detail = progress?.detail?.trim() || null;
+  const bare = detail !== null && BARE_TOOL.test(detail);
+  const tool = bare ? detail : named?.[1] ?? null;
+  const kind = tool ? kindOfTool(tool) : kindOfTool((detail ?? activity ?? '').split(/\s/)[0] ?? '');
+  const text = (detail && !bare ? detail : null) ?? (named ? named[2]! : activity) ?? (tool ? fill(labels.tool[kind as keyof typeof labels.tool] ?? labels.tool.other, { tool }) : null);
+  if (text) return { kind, text };
+  return progress ? { kind: 'other', text: labels.tool.unnamed } : null;
 }
 
-/** A machine's conversations and the threads its agents work in, read from its view and its threads. */
-export function chatsOf(view: AgentsView): { chats: AgentChat[]; live: Map<string, ThreadSummary> } {
-  const snapshot = view.snapshot;
-  if (!snapshot) return { chats: [], live: new Map() };
-  const threads = view.store.threads;
-  return { chats: agentChats(snapshot, view.seen.messages, view.readAt, attentionOf(snapshot, threads)), live: liveThreads(snapshot, threads) };
+/** What the agent is doing this second, in a few words (`liveActivity`). */
+export function liveStep(status: AgentStatus | null, thread: ThreadSummary | null | undefined): string | null {
+  return liveActivity(status, thread)?.text ?? null;
+}
+
+/** What the agent's thread waits on: the question it asked, else the permission it needs. */
+export function waitingOn(store: Pick<Store, 'pendingQuestions' | 'pendingPermissions'>, threadId: string | null | undefined): string | null {
+  if (!threadId) return null;
+  const question = store.pendingQuestions.find(q => q.threadId === threadId);
+  if (question) return question.text.split('\n')[0]!.trim();
+  const permission = store.pendingPermissions.find(p => p.threadId === threadId);
+  return permission ? permission.description ?? permission.toolName : null;
+}
+
+/**
+ * How the agent stands this second, for its header and its desk. Its
+ * thread's own row wins over the snapshot: it moves with every event, the
+ * snapshot at most once a second.
+ */
+export function liveState(agent: Pick<AgentProfile, 'status'>, status: AgentStatus | null, thread: Pick<ThreadSummary, 'status'> | null | undefined, waiting: boolean): AgentStatus['state'] {
+  if (agent.status === 'archived') return 'archived';
+  if (thread?.status === 'running') return 'working';
+  if (thread?.status === 'queued') return 'queued';
+  if (thread?.status === 'waiting' || waiting) return 'waiting';
+  if (status?.state === 'error' || status?.problem) return 'error';
+  if (agent.status === 'paused') return 'paused';
+  return status?.state === 'working' || status?.state === 'queued' || status?.state === 'waiting' ? status.state : 'idle';
+}
+
+/** The newest `openAgent` per machine: an older answer arriving after it opens nothing. */
+const agentOpens = new WeakMap<Store, number>();
+
+/**
+ * Opens an agent's thread on the machine that owns it: the core hands the
+ * thread (making it again if it was lost), and the store opens it the usual
+ * way, which lands on the Agents page. A newer open, another thread or
+ * another page asked meanwhile wins over it.
+ */
+export async function openAgent(store: Store, agentId: string): Promise<string | null> {
+  const client = store.client;
+  if (!client) return null;
+  const request = (agentOpens.get(store) ?? 0) + 1;
+  agentOpens.set(store, request);
+  const navigation = store.navigationGeneration;
+  const known = threadOfAgent(AgentsView.of(store).snapshot, agentId);
+  let threadId = known;
+  try {
+    threadId = (await client.call('agents.open', { agentId })).threadId;
+  } catch (error) {
+    // An older core without `agents.open` still lists the thread in its sessions; any other refusal is the answer.
+    if (!known || !(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) { store.error = errorText(error); return null; }
+  }
+  if (!threadId || store.client !== client || agentOpens.get(store) !== request || store.navigationGeneration !== navigation) return null;
+  lastAgent.set(store, agentId);
+  await store.open(threadId);
+  return threadId;
+}
+
+const DESK_SEEN_KEY = 'boite:agent-desk-seen';
+/**
+ * Whether this is the first time this device shows the agent: its desk opens
+ * by itself then, once, on a wide window. Remembered per agent in
+ * `localStorage`, the newest 200.
+ */
+export function firstDeskVisit(agentId: string): boolean {
+  let seen: string[] = [];
+  try { const stored = JSON.parse(localStorage.getItem(DESK_SEEN_KEY) ?? '[]'); if (Array.isArray(stored)) seen = stored.filter((id): id is string => typeof id === 'string'); } catch { /* A damaged list starts over. */ }
+  if (seen.includes(agentId)) return false;
+  try { localStorage.setItem(DESK_SEEN_KEY, JSON.stringify([...seen, agentId].slice(-200))); } catch { /* Storage full or off: the desk opens again next time. */ }
+  return true;
+}
+
+/** The agent each machine last showed, reopened when the user comes back to the Agents page. */
+const lastAgent = new WeakMap<Store, string>();
+export function lastOpenedAgent(store: Store): string | null { return lastAgent.get(store) ?? null; }
+export function rememberAgent(store: Store, agentId: string): void { lastAgent.set(store, agentId); }
+
+/** Whether a thread is a persistent agent's own, drawn on the Agents page. */
+export function isAgentThread(thread: Pick<ThreadSummary, 'agentSessionId'> | null | undefined): boolean {
+  return !!thread?.agentSessionId && experimentOn('resident-agents');
 }
 
 /**
@@ -174,94 +210,28 @@ export function previewOf(text: string): string {
   return text.replace(/```[^\n]*\n?/g, ' ').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_~#>|]+/g, '').replace(/\s+/g, ' ').trim();
 }
 
-const READ_KEY = 'boite:agents-read:v1';
-function readStored(): Record<string, Record<string, number>> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(READ_KEY) ?? '{}');
-    return value && typeof value === 'object' ? value as Record<string, Record<string, number>> : {};
-  } catch { return {}; }
-}
-/** The growing records a view shows, and what they point to. */
-export type AgentHistory = Omit<AgentsHistoryPage, 'more'>;
-type HistoryParams = Omit<RpcParams<'agents.history'>, 'before' | 'threadId' | 'limit'>;
-
-const LISTS = { message: 'messages', work: 'work', memory: 'memories' } as const;
-const TERMINAL: ReadonlySet<string> = new Set(['done', 'cancelled']);
-const EMPTY: AgentHistory = { messages: [], work: [], memories: [], deliveries: [], runs: [], decisions: [] };
-const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
-/** Both lists, oldest first; of two copies of a record the later revision wins. */
-function merge<T extends AgentRecord>(held: T[], next: T[]): T[] {
-  if (!next.length) return held;
-  const byId = new Map(held.map(r => [r.id, r]));
-  for (const r of next) { const old = byId.get(r.id); if (!old || old.revision <= r.revision) byId.set(r.id, r); }
-  return [...byId.values()].sort(byCreation);
-}
-function absorb(held: AgentHistory, next: AgentHistory): AgentHistory {
-  return { messages: merge(held.messages, next.messages), work: merge(held.work, next.work), memories: merge(held.memories, next.memories), deliveries: merge(held.deliveries, next.deliveries), runs: merge(held.runs, next.runs), decisions: merge(held.decisions, next.decisions) };
-}
-/** The cursor for the page before these records: the oldest by last change. */
-export function oldestOf(records: AgentRecord[]): AgentHistoryCursor | null {
-  return records.reduce<AgentHistoryCursor | null>((min, r) => !min || r.updatedAt < min.updatedAt || r.updatedAt === min.updatedAt && r.id < min.id ? { updatedAt: r.updatedAt, id: r.id } : min, null);
-}
-
-function newestOf(records: AgentRecord[]): AgentHistoryCursor | null {
-  return records.reduce<AgentHistoryCursor | null>((max, r) => !max || r.updatedAt > max.updatedAt || r.updatedAt === max.updatedAt && r.id > max.id ? { updatedAt: r.updatedAt, id: r.id } : max, null);
-}
-const earlier = (a: AgentHistoryCursor, b: AgentHistoryCursor) => a.updatedAt < b.updatedAt || a.updatedAt === b.updatedAt && a.id < b.id;
-/**
- * The records a view pages back from. Unfinished work stays in every snapshot at
- * any age, so only finished work marks how far back the loaded history reaches.
- */
-export function pagedOf<T extends AgentRecord & { status?: string }>(records: T[]): T[] {
-  return records.filter(r => r.status === undefined || TERMINAL.has(r.status));
-}
-
-/** Work the user has to act on: a decision, an interruption, a failure, or a result to review. */
-export function attentionOf(snapshot: AgentsSnapshot, threads: Store['threads']) {
-  const blocked = (runId: string | null) => threads.some(t => t.agentSessionId && t.status === 'waiting' && snapshot.runs.some(r => r.id === runId && r.threadId === t.id));
-  return {
-    work: snapshot.work.filter(w => ['waiting', 'interrupted', 'error', 'paused'].includes(w.status) || w.status === 'running' && blocked(w.runId)),
-    review: snapshot.tasks.filter(t => t.status === 'review')
-  };
-}
-
 const VIEWS = new WeakMap<Store, AgentsView>();
 
-/** One view controller per owning Store. No renderer owns an execution. */
+/**
+ * One snapshot of a machine's agents per Store, kept between visits. It
+ * carries one desk at most: the open agent's (`showDesk`), none otherwise,
+ * since every desk of every agent is most of a full snapshot's bytes. On
+ * screen it also feeds the machine's directory, which then fetches nothing.
+ */
 export class AgentsView {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
-  /**
-   * Every message, work item and memory a snapshot or a page brought since this
-   * client connected. A snapshot holds only the newest records, so a record
-   * that leaves its window stays here and a view never shows a gap.
-   */
-  seen = $state.raw<AgentHistory>(EMPTY);
   error = $state('');
   loadError = $state('');
   pending = $state(false);
-  /**
-   * When each conversation was last read on this device, per core, kept in
-   * `localStorage`: what the chat list counts its unread messages from.
-   */
-  readAt = $state.raw<Record<string, number>>({});
-  private readCore: string | null = null;
-  /** The view key whose older page is loading. */
-  loadingOlder = $state<string | null>(null);
-  /** Per view key, whether a page said older records remain. Missing means the snapshot's flag for the kind. */
-  private older = $state.raw<Record<string, boolean>>({});
-  private tried = new Set<string>();
-  /** The history kind each view key pages, so a reset forgets the keys of its kind. */
-  private kinds = new Map<string, AgentHistoryKind>();
-  /** Bumped when a kind's history resets; a page requested before it is dropped. */
-  private generation: Record<AgentHistoryKind, number> = { message: 0, work: 0, memory: 0 };
   private disposed = false;
   private dirty = false;
   private loading: Promise<void> | null = null;
   private client: Store['client'] = null;
   private off: (() => void) | null = null;
-  /** The page is on screen: changes refresh the snapshot. Off screen the last one is kept for the next visit. */
-  private shown = false;
+  /** Users on screen: changes refresh the snapshot. Off screen the last one is kept for the next visit. */
+  private users = 0;
+  /** The agent whose desk the snapshot carries, null for none. */
+  private desk: string | null = null;
   constructor(readonly store: Store) {}
   /**
    * The view of this store, kept between visits: the page draws the last
@@ -275,27 +245,28 @@ export class AgentsView {
     return view;
   }
   start(): void {
-    this.shown = true;
+    this.users++;
     // A failure of an earlier visit is not news on this one.
-    this.error = ''; this.loadError = '';
-    // A visit starts from one bounded snapshot, drawn at once, not from every
-    // record an earlier visit paged in or saw created.
-    this.forgetHistory();
-    if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
+    if (this.users === 1) { this.error = ''; this.loadError = ''; agentDirectory(this.store).feed(true); }
     this.listen();
     void this.refresh();
   }
-  private forgetHistory(): void {
-    this.seen = EMPTY; this.older = {}; this.tried.clear(); this.kinds.clear();
-    for (const kind of Object.keys(this.generation) as AgentHistoryKind[]) this.generation[kind]++;
-  }
   /** Off screen: no snapshot is fetched for changes nobody sees. */
   pause(): void {
-    this.shown = false;
+    if (this.users === 0) return;
+    this.users -= 1;
+    if (this.users > 0) return;
     this.off?.(); this.off = null;
+    agentDirectory(this.store).feed(false);
+  }
+  /** The agent whose desk is on screen, or null: a change reads the snapshot again with that desk only. */
+  showDesk(agentId: string | null): void {
+    if (this.desk === agentId) return;
+    this.desk = agentId;
+    if (this.users > 0) void this.refresh();
   }
   private listen(): void {
-    if (this.off || !this.shown) return;
+    if (this.off || this.users === 0) return;
     this.off = this.client?.on('agents.changed', () => { void this.refresh(); }) ?? null;
   }
   refresh(): Promise<void> {
@@ -303,9 +274,6 @@ export class AgentsView {
     if (this.client !== this.store.client) {
       this.off?.(); this.off = null;
       this.client = this.store.client;
-      this.forgetHistory();
-      // What this view last drew stays on screen until the new snapshot lands.
-      if (this.snapshot) this.seen = absorb(EMPTY, this.snapshot);
       this.listen();
     }
     this.dirty = true;
@@ -317,79 +285,19 @@ export class AgentsView {
       while (this.dirty && !this.disposed) {
         this.dirty = false;
         const client = this.client;
-        const snapshot = await client?.call('agents.snapshot', {});
-        if (snapshot && !this.disposed && client === this.store.client) { this.accept(snapshot); this.loadError = ''; }
+        const snapshot = await client?.call('agents.snapshot', { desk: this.desk });
+        if (snapshot && !this.disposed && client === this.store.client) {
+          this.snapshot = snapshot; this.loadError = ''; noteUpkeep(this.store, snapshot);
+          agentDirectory(this.store).adopt(snapshot, client);
+        }
       }
     } catch (error) { if (!this.disposed) this.loadError = errorText(error); }
-  }
-  /**
-   * More records than a window holds can arrive between two snapshots. The new
-   * window then no longer touches what was kept, and paging back from the
-   * oldest kept record would skip the records in between. That kind restarts
-   * from the new window instead, and pages already in flight are dropped.
-   */
-  private accept(snapshot: AgentsSnapshot): void {
-    const previous = this.snapshot;
-    let seen = this.seen;
-    for (const kind of Object.keys(LISTS) as AgentHistoryKind[]) {
-      const list = LISTS[kind];
-      const newest = previous ? newestOf(previous[list]) : null;
-      const oldest = oldestOf(pagedOf<AgentRecord & { status?: string }>(snapshot[list]));
-      if (!snapshot.more[kind] || !newest || !oldest || !earlier(newest, oldest)) continue;
-      seen = { ...seen, [list]: [] };
-      this.generation[kind]++;
-      const older = { ...this.older };
-      for (const [key, of] of this.kinds) if (of === kind) { delete older[key]; this.tried.delete(key); }
-      this.older = older;
-    }
-    this.readMarks();
-    this.snapshot = snapshot;
-    this.seen = absorb(seen, snapshot);
-  }
-  /** The read marks of the core this view shows, loaded once per core. */
-  private readMarks(): Record<string, number> {
-    const core = this.store.core?.dataDir ?? '';
-    if (this.readCore !== core) { this.readCore = core; this.readAt = readStored()[core] ?? {}; }
-    return this.readAt;
-  }
-  /** Marks a conversation read up to `at`, the newest message it shows. */
-  markRead(key: string, at: number): void {
-    const marks = this.readMarks();
-    if ((marks[key] ?? 0) >= at) return;
-    this.readAt = { ...marks, [key]: at };
-    try { localStorage.setItem(READ_KEY, JSON.stringify({ ...readStored(), [this.readCore ?? '']: this.readAt })); } catch { /* the count stays for this session */ }
-  }
-  hasOlder(key: string, kind: AgentHistoryKind): boolean {
-    return this.older[key] ?? this.snapshot?.more[kind] ?? false;
-  }
-  /** Loads the page before `held`, the records the view already shows for `key`. */
-  async loadOlder(key: string, params: HistoryParams, held: AgentRecord[]): Promise<void> {
-    const client = this.client;
-    if (this.loadingOlder || this.disposed || !client) return;
-    this.loadingOlder = key;
-    this.kinds.set(key, params.kind);
-    const generation = this.generation[params.kind];
-    try {
-      const before = oldestOf(pagedOf<AgentRecord & { status?: string }>(held));
-      const page = await client.call('agents.history', { ...params, ...(before ? { before } : {}) });
-      if (this.disposed || client !== this.store.client || generation !== this.generation[params.kind]) return;
-      this.seen = absorb(this.seen, page);
-      this.older = { ...this.older, [key]: page.more };
-    } catch (error) { if (!this.disposed) this.error = errorText(error); }
-    finally { this.loadingOlder = null; }
-  }
-  /** Fills a view that shows fewer than `enough` records once, when older ones exist. A failure is not retried. */
-  fill(key: string, params: HistoryParams, held: AgentRecord[], enough = 20): void {
-    this.kinds.set(key, params.kind);
-    if (pagedOf<AgentRecord & { status?: string }>(held).length >= enough || this.tried.has(key) || this.loadingOlder || !this.hasOlder(key, params.kind)) return;
-    this.tried.add(key);
-    void this.loadOlder(key, params, held);
   }
   async call<M extends keyof AgentsRpcMethods>(method: M, params: RpcParams<M>): Promise<RpcResult<M> | null> {
     if (this.pending || this.disposed) return null;
     this.pending = true; this.error = '';
     try {
-      if (!this.store.client) throw new Error('Not connected');
+      if (!this.store.client) throw new Error(strings.connection.unavailable);
       const result = await this.store.client.call(method, $state.snapshot(params) as RpcParams<M>);
       await this.refresh();
       return result;
@@ -415,5 +323,5 @@ export class AgentsView {
     this.saves = run.catch(() => undefined);
     return run;
   }
-  close(): void { this.disposed = true; this.off?.(); }
+  close(): void { if (this.users > 0) { this.users = 1; this.pause(); } this.disposed = true; }
 }

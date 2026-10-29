@@ -47,6 +47,7 @@ import { fr as imports } from './strings/fr/imports';
 import { fr as agentShape } from './strings/fr/agentShape';
 import { fr as media } from './strings/fr/media';
 import { fr as btw } from './strings/fr/btw';
+import { fr as secrets } from './strings/fr/secrets';
 import { fr as slash } from './strings/fr/slash';
 import { fr as activity } from './strings/fr/activity';
 import { fr as mention } from './strings/fr/mention';
@@ -54,7 +55,6 @@ import { fr as notify } from './strings/fr/notify';
 import { fr as permissionMode } from './strings/fr/permissionMode';
 import { fr as permissionModeLong } from './strings/fr/permissionModeLong';
 import { fr as permissionModeCodex } from './strings/fr/permissionModeCodex';
-import { fr as permissionModeAgy } from './strings/fr/permissionModeAgy';
 import { fr as thread } from './strings/fr/thread';
 import { fr as chat } from './strings/fr/chat';
 import { fr as agentMessages } from './strings/fr/agentMessages';
@@ -88,6 +88,7 @@ import { fr as features } from './strings/fr/features';
 import { fr as quotas } from './strings/fr/quotas';
 import { fr as harnessUpdates } from './strings/fr/harnessUpdates';
 import { fr as providerSettings } from './strings/fr/providerSettings';
+import { fr as localAcp } from './strings/fr/localAcp';
 import { fr as plugins } from './strings/fr/plugins';
 import { fr as time } from './strings/fr/time';
 import { fr as errors } from './strings/fr/errors';
@@ -97,6 +98,8 @@ import { fr as parts } from './strings/fr/parts';
 import { fr as common } from './strings/fr/common';
 import { fr as onboarding } from './strings/fr/onboarding';
 import { fr as contacts } from './strings/fr/contacts';
+import { fr as shared } from './strings/fr/shared';
+import { fr as windows } from './strings/fr/windows';
 
 export const fr: Translation = {
   ...subscriptionProxy,
@@ -136,6 +139,7 @@ export const fr: Translation = {
   ...agentShape,
   ...media,
   ...btw,
+  ...secrets,
   ...slash,
   ...activity,
   ...mention,
@@ -143,7 +147,6 @@ export const fr: Translation = {
   ...permissionMode,
   ...permissionModeLong,
   ...permissionModeCodex,
-  ...permissionModeAgy,
   ...thread,
   ...chat,
   ...agentMessages,
@@ -177,6 +180,7 @@ export const fr: Translation = {
   ...quotas,
   ...harnessUpdates,
   ...providerSettings,
+  ...localAcp,
   ...plugins,
   ...time,
   ...errors,
@@ -186,4 +190,6 @@ export const fr: Translation = {
   ...common,
   ...onboarding,
   ...contacts,
+  ...shared,
+  ...windows,
 };

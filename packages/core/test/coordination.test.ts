@@ -62,7 +62,7 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
   } finally { agent.close(); }
 });
 
-test('default discovery excludes archived threads and persistent agent sessions', async () => {
+test('default discovery excludes archived threads and reaches a bot\'s thread like any other', async () => {
   const { h, owner, a, b } = await setup();
   h.core.threads.archive(b, true);
   const projectId = h.core.threads.require(b).projectId!;
@@ -71,9 +71,14 @@ test('default discovery excludes archived threads and persistent agent sessions'
   expect(h.core.journal.getProject(projectId)?.archived).toBe(true);
   const resident = (await echoThread(h, owner, 'Persistent session')).threadId;
   h.core.journal.putThread({ ...h.core.threads.require(resident), projectId: null, agentSessionId: 'resident-test' });
-  expect((await h.core.coordination.directory(a)).agents).toEqual([]);
-  expect(h.core.coordination.get(resident).config.mode).toBe('off');
-  expect(await thrown(send(h, a, dest(h, resident)))).toThrow('across projects');
+  // A bot's thread starts on, across projects, so it and the threads find and message each other.
+  expect(h.core.coordination.get(resident).config).toEqual({ mode: 'brief', resources: '', remote: true, paused: false });
+  expect((await h.core.coordination.directory(a)).agents.map(contact => contact.threadId)).toEqual([resident]);
+  expect((await h.core.coordination.directory(resident)).agents.map(contact => contact.threadId)).toEqual([a]);
+  expect((await send(h, a, dest(h, resident))).status).not.toBe('rejected');
+  expect((await send(h, resident, dest(h, a))).status).not.toBe('rejected');
+  // The owner may still turn it off.
+  h.core.coordination.configure(resident, { ...brief, mode: 'off' });
   expect(await thrown(send(h, resident, dest(h, a)))).toThrow('disabled');
 });
 
@@ -195,8 +200,8 @@ test('a resume lifts the pause the core applied, but not one the owner set', asy
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.coordination.pause(a);
   h.core.coordination.configure(b, { ...brief, paused: true });
-  h.core.threads.startTurn(a, 'carry on', [], undefined, 'resume');
-  h.core.threads.startTurn(b, 'carry on', [], undefined, 'resume');
+  h.core.threads.startTurn(a, 'carry on', { kind: 'resume', reason: 'carry-on' });
+  h.core.threads.startTurn(b, 'carry on', { kind: 'resume', reason: 'carry-on' });
   expect(h.core.coordination.get(a).config.paused).toBe(false);
   expect(h.core.coordination.get(b).config.paused).toBe(true);
 });
@@ -230,6 +235,27 @@ test('a running driver receives a steer once, and uncertain dispatch is never re
   expect(h.core.journal.getProject(projectId)?.archived).not.toBe(true);
   expect(h.core.coordination.get(b).messages[0]?.status).toBe('uncertain');
   expect(h.core.coordination.take(b, h.core.journal.listTurns(b)[0]!.id)).toBeNull();
+});
+
+test('a hook that takes a full batch leaves the inbox readable for the next selection, on any thread', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  let finish!: () => void;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() {
+    return { done: new Promise(resolve => { finish = () => resolve({ status: 'stopped', sessionId: null, usage: null }); }), stop() { finish(); } };
+  } }));
+  // Letters stay in the inbox until a hook or a wait takes them.
+  const deliver = spyOn(h.core.coordination as unknown as { deliver(threadId: string): Promise<void> }, 'deliver').mockResolvedValue(undefined);
+  restores.push(() => deliver.mockRestore());
+  h.core.threads.startTurn(b, 'Deploy');
+  await waitFor(() => h.core.threads.require(b).status === 'running');
+  for (let i = 0; i < 5; i++) await send(h, a, dest(h, b), `Step ${i}`);
+  await send(h, b, dest(h, a), 'Back to you');
+  const turn = h.core.journal.lastTurn(b)!.id;
+  // Exactly a batch: the selection stops at its limit with a row still unread.
+  expect(h.core.coordination.take(b, turn)).toContain('Step 3');
+  expect((await h.core.coordination.wait(a, undefined, 0)).letters.map(letter => letter.text)).toEqual(['Back to you']);
+  expect(h.core.coordination.take(b, turn)).toContain('Step 4');
+  finish();
 });
 
 test('two real cores exchange signed directory, message, reply and receipt without sharing owner tokens', async () => {
@@ -272,6 +298,15 @@ test('an unreachable coordination check names the destination without broadcasti
     });
     expect(log.mock.calls.some(([level]) => level === 'error')).toBe(false);
   } finally { log.mockRestore(); }
+});
+
+test('manual peer trust rejects malformed public keys as invalid parameters without storing trust', async () => {
+  const { h, owner } = await setup();
+  const peer = { ...h.core.coordination.identity(), coreId: 'a'.repeat(64), publicKey: 'not a public key' };
+  expect((await rejection(owner.call('collaboration.trust', { peer }))).reason).toMatchObject({
+    rpc: { code: RpcErrorCode.InvalidParams, message: 'peer.publicKey: expected Ed25519' },
+  });
+  expect(await owner.call('collaboration.peers', {})).toEqual([]);
 });
 
 test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
@@ -361,7 +396,8 @@ test('restart pauses pending work while existing idle threads stay reachable and
   try {
     expect(restartConfigIds).toEqual([a, b, ...recovering, archived, resident, ...pending.map(item => item.threadId)]);
     expect(reopened.coordination.config(archived).paused).toBe(true);
-    expect(reopened.coordination.config(resident)).toEqual({ mode: 'off', resources: '', remote: false, paused: false });
+    // A bot's waiting thread starts on and pauses on restart like any thread with pending work.
+    expect(reopened.coordination.config(resident)).toEqual({ mode: 'brief', resources: '', remote: true, paused: true });
     expect(reopened.journal.getSetting(`coordination:${deleted}`)).toBeUndefined();
     for (const item of pending) {
       expect(reopened.coordination.get(item.threadId).config.paused).toBe(true);
@@ -469,6 +505,37 @@ test('a pause left by Stop ends with the user\'s next message, the owner\'s paus
   h.core.threads.startTurn(b, 'Carry on again');
   expect(h.core.coordination.get(b).config.paused).toBe(true);
 }, 20000);
+
+test('a letter wakes a thread whose last turn failed, and ends the pause a restart left, not Stop\'s', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  let fail = true;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() {
+    const status = fail ? 'error' as const : 'done' as const;
+    return { done: Promise.resolve({ status, sessionId: null, usage: null, error: status === 'error' ? 'API Error: 503 no available subscription' : undefined }), stop() {} };
+  } }));
+  h.core.threads.startTurn(b, 'Long job');
+  await waitFor(() => h.core.threads.require(b).status === 'error');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  fail = false;
+  const crashed = await send(h, a, dest(h, b), 'Resume the recovery batch');
+  await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === crashed.id)?.status === 'delivered', 5000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle');
+
+  // A restart left the pause: the next agent's letter lifts it and wakes the thread.
+  h.core.coordination.pause(b, 'restart');
+  expect((await h.core.coordination.directory(a)).agents.find(agent => agent.threadId === b)?.paused).toBe(false);
+  const restarted = await send(h, a, dest(h, b), 'The core is back, carry on');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === restarted.id)?.status === 'delivered', 5000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle');
+
+  // Stop is the user's word, even over a restart's pause: letters wait for his next message.
+  h.core.coordination.pause(b, 'restart');
+  h.core.threads.stopTurn(b);
+  const held = await send(h, a, dest(h, b), 'Still there?');
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+  expect(h.core.coordination.get(b).messages.find(m => m.id === held.id)?.status).toBe('received');
+}, 15000);
 
 test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
   const { h, a, b } = await setup();
@@ -588,6 +655,54 @@ test('a waiting agent takes its answer directly, and the recipient is not woken 
   const prompts = h.core.journal.listMessages(a).filter(m => m.role === 'system').map(m => JSON.stringify(m.parts));
   expect(prompts.some(p => p.includes('Done, you can restart.'))).toBe(false);
   expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
+});
+
+test('a read that faults midway leaves every letter of its batch in the inbox', async () => {
+  const { h, a, b } = await setup();
+  const desk = h.core.coordination as unknown as { deliver(threadId: string): Promise<void>; update(letter: unknown, status: string, error?: string | null): void };
+  const deliver = spyOn(desk, 'deliver').mockResolvedValue(undefined);
+  try {
+    await send(h, b, dest(h, a), 'First letter');
+    await send(h, b, dest(h, a), 'Second letter');
+    const original = desk.update.bind(desk);
+    let marked = 0;
+    const update = spyOn(desk, 'update').mockImplementation((letter, status, error) => {
+      if (status === 'delivered' && ++marked === 2) throw new Error('journal write failed');
+      original(letter, status, error);
+    });
+    try { expect(() => h.core.coordination.wait(a, undefined, 0)).toThrow('journal write failed'); } finally { update.mockRestore(); }
+    // The first letter was never returned, so it is still there to read.
+    expect((await h.core.coordination.wait(a, undefined, 0)).letters.map(l => l.text)).toEqual(['First letter', 'Second letter']);
+  } finally { deliver.mockRestore(); }
+});
+
+test('a waiter whose mail is held leaves the arrival to the next waiter of the thread', async () => {
+  const { h, a, b } = await setup();
+  const held = h.core.coordination.wait(a, dest(h, b), 5000);
+  const open = h.core.coordination.wait(a, undefined, 5000);
+  // The first waiter's read comes back empty, as when its contact mail waits for an idle turn.
+  const desk = h.core.coordination as unknown as { claim(threadId: string, from: AgentAddress | null): unknown[] };
+  const claim = spyOn(desk, 'claim').mockImplementationOnce(() => []);
+  try {
+    const answer = await send(h, b, dest(h, a), 'Done, you can restart.');
+    expect((await open).letters.map(l => [l.id, l.status])).toEqual([[answer.id, 'delivered']]);
+  } finally { claim.mockRestore(); }
+  expect((await held).letters).toEqual([]);
+}, 10000);
+
+test('a disconnected inbox waiter leaves the next answer for a provider wake', async () => {
+  const { h, a, b } = await setup();
+  const client = await connect(h.url, h.core.agents.tokenFor(a));
+  const waiting = client.call('collaboration.wait', { threadId: a, from: dest(h, b), timeoutMs: 5000 }).catch(() => null);
+  await waitFor(() => h.core.router.activeRequests === 1);
+  client.close();
+  await waiting;
+  // Let the server observe the socket close before the response arrives.
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const answer = await send(h, b, dest(h, a), 'Deliver this after the waiter left.');
+  await waitFor(() => h.core.coordination.get(a).messages.find(letter => letter.id === answer.id)?.status === 'delivered');
+  expect(h.core.coordination.get(a).wakes).toBe(1);
+  expect(h.core.journal.listTurns(a)).toHaveLength(1);
 });
 
 test('two linked cores search and read each other\'s agents through signed requests', async () => {

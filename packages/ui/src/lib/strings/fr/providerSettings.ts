@@ -47,7 +47,7 @@ export const fr: Translation = {
     threadOff: '{provider} est désactivé. Activez-le dans Réglages > Fournisseurs pour continuer cette conversation.',
     defaultModel: 'Modèle par défaut',
     autoUpdate: 'Mises à jour automatiques',
-    checkUpdates: 'Rechercher les mises à jour',
+    checkUpdates: 'Rechercher des mises à jour',
     updating: 'Mise à jour en cours'
   }
 };

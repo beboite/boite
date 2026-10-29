@@ -22,7 +22,7 @@ test('the conversation scrolls over an open text preview at both widths', async 
     const done = client.next('turn.finished');
     await client.call('turns.start', { threadId: thread.id, prompt: 'A paragraph around the preview.\n\n'.repeat(25) + '[Read the notes](notes.txt)' });
     await done;
-    page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, experiments: ['edge-scrollbars'] });
+    page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
     await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
     await page.click(`[data-thread-id="${thread.id}"]`);
     await page.waitFor(`document.querySelector('a[data-file-path="notes.txt"]')`);

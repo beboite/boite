@@ -1,5 +1,6 @@
 import { logMessageOf } from '../../log-errors.ts';
 import { mkdirSync } from 'node:fs';
+import {join} from 'node:path';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveLaunch } from '../../providers/resolve.ts';
@@ -9,6 +10,7 @@ import {
   agentEnv,
   commandsOf,
   contentText,
+  contextArgs,
   imagesOf,
   modelArgs,
   numberOf,
@@ -23,6 +25,8 @@ import type { PiTurn } from './turn.ts';
 import { answerText } from '../../attachments.ts';
 import { noteReady } from '../driver-log.ts';
 import { SessionRetention } from '../session-retention.ts';
+import { endOnClose, releaseChild } from '../session-close.ts';
+import {protectedPi} from './protected.ts';
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -61,6 +65,7 @@ export class PiSession {
 
   /** The pi session id: what `ctx.sessionId` stores and the next process reopens. */
   private sessionId: string | null = null;
+  private replaces: string | null = null;
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
@@ -80,6 +85,7 @@ export class PiSession {
   /** The model and the thinking level the process is on, so a warm turn only sends a change. */
   private model: string | null = null;
   private effort: string | null = null;
+  private protection: ReturnType<typeof protectedPi> = null;
 
   constructor(
     readonly key: string,
@@ -246,6 +252,7 @@ export class PiSession {
     }
     this.opening = turn;
     try {
+      turn.ctx.protectedExecution?.check();
       await this.start(turn.ctx);
     } catch (error) {
       if (turn.isStopped) turn.settleRun();
@@ -288,9 +295,16 @@ export class PiSession {
         });
         turn.settleRun();
       } else {
+        let prompt = turn.ctx.prompt, attachments = turn.ctx.attachments;
+        if (this.replaces !== null && this.replaces === turn.ctx.sessionId) {
+          this.replaces = null;
+          const carried = turn.ctx.continuation?.();
+          if (!carried) throw new Error('execution.pi.history: a protected cold start requires the captured conversation continuation');
+          prompt = carried.prompt; attachments = carried.attachments;
+        }
         await peer.command('prompt', {
-          message: turn.ctx.prompt,
-          ...(turn.ctx.attachments.length === 0 ? {} : { images: imagesOf(turn.ctx.attachments) }),
+          message: prompt,
+          ...(attachments.length === 0 ? {} : { images: imagesOf(attachments) }),
         });
         if (turn.isStopped) this.abort(turn, peer);
         else await this.settleIfIdle(turn, peer);
@@ -423,10 +437,13 @@ export class PiSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    // The id is the thread's for its whole life: the first turn mints one, every
-    // later process is launched with the same one and reopens that transcript.
-    const sessionId = ctx.sessionId ?? crypto.randomUUID();
-    const sessionDir = sessionDirOf(ctx);
+    // Ordinary local sessions retain their durable native transcript.
+    this.protection = protectedPi(ctx, () => this.current, profile?.launch?.args ?? []);
+    // Protected cold starts never reopen ordinary or differently scoped native history.
+    // Only the core's captured continuation may carry the previous conversation.
+    const sessionId = this.protection ? crypto.randomUUID() : ctx.sessionId ?? crypto.randomUUID();
+    this.replaces = this.protection ? ctx.sessionId : null;
+    const sessionDir = this.protection ? join(this.protection.directory, 'sessions') : sessionDirOf(ctx);
     try {
       mkdirSync(sessionDir, { recursive: true });
     } catch (error) {
@@ -443,10 +460,15 @@ export class PiSession {
       '--session-dir',
       sessionDir,
       ...modelArgs(ctx),
+      // Protected launch already removes every native/discovered resource.
+      // --no-tools would also suppress its mandatory registered tools; the
+      // captured toolsAllowed field still enforces a host tool-free context.
+      ...(this.protection ? [] : contextArgs(ctx.thread.contextMode)),
     ];
+    if (this.protection) args.push(...this.protection.args);
     const child = ctx.spawnChild(launch.executable, args, {
-      cwd: ctx.thread.cwd,
-      env: agentEnv(ctx.accountEnv),
+      cwd: this.protection?.cwd ?? ctx.thread.cwd,
+      env: {...agentEnv(ctx.accountEnv), ...this.protection?.env},
     });
     this.child = child;
     this.killTree = ctx.killTree ?? null;
@@ -468,12 +490,13 @@ export class PiSession {
     this.watch(child, ctx, peer);
     // pi's RPC mode has no approval call: there is nothing to gate a tool on, so
     // the thread's permission mode is a preference the agent never sees.
-    ctx.log('info', 'pi session: the permission mode is not enforced, pi has no approval gate in rpc mode');
+    ctx.log('info', this.protection ? 'pi session: protected automatic tools use the captured OS capability; native approvals remain unavailable' : 'pi session: the permission mode is not enforced, pi has no approval gate in rpc mode');
     // Once per process, not per turn: `open` runs once for the life of the
     // session, memoized behind `start`. Not awaited, so a slow or unknown
     // command never holds up the turn that started this process.
     void this.fetchCommands(ctx, peer);
     await peer.command('get_state', {}, { timeoutMs: 20_000 });
+    this.protection?.assertReady();
   }
 
   /** `get_commands`: a refusal or a dead peer is one warning, never a failed turn. */
@@ -488,6 +511,8 @@ export class PiSession {
   }
 
   private watch(child: SpawnedChild, ctx: SessionContext, peer: PiPeer): void {
+    // Refuse warm reuse immediately, without interrupting stdout drainage.
+    child.stdin.once('close', () => { if (this.child === child) this.closing = true; });
     let closed = (): void => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
@@ -557,32 +582,20 @@ export class PiSession {
     if (this.ended) return;
     this.ended = true;
     this.closing = true;
+    this.protection?.close(this.exited ?? this.processClosed);
+    this.protection = null;
     this.clearIdle();
     const turn = this.current;
     this.current = null;
-    // A turn the user already stopped stays stopped, as Muse's does.
-    if (turn?.isStopped === true) turn.settleRun();
-    else turn?.fail('the pi session was closed');
+    endOnClose(turn, 'the pi session was closed');
     this.peer?.fail('the pi session was closed');
     this.peer = null;
     const child = this.child;
     this.child = null;
-    if (child !== null) {
-      try {
-        child.stdin.end();
-      } catch {
-        // the pipe is already gone
-      }
-      try {
-        // The bash tool's children (a dev server started with `&`) are not
-        // pi's to reap once bash exits; the thread's tree is. On Linux and
-        // macOS the tree is the direct children only, which is `kill()`.
-        if (this.killTree !== null) this.killTree();
-        else child.kill();
-      } catch {
-        // already exited
-      }
-    }
+    // The bash tool's children (a dev server started with `&`) are not pi's to
+    // reap once bash exits; the thread's tree is. On Linux and macOS the tree
+    // is the direct children only, which is `kill()`.
+    releaseChild(child, this.killTree);
     this.onEnded(this);
   }
 

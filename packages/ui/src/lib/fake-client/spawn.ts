@@ -2,7 +2,8 @@
 import { RpcErrorCode, type AgentProjectAdded, type AgentSpawn, type Message, type ThreadLink } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { missingFolder, pathKey } from './checks';
-import { coordinationConfig } from './coordination';
+import { coordinationConfig, fakeCore } from './coordination';
+import { fakeMember } from './requests';
 import { toSummary } from './shared';
 import { resolveProject } from './thread-move';
 import type { FakeContext, FakeMethods } from './context';
@@ -55,6 +56,16 @@ export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.crea
       if (caller.archived) throw refuse('an archived thread cannot start threads', { threadId: caller.id, field: 'threadId', expected: 'a thread that is not archived' });
       const prompt = params.prompt.trim();
       if (!prompt || params.prompt.length > 12_000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'agent.spawn.prompt: expected 1 to 12000 characters' });
+      if (params.machine !== undefined) {
+        // The core's refusals for another machine; a thread there is not simulated.
+        const machine = fakeMember(ctx, params.machine, 'agent.spawn');
+        const target = fakeCore(machine.coreId);
+        if (target === undefined) throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${machine.name} did not answer`, data: { field: 'machine' } });
+        if (target.settings.groupThreads !== true) {
+          throw refuse(`${machine.name} does not let the other machines of its group start threads there; propose the switch to the user with boite settings request groupThreads true --machine ${machine.name.replace(/\s+/g, '-')} --why "<what the thread is for>"`, { field: 'machine', setting: 'groupThreads' });
+        }
+        throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'the in-memory client does not start threads on another machine', data: { field: 'machine' } });
+      }
       const fingerprint = JSON.stringify([params.project, params.prompt, params.title ?? null, params.worktree === true, ...(params.context === undefined ? [] : [params.context])]);
       const ledger = ledgers.get(caller.id) ?? [];
       const retried = ledger.find(entry => entry.requestId === params.requestId);

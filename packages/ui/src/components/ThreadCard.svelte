@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { errorText } from '../lib/errors';
-  import { tick, untrack } from 'svelte';
-  import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest } from '@lucide/svelte';
-  import { threadActive, type Project, type ThreadSummary } from '@boite/contracts';
+  import { tick } from 'svelte';
+  import { Check, Ellipsis, Folder, FolderInput, GitBranch } from '@lucide/svelte';
+  import { type Project, type ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
@@ -11,9 +10,11 @@
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import ThreadHeadline from './ThreadHeadline.svelte';
-  import { knownPullRequest, lookupPullRequest, PULL_REQUEST_POLL_MS, rememberPullRequest, watchPullRequests, WORKING_PULL_REQUEST_POLL_MS } from '../lib/pull-request';
+  import { trackThreadPullRequest } from '../lib/thread-pull-request.svelte';
+  import PullRequestBadge from './PullRequestBadge.svelte';
   import { projectName } from '../lib/format';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
+  import { ThreadRename, commitOnUnmount } from '../lib/thread-rename.svelte';
   let {
     machine,
     project,
@@ -39,86 +40,33 @@
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
-  let renaming = $state(false);
-  let title = $state('');
-  let pullRequest = $state<ThreadSummary['pullRequest']>(null);
+  /** The rename in progress, bound to the machine and thread it began on. */
+  let renaming = $state<ThreadRename | null>(null);
+  commitOnUnmount(() => renaming);
+  const pr = trackThreadPullRequest(() => ({ owner, thread, hidden }));
+  const pullRequest = $derived(pr.value);
   /** Only a project or pull request needs a second line; the machine and the provider stay beside the title. */
   let meta = $derived(showProject || pullRequest !== null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
   let doneAllowed = $derived(canMarkDone(owner, thread));
 
-  let prLoading = $state(false);
-  let prRevision = 0;
-  async function refreshPr(manual = false) {
-    const client = owner.client;
-    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading || (!manual && (hidden || owner.connection !== 'ready' || document.hidden))) return;
-    const revision = prRevision;
-    const requestedOwner = owner;
-    const checkout = JSON.stringify([thread.cwd, thread.branch]);
-    const key = requestedOwner.threadKey(thread.id) + checkout;
-    prLoading = true;
-    try {
-      const result = await lookupPullRequest(client, thread.id, manual, checkout);
-      // The answer is this checkout's whichever card asked: one that mounts later starts from it.
-      rememberPullRequest(key, result.supported ? result.pullRequest : null);
-      if (revision !== prRevision) return;
-      pullRequest = result.supported ? result.pullRequest : null;
-      if (!result.supported && manual) requestedOwner.error = strings.errors.pullRequestUnsupported;
-    } catch (error) {
-      // A lookup the user did not ask for fails quietly: no gh, no network, no banner.
-      if (revision === prRevision && manual) requestedOwner.error = errorText(error);
-    } finally {
-      if (revision === prRevision) prLoading = false;
-    }
-  }
-  /**
-   * A timer round skips a merged pull request: it stays merged. A closed one can reopen. A mount, a reconnect
-   * and a status change still ask, since the thread can open a new PR on the same branch.
-   */
-  function pollPr() {
-    if (pullRequest?.state !== 'MERGED') void refreshPr();
-  }
-  $effect(() => {
-    // A move or a different owning connection invalidates the old checkout's answer.
-    const identity = { client: owner.client, id: thread.id, cwd: thread.cwd, branch: thread.branch };
-    const ready = owner.connection === 'ready' && !hidden;
-    const key = owner.threadKey(identity.id) + JSON.stringify([identity.cwd, identity.branch]);
-    untrack(() => {
-      // A reconnect or a remount keeps the line this checkout last had; only a
-      // moved thread or another branch starts from nothing.
-      pullRequest = knownPullRequest(key);
-      prLoading = false;
-      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void refreshPr();
-    });
-    return () => { prRevision++; };
-  });
-  $effect(() => {
-    // Later rounds come from the connection's shared timer, paused while the page is hidden:
-    // every 15 s while the thread works and may open its PR, every minute at rest.
-    const client = owner.client;
-    if (!client || owner.connection !== 'ready' || hidden || !thread.branch || thread.branch === 'HEAD') return;
-    return watchPullRequests(client, pollPr, threadActive(thread.status) ? WORKING_PULL_REQUEST_POLL_MS : PULL_REQUEST_POLL_MS);
-  });
-  $effect(() => {
-    // A finished turn can have opened or merged a PR since its row first mounted, a new one after a merged one included.
-    const status = thread.status;
-    untrack(() => { void status; void refreshPr(); });
-  });
   function rename() {
-    title = thread.title;
-    renaming = true;
+    renaming = new ThreadRename(owner, thread.id, thread.title);
   }
   async function save() {
-    if (!renaming) return;
-    renaming = false;
-    await owner.rename(thread.id, title);
+    const current = renaming;
+    renaming = null;
+    await current?.commit();
   }
   let row = $state<HTMLButtonElement | undefined>(undefined);
   /** Enter and Escape hand the keyboard back to the row, never to the page, where Escape stops the turn. */
   async function leaveRename(commit: boolean) {
     if (commit) void save();
-    else renaming = false;
+    else {
+      renaming?.cancel();
+      renaming = null;
+    }
     await tick();
     row?.focus({ preventScroll: true });
   }
@@ -130,8 +78,8 @@
   function menu(event: MouseEvent) {
     contextMenu.open(
       event,
-      threadMenuItems(owner, thread, { open, showDone, prLoading }),
-      (action) => pickThreadAction(owner, thread, action, { rename, refreshPr: () => void refreshPr(true) })
+      threadMenuItems(owner, thread, { open, showDone, prLoading: pr.loading }),
+      (action) => pickThreadAction(owner, thread, action, { rename, refreshPr: () => void pr.refresh(true) })
     );
   }
 </script>
@@ -140,7 +88,8 @@
   <input
     class="rename"
     data-testid="thread-rename"
-    bind:value={title}
+    value={renaming.text}
+    oninput={(event) => { if (renaming) renaming.text = event.currentTarget.value; }}
     use:focusOnMount
     onblur={() => void save()}
     onkeydown={(event) => {
@@ -186,8 +135,7 @@
     <div class="metadata">
       {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span class="ui-label">{projectName(project)}</span></span>{/if}
       {#if pullRequest}
-        <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
-          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} /><span class="ui-label">#{pullRequest.number}</span></a>
+        <PullRequestBadge {pullRequest} />
       {/if}
       <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
       {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span class="ui-label">{thread.branch}</span></span>{/if}
@@ -304,17 +252,6 @@
   }
   .metadata :global(svg) {
     flex: none;
-  }
-  .pr-link {
-    display: flex;
-    flex: none;
-    gap: 4px;
-    align-items: center;
-    pointer-events: auto;
-    font-size: var(--text-xs);
-    color: var(--color-success);
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
   .project-name {
     flex: 1;

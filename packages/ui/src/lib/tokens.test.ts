@@ -14,4 +14,15 @@ describe('contextPercent', () => {
     expect(contextLevel(75)).toBe('high');
     expect(contextLevel(90)).toBe('full');
   });
+
+  test('uses the lower of the model window and configured compaction threshold', () => {
+    const rule = { tokens: 250_000, moments: ['turn-end'] as const };
+    const autoCompact = { ...rule, moments: [...rule.moments] };
+    expect(contextPercent({ tokens: 212_569, window: 1_000_000, at: 0 }, autoCompact)).toBe(85);
+    expect(contextPercent({ tokens: 100_000, window: 128_000, at: 0 }, autoCompact)).toBe(78);
+    expect(contextPercent({ tokens: 275_000, window: 1_000_000, at: 0 }, autoCompact)).toBe(100);
+    expect(contextPercent({ tokens: 212_569, window: null, at: 0 }, autoCompact)).toBe(85);
+    expect(contextPercent({ tokens: 212_569, window: 1_000_000, at: 0 }, { ...autoCompact, tokens: null })).toBe(21);
+    expect(contextPercent({ tokens: 212_569, window: 1_000_000, at: 0 }, null)).toBe(21);
+  });
 });

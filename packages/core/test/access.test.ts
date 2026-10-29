@@ -94,9 +94,12 @@ describe('the access gate', () => {
     } finally { phone.close(); agent.close(); }
   });
 
-  test('paired messages cannot impersonate a persistent agent session', () => {
-    expect(() => assertAllowed('agents.message.send', deviceConnection(), { threadId: 'thr_other' })).toThrow('threadId');
-    expect(() => assertAllowed('agents.message.send', deviceConnection(), { scope: { kind: 'agent', id: 'identity' } })).not.toThrow();
+  test('a paired device reads and opens agents, and talks to them through their threads, never as one', () => {
+    expect(() => assertAllowed('agents.snapshot', deviceConnection(), {})).not.toThrow();
+    expect(() => assertAllowed('agents.open', deviceConnection(), { agentId: 'agt_profile_x' })).not.toThrow();
+    for (const method of ['agents.memory.note', 'agents.routine.save', 'agents.watch', 'agents.profile.save'] as const) {
+      expect(() => assertAllowed(method, deviceConnection(), {})).toThrow('owner');
+    }
   });
   test('agent sockets cannot receive owner broadcasts or another thread activity', async () => {
     const owner = await harness.connect();

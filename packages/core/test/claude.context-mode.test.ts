@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { DEFAULT_DELEGATION_CONFIG, LIGHT_TOOLS } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, LIGHT_TOOLS, TOOL_FREE_CONTEXT } from '@boite/contracts';
 import { waitFor } from './harness.ts';
 import { answerEach, calls, claudeThread, harness, runTurn, scripted, useClaudeHarness } from './fixtures/claude-query.ts';
 import { thrown } from './settle.ts';
@@ -93,4 +93,20 @@ test('a conversation started in a context mode keeps it after a core restart', a
   expect(harness.core.journal.getThread(thread.id)?.contextMode).toEqual(thread.contextMode);
   expect(await thrown(client.call('threads.create', { projectId: parent.projectId!, providerId: 'claude', accountId: parent.accountId, context: { preset: 'tiny' as never } })))
     .toThrow('context.preset: expected full, light, neutral');
+});
+
+test('a tool-free child, as a memory pass runs, starts with no built-in tool, MCP server or hook and approves nothing', async () => {
+  accountFlags(false);
+  const client = await harness.connect();
+  const parent = harness.core.threads.require(await claudeThread(client));
+  scripted(() => {}, answerEach('sess-free'));
+  const child = harness.core.delegation.createChild(parent, { id: 'memory', name: 'Memory', providerId: 'claude', accountId: parent.accountId, model: parent.model, effort: null },
+    'Memory', () => {}, undefined, false, { contextMode: TOOL_FREE_CONTEXT, permissionMode: 'dontAsk' });
+  expect(harness.core.threads.require(child)).toMatchObject({ permissionMode: 'dontAsk', contextMode: { tools: [], mcp: false, hooks: false, instructions: false, guides: false } });
+  const before = calls.length;
+  harness.core.threads.startTurn(child, 'Rewrite the memory');
+  const own = () => calls.slice(before).find(call => call.prompts[0]?.includes('Rewrite the memory'));
+  await waitFor(() => own() !== undefined, 10000);
+  expect(own()!.options).toMatchObject({ tools: [], strictMcpConfig: true, mcpServers: {}, permissionMode: 'dontAsk' });
+  expect(own()!.options.settings).toMatchObject({ disableAllHooks: true });
 });

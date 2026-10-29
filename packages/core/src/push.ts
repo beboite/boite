@@ -1,6 +1,6 @@
 import { createHash, ECDH, randomUUID } from 'node:crypto';
-import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, requestExcerpt, requestKind } from '@boite/contracts';
-import type { CoordinationPeer, NotificationKind, NotificationLabel, PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
+import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, requestExcerpt, requestKind } from '@boite/contracts';
+import type { CoordinationPeer, NotificationKind, NotificationLabel, PushPayload, QuotaAlert, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
@@ -10,12 +10,12 @@ import { backgroundWaitOf } from './threads/records.ts';
 
 /** A device's destination; without `kinds`, written before devices chose, it receives every kind. */
 type Subscription = RpcParams<'push.subscribe'>;
-/** What a push says before it has a title and a badge. */
-type News = Pick<PushPayload, 'body' | 'label'> & { kind: NotificationKind };
+/** What a push says before it has a badge; the title is the thread's unless the news brings one. */
+type News = Pick<PushPayload, 'body' | 'label' | 'values'> & { kind: NotificationKind; title?: string };
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
-const LABELS: readonly NotificationLabel[] = ['done', 'failed', 'needsYou', 'connected'];
+const LABELS: readonly NotificationLabel[] = ['done', 'failed', 'needsYou', 'connected', 'limitFiveHour', 'limitWeekly'];
 
 /**
  * What a member sends the home machine of a device: the push, without the id of
@@ -47,6 +47,9 @@ function readForwarded(value: unknown): Forwarded {
   const kind = push['kind'];
   if (kind !== undefined && !NOTIFICATION_KINDS.includes(kind as NotificationKind)) throw bad('push.kind');
   if (typeof id !== 'string' || id.length === 0 || id.length > 64) throw bad('id');
+  const values = push['values'];
+  if (values !== undefined && (typeof values !== 'object' || values === null || Object.keys(values).some((name) => name !== 'percent')
+    || typeof (values as { percent?: unknown }).percent !== 'string' || (values as { percent: string }).percent.length > 16)) throw bad('push.values');
   return {
     id,
     device,
@@ -55,6 +58,7 @@ function readForwarded(value: unknown): Forwarded {
       ...(label === undefined ? {} : { label: label as NotificationLabel }),
       ...(kind === undefined ? {} : { kind: kind as NotificationKind }),
       ...(badge === undefined ? {} : { badge: badge as number }),
+      ...(values === undefined ? {} : { values: { percent: (values as { percent: string }).percent } }),
     },
   };
 }
@@ -117,6 +121,15 @@ export class PushStore {
         const text = requestExcerpt(request);
         const kind = requestKind(request);
         this.notify(request.threadId, text ? { body: text, kind } : { body: 'Needs your answer', label: 'needsYou', kind }, `request-${request.id}`, true);
+      } else if (name === 'message.started') {
+        // A capture waiting on the owner's consent card, which no question or permission event announces.
+        const message = payload as RpcEvents['message.started'];
+        const consent = message.parts.find(part => part.type === 'window_consent');
+        if (consent?.type === 'window_consent') this.notify(message.threadId, { body: `Wants to capture ${consent.process}`, kind: 'approvals' }, `request-${consent.requestId}`, true);
+      } else if (name === 'secret.requested') {
+        // Only that the user is needed: the push service is a third party, and a value never comes this way.
+        const request = payload as RpcEvents['secret.requested'];
+        this.notify(request.threadId, { body: 'Needs your answer', label: 'needsYou', kind: 'questions' }, `request-${request.id}`, true);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error') || !this.reachable()) return;
@@ -128,6 +141,9 @@ export class PushStore {
         const kind = turn.status === 'done' ? 'finished' : 'errors';
         this.notify(turn.threadId, reply ? { body: reply, kind }
           : turn.status === 'done' ? { body: 'Done', label: 'done', kind } : { body: 'The agent encountered an error', label: 'failed', kind }, `turn-${turn.id}`);
+      } else if (name === 'quotas.alerted') {
+        if (this.closed || this.core.journal.isClosed() || !this.reachable()) return;
+        this.deliverAll(null, limitNews(payload as QuotaAlert), `limit-${(payload as QuotaAlert).accountId}-${(payload as QuotaAlert).window.id}`);
       }
     });
   }
@@ -147,6 +163,8 @@ export class PushStore {
       .query('SELECT id, status FROM threads WHERE parent_thread_id = ?')
       .all(threadId) as { id: string; status: string }[];
     return rows.filter(row => {
+      // A persistent agent's memory pass is Boite's own housekeeping: the answer it follows is already the news.
+      if (this.core.workforce?.memory.owns(row.id)) return false;
       if (row.status === 'queued' || row.status === 'running' || row.status === 'waiting') return true;
       const live = this.core.threads.agentState.background.get(row.id) ?? [];
       if (live.length > 0) return true;
@@ -299,8 +317,9 @@ export class PushStore {
     }
   }
 
-  private deliverAll(threadId: string, text: News, tag: string) {
-    const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
+  private deliverAll(threadId: string | null, text: News, tag: string) {
+    const { title: own, ...news } = text;
+    const title = own ?? (threadId === null ? null : this.core.journal.getThread(threadId)?.title) ?? 'Boite';
     const badge = this.badge(threadId);
     const subscriptions = this.subscriptions();
     for (const [sessionId, subscription] of Object.entries(subscriptions)) {
@@ -308,7 +327,7 @@ export class PushStore {
       if (!wants(subscription, text.kind)) continue;
       // A device of the group may run a page no machine serves: its push says which machine the thread is on.
       const self = this.core.group.clients.deviceOf(sessionId) === undefined ? undefined : this.core.coordination.card().coreId;
-      this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
+      this.track(this.deliver(sessionId, { title, ...news, threadId, tag, badge, ...(self === undefined ? {} : { core: self }) }).catch(() => {
         // `deliver` already wrote the warning with its cause: this one is detail.
         this.core.logs.debug('Web Push delivery failed; the conversation remains available in Boite', { source: 'push', event: 'push.delivery-failed' });
       }));
@@ -324,7 +343,8 @@ export class PushStore {
       // Cut to what the home machine reads (`readForwarded`), so a long title or reply still arrives.
       // The home holds the device's subscription and its kinds: it filters, from the kind sent along.
       const payload: Forwarded = { id: randomUUID(), device: target.device, push: { title: title.slice(0, 300), body: text.body.slice(0, 2000),
-        ...(text.label === undefined ? {} : { label: text.label }), kind: text.kind, threadId: threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
+        ...(text.label === undefined ? {} : { label: text.label }), ...(text.values === undefined ? {} : { values: text.values }),
+        kind: text.kind, threadId: threadId === null ? null : threadId.slice(0, 128), tag: tag.slice(0, 200), badge } };
       this.track(this.forward(target.home, payload).catch(() => {
         this.core.log('warn', `a notification for a device of ${target.home.name} did not reach that machine; the conversation remains available in Boite`);
       }));
@@ -375,7 +395,7 @@ export class PushStore {
   send = async (subscription: PushSubscription, payload: string, keys: Keys, topic: string): Promise<void> => {
     const { default: webpush } = await import('web-push');
     await webpush.sendNotification(subscription, payload, {
-      vapidDetails: { ...keys, subject: this.core.settings.get().publicUrl ?? 'https://github.com/beboite/boite' },
+      vapidDetails: { ...keys, subject: this.core.settings.get().publicUrl ?? 'https://github.com/mtsu-dev/boite' },
       TTL: 300, timeout: 10_000, urgency: 'normal', topic
     });
   };
@@ -424,6 +444,17 @@ export class PushStore {
     this.held.clear();
     await Promise.allSettled([...this.pending]);
   }
+}
+
+/**
+ * A limit alert as a push: the account in the title, the period and the share
+ * used in the body, which the page's words replace by `label` in its language.
+ */
+export function limitNews(alert: QuotaAlert): News {
+  const percent = String(quotaAlertLeft(alert));
+  const weekly = alert.period === 'weekly';
+  return { title: quotaAlertTitle(alert), body: `${weekly ? 'Weekly' : '5-hour'} limit: ${percent}% left`,
+    label: weekly ? 'limitWeekly' : 'limitFiveHour', values: { percent }, kind: 'limits' };
 }
 
 export function registerPushMethods(core: Core) {

@@ -4,7 +4,7 @@
  * Run as `bun <this file> <state file> <command>`. The state file holds the
  * installed version. `--version` prints it, `check` prints the JSON an agent
  * that checks by itself prints, `update` installs 1.2.0, `update-current`
- * finds nothing newer and changes nothing, as `agy update` does, `update-broken`
+ * finds nothing newer and changes nothing, `update-broken`
  * fails the way a real updater does, and `update-launched` installs 1.2.0 only
  * when its launcher set `FAKE_MANAGED_BY_NPM`, as `codex update` does,
  * `update-npm` installs 1.2.0 and writes the `npm_config_prefix` it was given
@@ -62,6 +62,13 @@ else if (command === 'check') {
   console.log('Using global installation update method...');
   console.error('error: the release server refused the download');
   process.exit(3);
+} else if (command === 'update-unknown-method') {
+  console.log('\x1b[90mT\x1b[39m  Upgrade');
+  console.log('|');
+  console.log('\x1b[31mx\x1b[39m  Could not detect the installation method. Pass --method to choose how to upgrade OpenCode.');
+  console.log('|');
+  console.log('\x1b[90m-\x1b[39m  Failed');
+  process.exit(1);
 } else if (command === 'update-permission') {
   console.log('Updating agent via npm install -g...');
   console.error('npm error code EACCES');

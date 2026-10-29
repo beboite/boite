@@ -105,7 +105,7 @@ test('the desktop page charts each day by provider, reads a column on hover and 
   await openUsage();
   expect(await attribute('[data-testid=usage-chart]', 'aria-valuemax')).toBe('29');
   expect(await count('[data-testid=usage-providers] li')).toBeGreaterThanOrEqual(8);
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=usage-providers] li')].map(li => li.dataset.provider)`)).toEqual(expect.arrayContaining(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse']));
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=usage-providers] li')].map(li => li.dataset.provider)`)).toEqual(expect.arrayContaining(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'muse']));
   expect(await page.text('[data-testid=usage-coverage]')).toContain('Cost');
   expect(await count('[data-testid=usage-threads] li')).toBe(10);
   const cards = await page.evaluate<{ inset: number; gap: number; width: number }>(`(() => {
@@ -182,16 +182,22 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await viewport(390, 844, true);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=usage-chart] svg path')`);
   expect(await fits()).toBe(true);
-  // The bar above names the page and carries its info mark; the page's own title steps aside.
+  // The bar above names the page and carries its info mark; the page's own title steps aside,
+  // and its refresh joins the bar's right end rather than taking a row of its own.
   expect(await page.evaluate(`document.querySelector('[data-testid=mobile-settings-info]').getBoundingClientRect().height > 0`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header').getBoundingClientRect().height`)).toBe(0);
+  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header h1').getBoundingClientRect().height`)).toBe(0);
+  expect(await page.evaluate(`(() => {
+    const info = document.querySelector('[data-testid=mobile-settings-info]').getBoundingClientRect();
+    const refresh = document.querySelector('[data-testid=usage-refresh]').getBoundingClientRect();
+    return refresh.top < info.bottom && refresh.bottom > info.top && refresh.right <= innerWidth;
+  })()`)).toBe(true);
   await capture('usage-phone-dark.png');
 
   await page.click('[data-testid=usage-provider-filter]');
   await page.click('[data-testid=usage-provider-filter-menu] [data-value=muse]');
   await page.waitFor(`document.querySelectorAll('[data-testid=usage-providers] li').length === 1 && document.querySelector('[data-testid=usage-providers] li')?.dataset.provider === 'muse'`);
   expect(await page.text('[data-testid=usage-breakdown]')).toContain('Muse Code default');
-  expect(await page.text('[data-testid=usage-breakdown]')).not.toContain('Antigravity CLI default');
+  expect(await page.text('[data-testid=usage-breakdown]')).not.toContain('grok-code-fast-2');
   await page.evaluate(`document.querySelector('[data-testid=usage-page]').scrollIntoView({ block: 'start' })`);
   await page.click('[data-testid=usage-metric-cost]');
   await page.waitFor(`document.querySelector('[data-testid=usage-total]')?.textContent === 'No price'`);

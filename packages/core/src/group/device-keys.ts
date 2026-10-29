@@ -84,12 +84,12 @@ export function deviceAdmissionInput(groupId: string, id: string, role: PairingR
   return Buffer.from(`boite-group-device\n${groupId}\n${id}\n${role}`);
 }
 
-function text(value: unknown, field: string, max: number): string {
+export function text(value: unknown, field: string, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`, { field });
   return value;
 }
 
-function positive(value: unknown, field: string): number {
+export function positive(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidParams(`${field}: expected a positive integer`, { field });
   return value as number;
 }
@@ -151,7 +151,8 @@ export function checkServedOrigins(value: unknown, checkAddress: (raw: unknown, 
   return out;
 }
 
-function wins(a: DeviceKeyEntry, b: DeviceKeyEntry): boolean {
+/** Inside one epoch: the removal, then the later revision, then a fixed order so both sides agree. */
+export function wins(a: { rev: number; removed?: true }, b: { rev: number; removed?: true }): boolean {
   if ((a.removed === true) !== (b.removed === true)) return a.removed === true;
   if (a.rev !== b.rev) return a.rev > b.rev;
   return JSON.stringify(a) > JSON.stringify(b);

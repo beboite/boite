@@ -16,9 +16,6 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 
-/** The device boundary, the core's own sets: `packages/contracts/src/access.ts`. */
-export { DEVICE_METHODS } from '@boite/contracts';
-
 export const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 
 export const DATA_DIR = 'C:\\Users\\you\\AppData\\Local\\boite2';
@@ -96,7 +93,7 @@ export function toSummary(thread: Thread): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const started = thread.turns.filter(turn => turn.status === 'running' && turn.startedAt !== null).map(turn => turn.startedAt as number);
   const tasks = thread.background ?? [];
-  const lastTurn = thread.turns.at(-1) ?? null;
+  const lastTurn = thread.turns.findLast(turn => turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') ?? null;
   return {
     ...rest,
     lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null,
@@ -127,6 +124,7 @@ export function addUsage(a: Usage, b: Usage): Usage {
     outputTokens: a.outputTokens + b.outputTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    ...((a.cacheWriteHourTokens ?? 0) + (b.cacheWriteHourTokens ?? 0) > 0 ? { cacheWriteHourTokens: (a.cacheWriteHourTokens ?? 0) + (b.cacheWriteHourTokens ?? 0) } : {}),
     costUsdEquivalent: (a.costUsdEquivalent ?? 0) + (b.costUsdEquivalent ?? 0)
   };
 }

@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { targetOf } from './updater-manifest.ts';
 
 export interface Release {
   tag_name: string;
@@ -9,10 +10,11 @@ export interface Release {
 /** `authors` are the commit's author then its `Co-authored-by` trailers, as `Name <email>`. */
 export interface Commit { sha: string; subject: string; authors?: string[] }
 
+const isNightly = (tag: string) => tag.includes('-nightly.') || tag.startsWith('nightly-');
+
 export function previousRelease(
   releases: Release[], current: string, ancestor: (tag: string) => boolean,
 ): string | undefined {
-  const isNightly = (tag: string) => tag.includes('-nightly.') || tag.startsWith('nightly-');
   const nightly = isNightly(current);
   const prerelease = current.includes('-');
   return releases
@@ -50,8 +52,48 @@ function commitType(subject: string): string | undefined {
   return /^(\w+)(?:\([^)]*\))?!?: /.exec(subject)?.[1];
 }
 
+/** Only manual downloads belong here; signatures and updater payloads stay in Assets. */
+function downloadNotes(repository: string, tag: string, files: string[]): string {
+  const base = `https://github.com/${repository}`;
+  const encodedTag = encodeURIComponent(tag);
+  const link = (label: string, matches: (file: string) => boolean) => {
+    const file = files.find(matches);
+    return file ? `[${label}](${base}/releases/download/${encodedTag}/${encodeURIComponent(file)})` : '';
+  };
+  const target = (label: string, name: string) => link(label, (file) => targetOf(file) === name);
+  const match = (label: string, pattern: RegExp) => link(label, (file) => pattern.test(file));
+  const table = (rows: Array<[string, string[]]>) => {
+    const present = rows.filter(([, links]) => links.some(Boolean));
+    return present.length ? [
+      '| Platform | Download |', '| --- | --- |',
+      ...present.map(([platform, links]) => `| ${platform} | ${links.filter(Boolean).join(' · ')} |`),
+    ].join('\n') : '';
+  };
+  const desktop = table([
+    ['Windows (x64)', [target('Installer (.exe)', 'windows-x86_64')]],
+    ['macOS (Apple Silicon)', [match('Disk image (.dmg)', /_aarch64\.dmg$/)]],
+    ['macOS (Intel)', [match('Disk image (.dmg)', /_x64\.dmg$/)]],
+    ['Linux (x64)', [target('Debian / Ubuntu (.deb)', 'linux-x86_64-deb'), target('AppImage', 'linux-x86_64-appimage')]],
+    ['Linux (ARM64)', [target('Debian / Ubuntu (.deb)', 'linux-aarch64-deb'), target('AppImage', 'linux-aarch64-appimage')]],
+    ['Android (client)', [match('Boite (.apk)', /^boite-android-\d+\.\d+\.\d+\.apk$/)]],
+    ['Android (server, ARM64)', [match('Boite Server (.apk)', /^boite-server-android-\d+\.\d+\.\d+\.apk$/)]],
+  ]);
+  const server = table([
+    ['Linux (x64)', [target('Server (.zip)', 'linux-x86_64-server')]],
+    ['Linux (ARM64)', [target('Server (.zip)', 'linux-aarch64-server')]],
+    ['Android / Termux (ARM64)', [target('Server bundle (.zip)', 'android-aarch64-server')]],
+  ]);
+  if (!desktop && !server) return '';
+  const docs = `${base}/blob/${encodedTag}/docs`;
+  return [
+    '## Downloads', desktop,
+    `[Desktop installation](${docs}/portability.md) · [Android app](${docs}/android.md) · [Android server setup (Termux required)](${docs}/android-server.md)`,
+    ...(server ? ['### Headless server', server, `[Self-hosting guide](${docs}/server.md)`] : []),
+  ].filter(Boolean).join('\n\n');
+}
+
 export function releaseNotes(
-  commits: Commit[], repository: string, tag: string, previous?: string, announcement = '',
+  commits: Commit[], repository: string, tag: string, previous?: string, announcement = '', files: string[] = [],
 ): string {
   const url = `https://github.com/${repository}`;
   const list = (group: Commit[]) => group.map(({ sha, subject, authors }) =>
@@ -69,7 +111,12 @@ export function releaseNotes(
   const compare = previous
     ? `[Full diff](${url}/compare/${encodeURIComponent(previous)}...${encodeURIComponent(tag)})`
     : '';
-  return [announcement.trim(), changes || 'No code changes.', compare].filter(Boolean).join('\n\n') + '\n';
+  const warning = isNightly(tag)
+    ? '> [!WARNING]\n> Nightly builds are unstable and may contain bugs or unfinished changes. Back up your Boite data before installing or switching channels.'
+    : '';
+  const downloads = downloadNotes(repository, tag, files);
+  return [warning, downloads, announcement.trim(), downloads ? '## What\'s changed' : '', changes || 'No code changes.', compare]
+    .filter(Boolean).join('\n\n') + '\n';
 }
 
 function git(args: string[]): string {
@@ -101,7 +148,9 @@ if (import.meta.main) {
       const [sha = '', subject = '', author = '', ...coauthors] = record.trim().split('\x1f');
       return { sha, subject, authors: [author, ...coauthors].map((name) => name.trim()).filter(Boolean) };
     });
-  const notes = releaseNotes(commits, repository, tag, previous, process.env.RELEASE_ANNOUNCEMENT);
+  const files = process.argv.slice(4).flatMap((directory) =>
+    readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name));
+  const notes = releaseNotes(commits, repository, tag, previous, process.env.RELEASE_ANNOUNCEMENT, files);
   writeFileSync(process.argv[3] ?? 'release-notes.md', notes);
   console.log(`Changelog: ${commits.length} commits since ${previous ?? 'the first commit'}`);
 }

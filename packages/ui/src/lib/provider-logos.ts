@@ -95,8 +95,6 @@ export const providerLogos: Record<string, ProviderLogo> = {
   },
   // `AntigravityIcon`: its png, taken out of T3 Code's data url byte for byte.
   antigravity: antigravityLogo,
-  // The Antigravity CLI is the same company's agent, installed by the user.
-  'antigravity-cli': antigravityLogo,
   // `PiAgentIcon`: the white mark on its black rounded square.
   pi: {
     kind: 'paths',

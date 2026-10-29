@@ -17,6 +17,8 @@
 //! navigation handler refuses it again for a link the page itself followed.
 //! A page's new windows are tabs or popups, as `popups` explains.
 
+#[cfg(windows)]
+mod adopted;
 mod popups;
 
 use popups::{close_popups, follow_surface, new_window};
@@ -166,6 +168,17 @@ enum Event {
         id: String,
         url: String,
     },
+    /// A page of the agent surface `id` opened a window, which is the agent
+    /// surface `popup` now, its `window.opener` still the page that asked.
+    Popup {
+        id: String,
+        popup: String,
+        url: String,
+    },
+    /// The page of an agent's popup called `window.close()`.
+    Closed {
+        id: String,
+    },
 }
 
 /// A slot's place in the window's content area, in logical pixels, which is
@@ -231,6 +244,16 @@ struct Surfaces {
 /// screenshots and records it while nobody looks at it.
 fn is_agent_label(label: &str) -> bool {
     label.strip_prefix(LABEL_PREFIX).is_some_and(crate::browser_control::is_agent_surface)
+}
+
+/// Whether a webview plays no sound: an agent surface and every popup its
+/// pages open. Nobody listens to the pages an agent drives, often out of sight,
+/// and their sound reached the user's headset (2026-10-25). The pages the user
+/// browses keep theirs. A label's kind never changes, so neither does this.
+/// Only WebView2 applies it: an agent drives a surface through WebView2's
+/// devtools channel alone, so off Windows no agent surface plays anything.
+pub(crate) fn muted(label: &str) -> bool {
+    is_agent_label(label) || popups::popup_surface(label).is_some_and(crate::browser_control::is_agent_surface)
 }
 
 /// The viewport an agent surface works in before the UI ever measured a slot for it.
@@ -487,8 +510,9 @@ fn checked_url(id: &str, raw: &str) -> Result<Url, String> {
 
 /// Where a surface keeps its cookies and storage. `Default` is the profile the
 /// main webview runs on, the one every surface used before profiles existed,
-/// so the sign-ins made there stay. `Private` is WebView2's InPrivate session,
-/// which forgets everything once its last surface closes.
+/// so the sign-ins made there stay. `Private` is an InPrivate session, which
+/// forgets everything once its last surface closes; on Windows it is the
+/// session of a profile of its own (`webview2_profile`).
 #[derive(Debug, PartialEq)]
 enum Profile {
     Default,
@@ -515,6 +539,25 @@ fn profile_of(id: &str, raw: Option<&str>) -> Result<Profile, String> {
                 ))
             }
         }
+    }
+}
+
+/// The WebView2 profile private surfaces open in. The underscore keeps it
+/// out of the profile ids `profile_of` accepts.
+const PRIVATE_WEBVIEW2_PROFILE: &str = "boite_private";
+
+/// The WebView2 profile a surface opens in, by name; `None` is the default
+/// one, the profile the main webview runs on. A private surface gets one of
+/// its own, so it shares nothing with the default profile: InPrivate on the
+/// default profile is that profile's off-the-record session, and a Gmail tab
+/// of the default profile was found signed out right after a private tab
+/// opened beside it (2026-10-22).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn webview2_profile(profile: &Profile) -> Option<&str> {
+    match profile {
+        Profile::Default => None,
+        Profile::Private => Some(PRIVATE_WEBVIEW2_PROFILE),
+        Profile::Named(name) => Some(name),
     }
 }
 
@@ -587,17 +630,19 @@ pub async fn browser_create(
     if let Some(directory) = crate::window::webview_profile() {
         builder = builder.data_directory(directory);
     }
-    if let Some(args) = crate::window::test_browser_args() {
-        builder = builder.additional_browser_args(&args);
+    builder = builder.additional_browser_args(&crate::window::browser_args());
+    // On Windows a named profile and the private session each open under a
+    // WebView2 profile name of their own, through the main webview's environment.
+    #[cfg(windows)]
+    if let Some(name) = webview2_profile(&profile) {
+        let environment = crate::platform::webview_profiles::environment(&app, name).await?;
+        builder = builder.with_environment(environment.0);
     }
     match &profile {
         Profile::Default => {}
         Profile::Private => builder = builder.incognito(true),
         #[cfg(windows)]
-        Profile::Named(name) => {
-            let environment = crate::platform::webview_profiles::environment(&app, name).await?;
-            builder = builder.with_environment(environment.0);
-        }
+        Profile::Named(_) => {}
         #[cfg(target_os = "macos")]
         Profile::Named(name) => builder = builder.data_store_identifier(data_store_of(name)),
         #[cfg(not(any(windows, target_os = "macos")))]
@@ -606,6 +651,49 @@ pub async fn browser_create(
         }
     }
 
+    builder = page_events(builder, &app, id.clone(), profile == Profile::Private);
+
+    // An agent surface is never hidden, so it starts where it waits out of
+    // sight: see `Surfaces::placement`.
+    let agent = is_agent_label(&label);
+    let view = if agent {
+        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
+    } else {
+        window.add_child(
+            builder,
+            LogicalPosition::new(0.0, 0.0),
+            // A tab first opened by a background agent has no measured UI slot.
+            // Give its hidden page a usable viewport until the panel shows it.
+            LogicalSize::new(1024.0, 768.0),
+        )
+    }
+    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
+    if !agent {
+        view.hide()
+            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    }
+    #[cfg(windows)]
+    {
+        if let Err(error) = crate::platform::browser_page::surface(&view, muted(&label)).await {
+            let _ = view.close();
+            return Err(format!("the browser surface {id:?} could not be prepared: {error}"));
+        }
+        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
+            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
+        }
+        if let Err(error) = view.navigate(start) {
+            crate::platform::browser_diagnostics::remove(&id);
+            let _ = view.close();
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// What the page of the surface `id` tells the UI: where it goes, what it is
+/// called, when it loads, and the windows it asks for. An agent's popup is
+/// built with the same handlers as the tab whose page opened it.
+fn page_events(mut builder: WebviewBuilder<tauri::Wry>, app: &AppHandle, id: String, private: bool) -> WebviewBuilder<tauri::Wry> {
     let handle = app.clone();
     let surface = id.clone();
     builder = builder.on_navigation(move |url| {
@@ -712,45 +800,8 @@ pub async fn browser_create(
     });
 
     let handle = app.clone();
-    let surface = id.clone();
-    let private = profile == Profile::Private;
-    builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
-
-    // An agent surface is never hidden, so it starts where it waits out of
-    // sight: see `Surfaces::placement`.
-    let agent = is_agent_label(&label);
-    let view = if agent {
-        window.add_child(builder, PhysicalPosition::new(OFF_SCREEN_X, 0), LogicalSize::new(AGENT_SIZE.0, AGENT_SIZE.1))
-    } else {
-        window.add_child(
-            builder,
-            LogicalPosition::new(0.0, 0.0),
-            // A tab first opened by a background agent has no measured UI slot.
-            // Give its hidden page a usable viewport until the panel shows it.
-            LogicalSize::new(1024.0, 768.0),
-        )
-    }
-    .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
-    if !agent {
-        view.hide()
-            .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
-    }
-    #[cfg(windows)]
-    {
-        if let Err(error) = crate::platform::browser_page::surface(&view).await {
-            let _ = view.close();
-            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
-        }
-        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
-            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
-        }
-        if let Err(error) = view.navigate(start) {
-            crate::platform::browser_diagnostics::remove(&id);
-            let _ = view.close();
-            return Err(error.to_string());
-        }
-    }
-    Ok(())
+    let surface = id;
+    builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features))
 }
 
 #[tauri::command]
@@ -954,7 +1005,19 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, profile_of, read_selection, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, muted, profile_of, read_selection, webview2_profile, Placement, Profile, SurfaceRect, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    /// A page an agent opened played its sound in the user's headset
+    /// (2026-10-25): its surface and its popups start muted, the user's do not.
+    #[test]
+    fn agent_surfaces_and_their_popups_are_muted_and_the_users_pages_are_not() {
+        assert!(muted(&label_of("agent-1").unwrap()));
+        assert!(muted("boite-popup:4:agent-1"));
+        assert!(!muted(&label_of("t1").unwrap()));
+        assert!(!muted(&label_of("browser:agent-1").unwrap()));
+        assert!(!muted("boite-popup:5:t1"));
+        assert!(!muted(MAIN_LABEL));
+    }
 
     #[test]
     fn an_agent_surface_out_of_sight_stays_shown_off_screen_at_its_last_size() {
@@ -1025,6 +1088,18 @@ mod tests {
             let error = profile_of("a", Some(bad)).unwrap_err();
             assert!(error.contains("lowercase letters"), "{bad:?}: {error}");
         }
+    }
+
+    #[test]
+    fn a_private_surface_runs_in_a_webview2_profile_of_its_own() {
+        // A Gmail tab of the default profile was found signed out right after
+        // a private tab, InPrivate on that same profile, opened beside it (2026-10-22).
+        let private = webview2_profile(&Profile::Private).expect("a private surface names its own WebView2 profile");
+        assert_ne!(Some(private), webview2_profile(&Profile::Default));
+        // No profile id the UI or an agent can make is that name.
+        assert!(profile_of("a", Some(private)).is_err(), "{private:?} is a valid profile id");
+        assert_eq!(webview2_profile(&Profile::Default), None);
+        assert_eq!(webview2_profile(&Profile::Named("p-1a2b".into())), Some("p-1a2b"));
     }
 
     #[test]

@@ -21,7 +21,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { GROUP_MAX_CORES, PAIRING_ROLES, type Os, type PairingRole } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
 import { boxSigningInput, checkBox } from './seal.ts';
-import { checkDeviceKey, checkServedOrigins, deviceAdmitted, mergeDeviceKeys, mergeServedOrigins, type DeviceKeyEntry, type ServedOrigins } from './device-keys.ts';
+import { checkDeviceKey, checkServedOrigins, positive, text, wins, deviceAdmitted, mergeDeviceKeys, mergeServedOrigins, type DeviceKeyEntry, type ServedOrigins } from './device-keys.ts';
 
 export interface CoreEntry {
   coreId: string;
@@ -68,6 +68,13 @@ export interface Roster {
   deviceKeys?: DeviceKeyEntry[];
   /** Where each member says its page is served, besides its addresses: the origins its members let open a socket. */
   origins?: Record<string, ServedOrigins>;
+  /**
+   * The member whose settings the others follow; null once the owner cleared it,
+   * so the clearing outranks an older choice. Read only with its revision.
+   */
+  settingsHome?: string | null;
+  /** Omitted by older cores. Concurrent choices converge by revision, then id. */
+  settingsHomeRev?: number;
 }
 
 /** Machines a group lists over its life, removed ones included: past it, no new machine is admitted. */
@@ -79,15 +86,7 @@ const OVERSHOOT = 2;
 export const ADDRESSES_MAX = 8;
 const OS: readonly Os[] = ['windows', 'linux', 'macos'];
 
-function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`, { field });
-  return value;
-}
 
-function revision(value: unknown, field: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 1) throw invalidParams(`${field}: expected a positive integer`, { field });
-  return value as number;
-}
 
 /** The key as this core writes it, and the id that is its fingerprint. */
 export function fingerprint(publicKey: string): { coreId: string; publicKey: string } {
@@ -153,9 +152,9 @@ export function checkCore(value: unknown, field = 'core'): CoreEntry {
   }
   return {
     ...card,
-    epoch: revision(raw['epoch'], `${field}.epoch`),
+    epoch: positive(raw['epoch'], `${field}.epoch`),
     admit: { by: admit.by, sig: text(admit.sig, `${field}.admit.sig`, 200) },
-    rev: revision(raw['rev'], `${field}.rev`),
+    rev: positive(raw['rev'], `${field}.rev`),
     ...(raw['removed'] === true ? { removed: true as const } : {}),
   };
 }
@@ -170,7 +169,7 @@ export function checkDevice(value: unknown, field = 'device'): DeviceEntry {
     id,
     name: text(raw['name'], `${field}.name`, 100),
     role: raw['role'] as PairingRole,
-    rev: revision(raw['rev'], `${field}.rev`),
+    rev: positive(raw['rev'], `${field}.rev`),
     ...(raw['removed'] === true ? { removed: true as const } : {}),
   };
 }
@@ -189,7 +188,8 @@ export function checkRoster(value: unknown): Roster {
   const roster: Roster = {
     id: text(raw['id'], 'roster.id', 64),
     name: text(raw['name'], 'roster.name', 80),
-    ...(raw['nameRev'] === undefined ? {} : { nameRev: revision(raw['nameRev'], 'roster.nameRev') }),
+    ...(raw['nameRev'] === undefined ? {} : { nameRev: positive(raw['nameRev'], 'roster.nameRev') }),
+    ...(raw['settingsHomeRev'] === undefined ? {} : { settingsHome: checkSettingsHome(raw['settingsHome']), settingsHomeRev: positive(raw['settingsHomeRev'], 'roster.settingsHomeRev') }),
     founder: raw['founder'],
     cores: raw['cores'].map((core) => checkCore(core, 'roster.cores')),
     devices: raw['devices'].map((device) => checkDevice(device, 'roster.devices')),
@@ -223,6 +223,12 @@ export function checkRoster(value: unknown): Roster {
     }
   }
   return sorted(roster);
+}
+
+function checkSettingsHome(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw invalidParams('roster.settingsHome: expected a machine id or null', { field: 'roster.settingsHome' });
+  return value;
 }
 
 /**
@@ -288,6 +294,7 @@ function sorted(roster: Roster): Roster {
     id: roster.id,
     name: roster.name,
     ...(roster.nameRev === undefined ? {} : { nameRev: roster.nameRev }),
+    ...(roster.settingsHomeRev === undefined ? {} : { settingsHome: roster.settingsHome ?? null, settingsHomeRev: roster.settingsHomeRev }),
     founder: roster.founder,
     cores: [...roster.cores].sort((a, b) => a.coreId.localeCompare(b.coreId)),
     devices: [...roster.devices].sort((a, b) => a.id.localeCompare(b.id)),
@@ -301,12 +308,6 @@ export function digestOf(roster: Roster): string {
   return createHash('sha256').update(JSON.stringify(sorted(roster))).digest('hex');
 }
 
-/** Inside one epoch: the removal, then the later revision, then a fixed order so both sides agree. */
-function wins(a: { rev: number; removed?: true }, b: { rev: number; removed?: true }): boolean {
-  if ((a.removed === true) !== (b.removed === true)) return a.removed === true;
-  if (a.rev !== b.rev) return a.rev > b.rev;
-  return JSON.stringify(a) > JSON.stringify(b);
-}
 
 /**
  * The machines of both rosters. A remote entry of a later epoch is an
@@ -365,16 +366,32 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
   const localRev = local.nameRev ?? 0;
   const remoteRev = remote.nameRev ?? 0;
   const named = remoteRev > localRev || (remoteRev === localRev && remoteRev > 0 && remote.name > local.name) ? remote : local;
-  return sorted({
+  // An older core drops both fields and reads as revision 0, so it never undoes a choice.
+  const localHomeRev = local.settingsHomeRev ?? 0;
+  const remoteHomeRev = remote.settingsHomeRev ?? 0;
+  const homed = remoteHomeRev > localHomeRev || (remoteHomeRev === localHomeRev && remoteHomeRev > 0 && (remote.settingsHome ?? '') > (local.settingsHome ?? '')) ? remote : local;
+  const merged: Roster = {
     id: local.id,
     name: named.name,
     ...(named.nameRev === undefined ? {} : { nameRev: named.nameRev }),
+    ...(homed.settingsHomeRev === undefined ? {} : { settingsHome: homed.settingsHome ?? null, settingsHomeRev: homed.settingsHomeRev }),
     founder: local.founder,
     cores: mergeCores(local.cores, remote.cores),
     devices: mergeDevices(local.devices, remote.devices),
     deviceKeys: mergeDeviceKeys(local.deviceKeys ?? [], remote.deviceKeys ?? []),
     origins: mergeServedOrigins(local.origins ?? {}, remote.origins ?? {}),
-  });
+  };
+  // A home chosen on one member while another removed it meets its removal here: every member clears it the same way.
+  const home = merged.settingsHome;
+  return sorted(typeof home === 'string' && !liveCores(merged).some((core) => core.coreId === home) ? { ...merged, ...homeGone(merged, home) } : merged);
+}
+
+/**
+ * A settings home that leaves the group stops being one for good: cleared at a
+ * new revision, so the machine coming back later is not the default again.
+ */
+export function homeGone(roster: Roster, coreId: string): Pick<Roster, 'settingsHome' | 'settingsHomeRev'> | Record<string, never> {
+  return roster.settingsHome === coreId ? { settingsHome: null, settingsHomeRev: (roster.settingsHomeRev ?? 0) + 1 } : {};
 }
 
 /** A member as agent coordination addresses it: the first address listed, the others are tried by the caller. */

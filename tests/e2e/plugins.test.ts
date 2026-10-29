@@ -94,6 +94,11 @@ test('a pool switches its login, and the recommended plugin uninstalls back to R
   await page.click(`${row('bots')} ${id('plugin-uninstall')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
   await page.waitFor(`document.querySelector('${row('bots')}')?.closest('section')?.dataset.testid === 'plugins-recommended'`);
+  await page.click(id('settings-tab-general'));
+  await page.click(id('settings-tab-plugins'));
+  await page.waitFor(`document.querySelector('${row('bots')} h3')?.textContent.includes('v0.1.10')`);
+  expect(await page.evaluate(`document.querySelector('${row('bots')}').dataset.status`)).toBe('not-installed');
+  expect(await page.evaluate(`document.querySelector('${row('bots')} ${id('plugin-check-updates')}') !== null`)).toBe(true);
   await scrollTo(id('plugins-recommended'));
   await capture('plugins-recommended-desktop.png');
   await page.click(`${row('bots')} ${id('plugin-install')}`);

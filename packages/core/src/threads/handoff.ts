@@ -2,22 +2,24 @@ import type { RpcEventName, RpcEvents, ThreadId, ThreadSummary, Turn, TurnId } f
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
+import { RESUME_TEXT } from './resume-text.ts';
 import { STOP_DEADLINE } from './turn-runner.ts';
 
 /**
  * `graceMs`: how long a running tool call may take to finish before its turn is
- * stopped anyway. `maxAgeMs`: past it the next core resumes nothing, so a
- * machine left off for a day does not start paid work by itself. Mutable so a
- * test can shorten them.
+ * stopped anyway. `longToolMs`: a tool call already running this long when the
+ * restart starts is not waited for: one that outlasted the grace once rarely
+ * ends within it, and two updates of 2026-10-22 each waited the whole 30
+ * seconds on such a call (a nine minute script, a polling loop) before cutting
+ * it, from `core.handoff.started` to `core.shutdown.started` in the core's log. `maxAgeMs`: past it the next core resumes nothing, so a machine left off
+ * for a day does not start paid work by itself. Mutable so a test can shorten them.
  */
-export const HANDOFF = { graceMs: 30_000, maxAgeMs: 3_600_000 };
+export const HANDOFF = { graceMs: 30_000, longToolMs: 30_000, maxAgeMs: 3_600_000 };
 
 /** The journal setting the stopping core leaves for the next one. */
 const KEY = 'restart-handoff';
 /** The request of the interrupted turn is quoted up to this many characters. */
 const QUOTE_LIMIT = 8_000;
-
-const RESUME_PROMPT = 'Boite restarted, to install an update for instance, and stopped your previous turn before it finished. The conversation and the files are as you left them. A command that was running at that moment may have been cut short: check its result before relying on it. Continue the work from where you stopped, without starting over.';
 
 interface Entry { turnId: TurnId; threadId: ThreadId; was: 'running' | 'queued'; admittedTurnId?: TurnId }
 interface HandoffRecord { at: number; turns: Entry[] }
@@ -41,8 +43,8 @@ function isRecord(value: unknown): value is HandoffRecord {
  * the wait still hands its turns over.
  */
 export class RestartHandoff {
-  /** Tool calls in flight per thread, as `messageId:partIndex`. */
-  private readonly tools = new Map<ThreadId, Set<string>>();
+  /** Tool calls in flight per thread, as `messageId:partIndex`, with when each started. */
+  private readonly tools = new Map<ThreadId, Map<string, number>>();
   /** What this core hands over, once `begin` ran. */
   private entries: Map<TurnId, Entry> | null = null;
   /** Running turns still to end before this core may exit. */
@@ -144,7 +146,12 @@ export class RestartHandoff {
     // A stop the runner could not settle either must not hold the restart.
     timers.push(setTimeout(() => this.settle?.(), graceMs + STOP_DEADLINE.ms + STOP_DEADLINE.forceMs + 1_000));
     for (const timer of timers) timer.unref?.();
-    for (const [turnId, threadId] of this.pending) this.stopWhenBetweenTools(turnId, threadId);
+    const now = Date.now();
+    for (const [turnId, threadId] of this.pending) {
+      const running = [...this.tools.get(threadId)?.values() ?? []];
+      if (running.length > 0 && running.every(startedAt => now - startedAt >= HANDOFF.longToolMs)) this.stop(turnId, threadId);
+      else this.stopWhenBetweenTools(turnId, threadId);
+    }
     return promise;
   }
 
@@ -187,7 +194,7 @@ export class RestartHandoff {
           this.core.scheduler.enqueue(turn, turn.execution?.accountId ?? thread.accountId);
           resumed += 1;
         } else if (admitted === null && entry.was === 'running' && turn.status === 'stopped') {
-          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), [], undefined, 'resume', undefined, this.requestId(entry));
+          const continuation = this.threads.startTurn(thread.id, this.continuation(turn), { kind: 'resume', reason: 'handoff', requestId: this.requestId(entry) });
           this.remember(entry, continuation.id);
           resumed += 1;
         } else this.consume(entry);
@@ -237,7 +244,7 @@ export class RestartHandoff {
    * continue the children a handoff cut with it too, and a crash resume
    * (`threads/auto-continue.ts`) leads with its own reason.
    */
-  continuation(turn: Turn, lead: string = RESUME_PROMPT): string {
+  continuation(turn: Turn, lead: string = RESUME_TEXT.handoff.prompt): string {
     const opening = turn.execution?.operation === 'resume'
       ? Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id, { blobs: false })).find(message => message.role === 'system') ?? null
       : this.core.journal.lastUserMessage(turn.threadId, turn.id);
@@ -250,15 +257,15 @@ export class RestartHandoff {
   }
 
   /**
-   * Sub-threads and persistent agent sessions belong to delegation, workflows
-   * and the agent runtime, which carry their own work across a handoff
-   * (`Delegation.resumeAfterRestart`, `Workflows.resumeAfterRestart`) and
+   * Sub-threads belong to delegation and workflows, which carry their own
+   * work across a handoff (`Delegation.resumeAfterRestart`,
+   * `Workflows.resumeAfterRestart`) and
    * pause after a crash. A compaction or a coordination wake is not worth repeating.
    */
   private resumable(turnId: TurnId, threadId: ThreadId, was: Entry['was']): boolean {
     const turn = this.core.journal.getTurn(turnId);
     const thread: ThreadSummary | null = this.core.journal.getThread(threadId);
-    if (turn === null || thread === null || thread.archived || thread.agentSessionId || thread.parentThreadId) return false;
+    if (turn === null || thread === null || thread.archived || thread.parentThreadId) return false;
     const operation = turn.execution?.operation;
     return operation === undefined || operation === 'resume' || (was === 'running' && operation === 'background');
   }
@@ -287,9 +294,9 @@ export class RestartHandoff {
       const { threadId, messageId, partIndex, part } = payload as RpcEvents['message.part'];
       if (part.type !== 'tool') return;
       const key = `${messageId}:${partIndex}`;
-      const running = this.tools.get(threadId) ?? new Set<string>();
-      if (part.status === 'running') running.add(key);
-      else running.delete(key);
+      const running = this.tools.get(threadId) ?? new Map<string, number>();
+      if (part.status !== 'running') running.delete(key);
+      else if (!running.has(key)) running.set(key, typeof part.startedAt === 'number' ? part.startedAt : Date.now());
       if (running.size > 0) this.tools.set(threadId, running);
       else this.tools.delete(threadId);
       if (this.entries === null || running.size > 0) return;

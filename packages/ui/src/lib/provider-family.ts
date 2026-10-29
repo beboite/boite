@@ -2,12 +2,11 @@ import { providerEnabled, type Account, type ProviderSummary } from '@boite/cont
 import { connected } from './provider-setup';
 
 /**
- * Descriptors that are one agent to the person using them. Antigravity ships
- * twice, the server Boite downloads and the `agy` command the user installed
- * themselves; both sign in to the same Google account and answer with the
- * same models, so every list shows one Antigravity with both ways inside it.
+ * Descriptors that are one agent to the person using them, by member id to
+ * the head's: every list shows one row with each way inside it. No shipped
+ * provider has a second way today.
  */
-const FAMILY: Record<string, string> = { 'antigravity-cli': 'antigravity' };
+const FAMILY: Record<string, string> = {};
 
 /** The id of the row a provider is drawn in. */
 export function familyOf(providerId: string): string {

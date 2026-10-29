@@ -13,7 +13,8 @@ browser and holds its flags, `browser/launch.ts` starts it, `browser/cdp.ts` is 
 `browser/recorder.ts` records, `browser/frames.ts` takes a viewer's frames and `browser/scripts.ts` holds what is evaluated
 in a page for viewers. `browser/automation.ts` runs agent-browser's commands
 with `browser/page-kit.ts`, the script that reads a page into a snapshot with
-refs and finds `@eN`, CSS and `text=` targets.
+refs and finds `@eN`, CSS and `text=` targets, and `browser/page-frames.ts`
+reaches the frames of other origins.
 
 ## Which browser
 
@@ -74,6 +75,32 @@ flag adds and that took 56 pixels of the page, and `--screen-info={1920x1080}`.
 A browser whose identity cannot be read starts as it is, with a warning in the
 log. A page check of `boite view` skips the read.
 
+Settings > General > Browser profiles has a User-Agent editor on each custom
+profile. Leave it empty for the unchanged browser identity, append a suffix
+such as a bug bounty program marker, or replace the complete value. The
+setting is stored as `browserProfiles[].userAgent` (`mode: suffix | replace`,
+`value`) and applies when that profile's agent browser next starts. Close its
+agent tabs and wait for the idle process to end, or restart the core, to apply
+a change to an already running profile. Default and private profiles keep the
+browser identity; create a named profile to customize it.
+
+A profile keeps its current engine until it closes, including when the desktop
+app attaches or the User-Agent setting changes. Its next engine starts after
+the previous engine finishes saving cookies, so two engines never overwrite
+the same profile's saved cookie snapshot. An engine that ended, closed by
+the core or lost when its connection dropped, holds its profile until its
+process exited: a browser started sooner would find the folder still locked.
+A start that fails once its browser was spawned rejects only after that
+browser exited, so the profile stays taken until then too.
+
+A customized profile starts a separate Chromium process even while the desktop
+app hosts other agent tabs: webviews cannot set per-profile process flags for
+workers and popups. The panel displays its remote view. The process receives
+the complete value through `--user-agent`; tab overrides use that same value
+with the real browser's client hints. Replacing the value does not impersonate
+another engine or OS in client hints. If the native identity cannot be read,
+a customized profile refuses to start rather than omit its program marker.
+
 This brings it level with the same Chrome running with a window on the same
 network, not past it. Etsy, SeLoger and Reddit still asked for a captcha on
 2026-10-09, and so did Chrome with a window under Xvfb on that address. The
@@ -93,6 +120,10 @@ tool process of `system:browser`, so [the trace](trace.md) shows it. It closes
 Settings closes its tabs and removes its folder; a folder whose browser had
 already closed goes at the next settings change or the first use of the agent
 browser after a restart. A folder that cannot be removed is logged.
+
+The profile entry is removed only after the desktop app confirms that it erased
+its local data. Web and phone clients keep the entry and explain that deletion
+needs the desktop app. A failed erase also leaves the entry available to retry.
 
 The browser downloads no components (`--disable-component-update`) and keeps
 at most 64 MiB of HTTP cache (`--disk-cache-size`). Before a profile's first
@@ -138,7 +169,7 @@ An agent that meets a login page asks with `boite ask --open <url> "<site and
 why>" "Signed in" Skip`. The question card gets an Open button: it opens the
 page as `boite browse` does, in a new tab of the conversation's browser and
 its default profile, and shows the panel on the Browser tab, going to the
-thread first from the Agents page or another conversation. It calls
+thread first from the Bots page or another conversation. It calls
 `questions.openPage`, which names the question rather than an address, so a
 paired phone subscribed to the conversation opens the page too, and the core
 reads and checks the address again. The address must
@@ -147,7 +178,12 @@ goes to a delegated agent's parent: only the user can sign in.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
-the limit the window is closed. A tab still attaching counts toward both
+the limit the window is closed. A script's `window.open` without a click opens
+one too: neither the core's Chromium (`--disable-popup-blocking`) nor the
+desktop app's webviews block popups, so the tab limit is the bound. The tab
+shares the opener's profile and cookies and keeps `window.opener`, so the
+sign-in can answer the page with `postMessage`; its page calling
+`window.close()` closes the tab. A tab still attaching counts toward both
 limits, so a burst of windows opened at once stops at the limit too. Nobody can answer a dialog in a headless page.
 One raised while an agent command runs follows `dialog accept|dismiss`
 (accept until told otherwise) and is listed in that command's output; any
@@ -155,6 +191,14 @@ other alert is accepted and a confirm or prompt declined, so a person acting in
 the panel never confirms by accident. All are noted in the diagnostics. Downloads go to a
 [quarantine](#downloads). Archiving or removing the
 conversation closes its tabs.
+
+When a DevTools session detaches, its pending commands fail immediately with
+their method and session identity; commands for the browser or another session
+keep waiting for their own answers. A native click accepts detachment only
+while releasing the mouse on its own tab, as happens when a popup closes itself.
+It sends no remaining double-click input or navigation queries to that page.
+Detachment identifies the lost session, not why it disappeared. Earlier input
+failures, protocol errors and a closed browser connection still fail the click.
 
 ### A tab nobody uses sleeps
 
@@ -223,10 +267,52 @@ reports where the page went. Clicks, keys and text are native input; an element
 something covers is clicked through the DOM, and the agent hears what covered
 it.
 
+Before pressing, a native click waits up to two seconds for trusted pointer
+movement in the target's document and checks that the target and every enclosing
+iframe still receive that point. This also works in popups whose CSS `:hover` state stays unset.
+If movement misses the target, the command fails without pressing; it never
+retries the click.
+
+## Frames from other origins
+
+The page kit reads a frame of its own origin through the iframe, and measures
+an element there in its own document, then moves the point out through each
+iframe around it. The browser hides the document of another origin from the
+page's script: a payment form, a captcha or an embedded sign-in would show only
+its iframe. The kit lists each such iframe that has a size, and the core reads
+its document in the frame's own context, then sets the lines under the iframe
+and numbers its refs after those read before (`browser/page-frames.ts`):
+
+- A frame of the same site runs in the page's renderer, in an execution context
+  of its own on the tab's session; the core keeps each frame's context from the
+  `Runtime.executionContextCreated` events.
+- A frame of another site runs in a process of its own, a target whose id is
+  the frame's. The command attaches to it, enables its runtime, so its own
+  frames of the same site are listed too, and leaves it when it ends.
+- The iframe's element names its frame through `DOM.describeNode`.
+
+The kit keeps its refs in each frame's own window, and the core keeps, for each
+ref the last snapshot read in a frame, the iframe refs that lead to it. A
+command on such a ref runs in that frame's document. Native input is sent to
+the tab in the top document's coordinates: each iframe around the element is
+scrolled into its parent's view, and the point moves out through its content
+box, scaled with it. A point outside a parent's view, or where something is
+drawn over an iframe, is clicked through the DOM, with a note naming what
+covered it. A navigation of the top document forgets the frame refs, so an old
+one is refused by name.
+
+A snapshot reads at most 30 frames of other origins, within its 40,000
+characters; one past either is a note under its iframe. With `-i`, a frame with
+nothing to act on is left out. The desktop app relays no
+`Runtime.executionContextDestroyed` and attaches to no frame's process: a hosted
+tab reaches a frame of the same site through its context, and a frame of
+another site shows as a note.
+
 ## The desktop app hosts the tabs
 
-On Windows, the desktop app connected to the core it started hosts that core's
-agent browser: each new agent tab is a webview of the app (WebView2), in the
+On Windows, the desktop app connected to the core it started hosts new agent
+browser sessions once a profile's previous engine has closed. Each hosted
+agent tab is a webview of the app (WebView2), in the
 same profiles as the user's own Browser tabs, so a site signed in there is
 signed in for the agent too. The panel shows that webview itself, parked over
 its slot: it scrolls, types and paints natively, and nothing is captured or
@@ -242,12 +328,19 @@ any port; `Target.createTarget`, `attachToTarget` and `closeTarget` create,
 name and close webviews; a page's events, its address and title, and the
 windows it opens come back with `browser.hostReply`. Network events are cut
 to what the core reads: a request's address, and a response only when it
-failed, with its status and address (`compactPageEvent`). The shell lets an agent
+failed, with its status and address (`compactPageEvent`). A call the page makes
+to its servers (`Fetch`, `XHR`, a document, an event stream) also keeps its
+method, headers, type and response headers, and its end comes back with the
+bytes it took, so [`browser network`](#network-calls) lists hosted tabs too.
+The shell lets an agent
 webview (an id starting with `agent-`) take the Page, Runtime, Input,
 Emulation, Network, Log and DOM domains, never the profile's cookies
 (`apps/shell/src-tauri/src/browser_control.rs`). An agent webview out of sight
 is moved outside the window rather than hidden, since a hidden WebView2 stops
 painting and the agent screenshots and records pages nobody looks at.
+An agent webview and every popup its pages open are muted by WebView2 from
+creation (`ICoreWebView2_8::IsMuted`), which no page can undo; the user's own
+tabs keep their sound.
 
 The core keeps a copy of a hosted profile's cookies in the same
 `boite-cookies.json` as for its own browser, with the same saves. The app
@@ -271,6 +364,79 @@ the connection ends the relay, and the next tab opens in the core's own
 browser again. Other clients of the conversation, a phone or another machine,
 still watch a hosted tab as frames, taken through the app. The Linux and
 macOS apps do not host; their webviews have no DevTools channel to relay.
+
+## Network calls
+
+`boite browser network` lists the calls a tab's page makes to its servers:
+fetch and XHR calls, documents and event streams, never its scripts, styles,
+images or fonts. Capture is off until an agent asks: every tab enables the
+`Network` domain with no buffer for bodies, and the first `browser network`
+in a tab enables it again with 20 MB for responses (4 MB each) and 64 KB of
+request body, then lists only what the page does from there; reloading or
+acting on the page fills the list. `browser network --filter <text>` keeps
+the calls whose method, address or type contains the text. A tab keeps its
+last 300 calls (`packages/core/src/browser/network.ts`).
+
+`browser network <id>` shows one call: its headers, without the ones the
+browser sets itself, its request and response bodies up to 50,000 characters,
+and the `page.fetch` line that sends it again from the page. A binary
+response is described, never sent. Credentials are hidden before anything
+leaves the core: a header, a query parameter or a JSON or form field named
+like a cookie, an authorization, a password, a secret, a key, a session, a
+signature or a token reads `<hidden, N characters>`, after an acronym or in
+the plural too (`APIToken`, `apiKeys`). A list or an object under such a name
+is hidden whole, as is a value nested past 20 levels. The address in a
+`Location`, `Content-Location` or `Referer` header has its query masked as a
+call's address is. A body is masked whole, then cut. One that does not parse
+as JSON (a guard prefix, a stream of values, a page's inline script) has each
+`"name": value` pair masked on its own, a list or an object up to its closing
+bracket. Only pagination tokens stay readable (`page_token`,
+`next_page_token`, `continuation_token`, `next_token` and the like), since an
+agent pages through results with them; `page_access_token` is hidden. The
+note under a call with hidden values tells the agent to read them from the
+page each time. `browser network stop` forgets the calls and gives Chromium's buffers
+back.
+
+`page.fetch(url, { method, headers, body })` in a script runs `fetch` in the
+page, so the request carries the page's cookies and passes its CORS rules as
+the site's own code would. It returns the status, final address, headers and
+the body as `json` when the reply is typed JSON or starts with `{` or `[` and
+parses, as `text` otherwise (a bare `42` stays text). It reads no further
+than 2,000,000 characters and returns them with `truncated: true`. A status of 400 or more fails the step with
+the start of the body. The step's label leaves the query and the body out. The
+request travels as one page expression, so address, headers and body fit in
+32,000 characters; a longer body is built in the page and sent from `page.eval`.
+
+## Recipes
+
+A recipe is a `browser run` script kept on the machine under a name, so the
+next agent with the same task on the same site runs it in one call instead of
+driving the pages again (`packages/core/src/browser-recipe.ts`).
+`boite browser recipe save <name> <file|-> --about "<what it does>"
+[--usage "<its args>"] [args...]` runs the script with those words first and
+keeps it only if the run passes; its flags come before the script's first
+word, and every word from there on is the script's own. It is kept under the sites it asked for, reached after
+redirects or fetched, and the site its tab ended on. Saving a name again replaces the script and keeps its
+`--about` and `--usage` unless new ones are given. `recipe list` shows each
+recipe's command, sites, runs and last result; `recipe show <name>` adds its
+script; `recipe delete <name>` removes it. `browser open` and `navigate` name
+the recipes kept for the site they reach.
+
+`boite browser recipe run <name> [--tab <id>] [args...]` runs the script as
+`browser run` would and records the result on the recipe. A run that fails
+names the step and shows the page it stopped on, as any script does, then
+says how to repair the recipe: show its script, fix it against that page and
+save it again under the same name. The agent that ran it does the repair in
+its own turn; `recipe list` marks the recipe broken, with the step and the
+reason, until a save or a run passes.
+
+The core only stores recipes: one JSON file each in
+`<data>/browser-recipes/`, mode 0600, at most 200 of 64 KB each, outside
+`browser/`, whose unknown folders the profile cleanup removes
+(`packages/core/src/browser/recipes.ts`). A recipe runs in the agent's CLI
+process with the agent's own rights, as any script it wrote would. Recipes
+belong to the machine, not to one conversation, and any agent of the machine
+may run, replace or delete one. A demo client keeps none.
 
 ## Downloads
 
@@ -342,7 +508,10 @@ plain browser on the same machine is not told it is local and keeps the cover. A
 the machine, "This agent controls a browser on m2", with the page's title, and
 a **Show** button; nothing is captured or sent before that. Show starts the
 live view and, while a page shows, the eye in the tab strip covers it again. When the agent opens a
-tab in the conversation on screen, the panel opens on that surface. The
+tab in the conversation on screen, the panel opens on that surface on clients
+wider than 720 px. A phone stays in the chat or on the surface the user chose.
+Its **Browser** button opens the viewer, and **Chat** or Back returns to the
+conversation without closing any agent tabs. The
 launcher's **B** opens it by hand, and `boite browse <url>` opens a page in a
 new tab of it. On a client with a cover, it holds for the
 conversation while the app stays open, and a reload covers it again.
@@ -473,7 +642,18 @@ one kept awake by `browser.remoteWatch`, and a machine without a browser. `brows
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app
-reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
+reports a hosted tab it shows, only while its window is visible. `browser-cli.test.ts` checks the CLI's files and `browser run` scripts with the browser stubbed,
+and recipes kept only after a run passes, a failed run recorded with the way to repair it and a repaired one saved again, against the core's own store.
+`browser-network.test.ts` captures a page's API call in a real Chromium, reads its body after capture started, hides its authorization, password,
+query token and session field, repeats it with `page.fetch`, and keeps and runs a recipe built on it. `browser-host.test.ts` checks the fields a
+hosted tab relays for a call; the Windows app's relay of them runs only on Windows.
+`browser-frames.test.ts` reads and drives a payment form in a frame of the
+page's origin, one of another site, one of another origin of the same site
+below the fold, and a frame of another site nested in the second: native clicks land in each (`isTrusted`),
+fill and get reach them, and a frame ref is refused after the page moves on.
+It also clicks into a frame nested in an offset frame and into a scaled one,
+and through the DOM when a button is drawn over the frame. The desktop app's
+relay of frames is not covered.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`

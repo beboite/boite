@@ -3,8 +3,11 @@ use serde_json::Value;
 use std::time::{Duration, Instant};
 use tauri::{ipc::{Channel, InvokeResponseBody}, AppHandle, Webview};
 
+/// The id prefix of a surface the core's agent browser drives through the UI.
+pub const AGENT_SURFACE_PREFIX: &str = "agent-";
+
 /// A surface the core's agent browser drives through the UI, by its id's prefix.
-pub fn is_agent_surface(id: &str) -> bool { id.starts_with("agent-") }
+pub fn is_agent_surface(id: &str) -> bool { id.starts_with(AGENT_SURFACE_PREFIX) }
 
 /// What the UI may send to a surface the user browses: the panel's own needs.
 const SURFACE_METHODS: [&str; 9] = ["Runtime.evaluate", "Page.captureScreenshot", "Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText", "Emulation.setDeviceMetricsOverride", "Emulation.clearDeviceMetricsOverride", "Emulation.setEmulatedMedia", "Boite.diagnostics"];
@@ -62,11 +65,11 @@ pub async fn browser_protocol(app: AppHandle, webview: Webview, id: String, meth
 
 /// The DevTools events an agent surface relays to the UI, which hands them to
 /// the core's agent browser. Page-level only, like the methods it may call.
-pub const AGENT_EVENTS: [&str; 15] = [
+pub const AGENT_EVENTS: [&str; 16] = [
     "Page.frameNavigated", "Page.javascriptDialogOpening", "Page.loadEventFired", "Page.domContentEventFired",
     "Page.screencastFrame", "Page.frameStartedLoading", "Page.frameStoppedLoading",
     "Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Runtime.executionContextCreated", "Runtime.executionContextsCleared",
-    "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFailed", "Log.entryAdded",
+    "Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFinished", "Network.loadingFailed", "Log.entryAdded",
 ];
 const MAX_EVENT_NAMES: usize = 32;
 

@@ -1,11 +1,11 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { AGENT_ENV, DEFAULT_DELEGATION_CONFIG, type ThreadId } from '@boite/contracts';
-import { runCli } from '../src/cli.ts';
+import { runCli, watchStatus } from '../src/cli.ts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Retirements } from '../src/delegation/retirement.ts';
 import { PullRequestWatches } from '../src/pull-request-watch.ts';
-import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
+import { evaluate, initialMemory, mergeChanges, parseDetail, parseRemarks, stillTrue, wakeMessage, type Remark, type WatchDetail } from '../src/pull-request-watch-read.ts';
 import { parseProtection, parseRules, withRequired } from '../src/pull-request-required.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
@@ -56,7 +56,7 @@ test('a failure is told once, a rerun failing again is told again, and passing w
   expect(evaluate(grown.next, detail([{ name: 'lint', required: true }, { name: 'test', required: true }, { name: 'e2e', required: true }, { name: 'docs', conclusion: 'FAILURE' }]), null).changes).toEqual([]);
 });
 
-test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict is told once', () => {
+test('remarks count when someone else wrote them, once each, a bot rewriting one is not news, and a conflict or falling behind is told once', () => {
   const memory = initialMemory(since);
   const old = remark('1', 'reviewer', '2026-10-15T08:00:00Z');
   const mine = remark('2', 'meetsu', '2026-10-15T09:30:00Z');
@@ -87,6 +87,21 @@ test('remarks count when someone else wrote them, once each, a bot rewriting one
   expect(conflict.changes).toEqual([{ kind: 'conflict', base: 'main' }]);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'UNKNOWN' }, null).next.conflicting).toBe(true);
   expect(evaluate(conflict.next, { ...detail([]), mergeable: 'CONFLICTING' }, null).changes).toEqual([]);
+  // Behind a base that requires branches up to date: told once, kept while GitHub computes, cleared by a clean answer, never while queued.
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'BEHIND' })).behind).toBe(true);
+  expect(parseDetail(detailJson([], { mergeStateStatus: 'UNKNOWN' })).behind).toBeNull();
+  const behind = evaluate(memory, { ...detail([]), behind: true }, null);
+  expect(behind.changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(behind.next, { ...detail([]), behind: null }, null).next.behind).toBe(true);
+  expect(evaluate(behind.next, { ...detail([]), behind: true }, null).changes).toEqual([]);
+  expect(evaluate(evaluate(behind.next, { ...detail([]), behind: false }, null).next, { ...detail([]), behind: true }, null).changes).toEqual([{ kind: 'behind', base: 'main' }]);
+  expect(evaluate(memory, { ...detail([]), behind: true, queue: 1 }, null).changes).toEqual([]);
+  // A warning still held when the branch is updated or queued is not told.
+  const queued = evaluate(behind.next, { ...detail([]), behind: true, queue: 1 }, null).next;
+  expect(stillTrue(behind.changes, queued)).toEqual([]);
+  expect(stillTrue(behind.changes, evaluate(behind.next, { ...detail([]), behind: false }, null).next)).toEqual([]);
+  expect(stillTrue(behind.changes, behind.next)).toEqual(behind.changes);
+  expect(wakeMessage([{ number: 7, url: URL, changes: behind.changes }])).toMatchObject({ label: 'Pull request update, #7: behind base' });
 });
 
 // Bodies as CodeRabbit and mtsu-patrol posted them on beboite/boite #441, #567 and #583, trimmed.
@@ -169,7 +184,7 @@ test('CI wakes on its first failure and on its verdict, not on each check that f
   const rabbit = { name: 'CodeRabbit', context: true, status: 'PENDING' };
   let memory = initialMemory(since);
   const step = (runs: Run[]) => { const result = evaluate(memory, detail(runs), null); memory = result.next; return result.changes; };
-  // beboite/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
+  // mtsu-dev/boite requires "PR title", done in seconds, and "CI required", which exists only once every job finished.
   expect(step([title, job('Core tests', running), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI', running), rabbit])).toEqual([]);
   expect(step([title, job('Core tests'), job('Build UI'), gate(running), rabbit])).toEqual([]);
@@ -228,7 +243,7 @@ test('the base branch names what it requires through its rulesets and its classi
 });
 
 test('a draft passes on the required checks it reports, without waiting for one it never reports', () => {
-  // beboite/boite's draft run names its planning job apart, so a draft never satisfies the ruleset (docs/ci.md#draft-pull-requests).
+  // A repository whose draft run names its planning job apart, so a draft never satisfies its ruleset.
   const required = ['Plan and repository checks', 'Build UI'];
   const draft = parseDetail(detailJson([{ name: 'Plan and repository checks (draft)' }, { name: 'Build UI' }], { isDraft: true }));
   expect(draft.draft).toBe(true);
@@ -253,14 +268,25 @@ test('a burst folds into one set of changes, and failures of an older head drop 
     { kind: 'remarks', remarks: [expect.objectContaining({ id: 'a', body: '2' }), expect.objectContaining({ id: 'b' })] },
     { kind: 'passed', head: 'new', count: 3, required: true },
   ]);
+  // Out of the queue a moment before GitHub shows the merge: the merge is the news.
+  expect(mergeChanges([{ kind: 'dequeued', base: 'main' }], [{ kind: 'closed', state: 'MERGED', by: 'maintainer' }])).toEqual([{ kind: 'closed', state: 'MERGED', by: 'maintainer' }]);
 });
 
 // --- The loop, against a scripted gh ----------------------------------------
 
 interface FakeGitHub {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
+  /** The head branch and its repository, absent where the test does not need them. */
+  headRef?: string;
+  headRepository?: string;
   mergeable: string;
+  /** GitHub's merge state, absent where the test does not need it. */
+  mergeState?: string;
   head: string;
+  /** Its place in the merge queue, null out of it. */
+  queue: number | null;
+  /** The state only the detail read gives, as when GitHub merges between the fingerprint and the detail. */
+  detailState?: 'MERGED' | 'CLOSED';
   runs: Run[];
   comments: unknown[];
   reviews: unknown[];
@@ -281,7 +307,7 @@ interface FakeGitHub {
 }
 
 function fakeGitHub(): FakeGitHub {
-  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
+  return { state: 'OPEN', mergeable: 'MERGEABLE', head: 'a'.repeat(40), queue: null, runs: [{ name: 'test', status: 'IN_PROGRESS', conclusion: '' }], comments: [], reviews: [], inline: [], updatedAt: '2026-10-15T09:00:00Z', closedBy: 'meetsu', failure: null, closerFailure: null, rules: [], protection: [], rulesFailure: null, calls: [] };
 }
 
 /** What `gh` prints for each call a watch makes. */
@@ -295,14 +321,17 @@ async function answer(github: FakeGitHub, args: string[]): Promise<string> {
     github.closerFailure = null;
     if (failure) throw new Error(failure);
     const by = { login: github.closedBy };
-    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state: github.state, mergedBy: github.state === 'MERGED' ? by : null,
-      timelineItems: { nodes: github.state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
+    const state = github.detailState ?? github.state;
+    return JSON.stringify({ data: { viewer: { login: 'meetsu' }, repository: { pullRequest: { state, mergedBy: state === 'MERGED' ? by : null,
+      timelineItems: { nodes: state === 'CLOSED' ? [{ actor: by }] : [] } } } } });
   }
-  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.state, mergeable: github.mergeable, headRefOid: github.head });
+  const mergeQueueEntry = github.queue === null ? null : { position: github.queue };
+  if (query?.includes('viewer')) return detailJson(github.runs, { state: github.detailState ?? github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, mergeQueueEntry,
+    ...(github.headRef ? { headRefName: github.headRef, headRepository: { nameWithOwner: github.headRepository } } : {}) });
   if (query) {
     const counts = new Map<string, number>();
     for (const run of github.runs) { const key = run.status && run.status !== 'COMPLETED' ? run.status : run.conclusion ?? 'SUCCESS'; counts.set(key, (counts.get(key) ?? 0) + 1); }
-    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, headRefOid: github.head, updatedAt: github.updatedAt,
+    return JSON.stringify({ data: { repository: { pullRequest: { state: github.state, mergeable: github.mergeable, mergeStateStatus: github.mergeState, headRefOid: github.head, updatedAt: github.updatedAt, mergeQueueEntry,
       comments: { totalCount: github.comments.length, nodes: [] }, reviews: { totalCount: github.reviews.length, nodes: [] }, reviewThreads: { totalCount: 0 },
       commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { checkRunCountsByState: [...counts].map(([state, count]) => ({ state, count })), statusContextCountsByState: [] } } } }] } } } } });
   }
@@ -342,6 +371,15 @@ async function settled(threadId: string): Promise<void> {
 const wakeText = (threadId: string, turnId: string) => [...harness!.core.journal.walkTurnMessages(threadId, turnId)].find(message => message.role === 'system')!.parts
   .map(part => part.type === 'text' ? part.text : '').join('');
 
+test('a watch read refreshes the head the conversation link claims for the worktree cleanup', async () => {
+  const { owner, threadId, github, drive } = await watchedThread();
+  github.headRef = 'renamed';
+  github.headRepository = 'me/repo';
+  await owner.call('threads.watchPullRequest', { threadId });
+  await drive();
+  expect(harness!.core.linkedPullRequests.saved(threadId)[0]).toMatchObject({ state: 'OPEN', head: 'renamed', headRepository: 'me/repo' });
+});
+
 test('a watch reads first without waking, wakes once per change with links, and reads in full only when the fingerprint moves', async () => {
   const { owner, threadId, github, drive } = await watchedThread();
   // The user's request that opened the pull request.
@@ -353,7 +391,10 @@ test('a watch reads first without waking, wakes once per change with links, and 
   // A check still runs: the idle row keeps counting from the user's request, like a monitor.
   const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
   expect(summary().requestSince).toBeNumber();
-  expect(github.calls).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  // The pass the watch arms at 0 ms may land before the answer reaches the
+  // client; nothing moved, so it reads only the fingerprint.
+  expect(github.calls.slice(0, 7)).toEqual(['fingerprint', 'detail', 'rules/branches/main?per_page=100', 'branches/main', 'issues/7/comments?per_page=100&page=1', 'pulls/7/reviews?per_page=100&page=1', 'pulls/7/comments?per_page=100&page=1']);
+  expect(github.calls.slice(7).every(call => call === 'fingerprint')).toBe(true);
 
   // Nothing moved: one fingerprint per pass, no detail, no wake.
   github.calls = [];
@@ -396,6 +437,13 @@ test('a watch reads first without waking, wakes once per change with links, and 
   await drive();
   await settled(threadId);
   expect(wakeText(threadId, wakes(threadId)[2]!.id)).toContain('The branch now conflicts with main.');
+  // Resolved, then behind a base that requires it up to date: told, and shown by what the watch saw.
+  github.mergeable = 'MERGEABLE';
+  github.mergeState = 'BEHIND';
+  await drive();
+  await settled(threadId);
+  expect(wakeText(threadId, wakes(threadId)[3]!.id)).toContain('The branch is behind main');
+  expect(watchStatus(harness!.core.pullRequestWatches.of(threadId)[0]!)).toContain('behind main');
 
   // The agent's own merge ends the watch without a wake.
   github.state = 'MERGED';
@@ -403,12 +451,12 @@ test('a watch reads first without waking, wakes once per change with links, and 
   expect(github.calls).toContain('closer');
   expect(harness!.core.pullRequestWatches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
-  expect(wakes(threadId)).toHaveLength(3);
+  expect(wakes(threadId)).toHaveLength(4);
 });
 
 test('a check the base branch requires holds "passed" back until it reported', async () => {
   const { owner, threadId, github, watches, drive } = await watchedThread();
-  // beboite/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
+  // mtsu-dev/boite's ruleset requires "PR title", done in seconds, and "CI required", created only once every other job ended.
   github.rules = ['PR title', 'CI required'];
   const title = { name: 'PR title', workflow: 'pr title', required: true };
   github.runs = [{ ...title, status: 'IN_PROGRESS', conclusion: '' }];
@@ -535,6 +583,47 @@ test('a merge or a close by someone else is told with what still waited, a faile
   expect(text).toContain('maintainer merged the pull request; its watch ended.');
   expect(watches.of(threadId)).toEqual([]);
   expect(harness!.core.journal.getSetting(`pr-watches:${threadId}`)).toBeUndefined();
+  expect(harness!.core.linkedPullRequests.saved(threadId)[0]?.state).toBe('MERGED');
+});
+
+test('a pull request in the merge queue keeps its watch waiting, and leaving the queue unmerged wakes the agent', async () => {
+  const { owner, threadId, github, watches, drive } = await watchedThread();
+  await owner.call('turns.start', { threadId, prompt: 'merge it when green' });
+  await settled(threadId);
+  github.runs = [{ name: 'test' }];
+  await owner.call('threads.watchPullRequest', { threadId });
+  const summary = () => harness!.core.threads.list({}).find(thread => thread.id === threadId)!;
+  // Its head checks passed: nothing left to wait on.
+  expect(summary().requestSince).toBeNull();
+  // Queued: its merge group's checks run where the head's do not show them, so the agent still waits.
+  github.queue = 2;
+  await drive();
+  expect(watches.of(threadId)[0]!.seen?.queue).toEqual({ position: 2 });
+  expect(summary().requestSince).toBeNumber();
+  github.queue = 1;
+  await drive();
+  expect(watches.of(threadId)[0]!.seen?.queue).toEqual({ position: 1 });
+  expect(wakes(threadId)).toHaveLength(0);
+  // Its merge group failed: out of the queue, still open.
+  github.queue = null;
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(1);
+  expect(wakeText(threadId, wakes(threadId)[0]!.id)).toContain('It left the merge queue of main without merging');
+  expect(summary().requestSince).toBeNull();
+  // Queued again and merged between the fingerprint, still open, and the detail read: the merge is the news, not the queue.
+  github.queue = 1;
+  await drive();
+  github.queue = null;
+  github.detailState = 'MERGED';
+  github.closedBy = 'maintainer';
+  await drive();
+  await settled(threadId);
+  expect(wakes(threadId)).toHaveLength(2);
+  const text = wakeText(threadId, wakes(threadId)[1]!.id);
+  expect(text).toContain('maintainer merged the pull request; its watch ended.');
+  expect(text).not.toContain('merge queue');
+  expect(watches.of(threadId)).toEqual([]);
 });
 
 test('changes while the agent works wait for the turn to end and go out as one message', async () => {

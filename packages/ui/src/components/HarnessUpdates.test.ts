@@ -3,7 +3,6 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import MachinesPage from './MachinesPage.svelte';
 import AccountsPage from './AccountsPage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -29,30 +28,33 @@ async function machine(id: string, label: string): Promise<Store> {
   workspace.active = workspace.machines[0]!.store;
   return store;
 }
-const row = (machine: string, provider: string) => document.querySelector<HTMLElement>(`[data-machine-id="${machine}"] [data-testid="machine-agent-update"][data-provider-id="${provider}"]`)!;
-async function showMachines() {
-  mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } });
+const row = (provider: string) => document.querySelector<HTMLElement>(`[data-testid="machine-agent-update"][data-provider-id="${provider}"]`)!;
+/** A machine's Providers page, where its agents' versions and updates live. */
+async function showProviders(store: Store) {
+  if (mounted) await unmount(mounted);
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
   await settle();
 }
 
-test('Machines routes Update and Skip to the owning core even with matching provider IDs', async () => {
+test('Providers routes Update and Skip to the machine it shows even with matching provider IDs', async () => {
   vi.useFakeTimers();
   const local = await machine('local', 'This PC');
   const remote = await machine('remote', 'Builder');
-  await showMachines();
+  await showProviders(local);
   expect(document.querySelector('[data-testid="harness-update-notice"]')).toBeNull();
-  expect(row('local', 'claude').textContent).toContain('2.1.267 → 2.1.278');
-  row('local', 'claude').querySelector<HTMLButtonElement>('[data-testid="harness-update-skip"]')!.click();
+  expect(row('claude').textContent).toContain('2.1.267 → 2.1.278');
+  row('claude').querySelector<HTMLButtonElement>('[data-testid="harness-update-skip"]')!.click();
   await settle();
   expect(local.harnessUpdates.find(update => update.providerId === 'claude')).toMatchObject({ pending: false, skipped: '2.1.278' });
   expect(remote.harnessUpdates.find(update => update.providerId === 'claude')?.pending).toBe(true);
-  row('local', 'claude').querySelector<HTMLButtonElement>('[data-testid="harness-update-unskip"]')!.click();
+  row('claude').querySelector<HTMLButtonElement>('[data-testid="harness-update-unskip"]')!.click();
   await settle();
   expect(local.harnessUpdates.find(update => update.providerId === 'claude')).toMatchObject({ pending: true, skipped: null });
-  row('remote', 'codex').querySelector<HTMLButtonElement>('[data-testid="harness-update-row-run"]')!.click();
+  await showProviders(remote);
+  row('codex').querySelector<HTMLButtonElement>('[data-testid="harness-update-row-run"]')!.click();
   await settle();
   expect(remote.harnessUpdates.find(update => update.providerId === 'codex')?.state).toBe('updating');
-  expect(row('remote', 'codex').textContent).toContain('Updating');
+  expect(row('codex').textContent).toContain('Updating');
   expect(local.harnessUpdates.find(update => update.providerId === 'codex')?.pending).toBe(true);
   await vi.advanceTimersByTimeAsync(1500); await settle();
   expect(remote.harnessUpdates.find(update => update.providerId === 'codex')).toMatchObject({ current: '0.155.1', pending: false });
@@ -64,10 +66,10 @@ test('failed updates retain their reason and retry and unknown releases keep the
   const local = await machine('local', 'This PC');
   local.harnessUpdates = local.harnessUpdates.map(update => update.providerId === 'claude'
     ? { ...update, state: 'failed', pending: true, message: 'the disk is full' } : update);
-  await showMachines();
-  expect(row('local', 'claude').textContent).toContain('the disk is full');
-  expect(row('local', 'claude').querySelector('[data-testid="harness-update-row-run"]')!.textContent).toContain('Try again');
-  const blind = row('local', 'antigravity-cli');
+  await showProviders(local);
+  expect(row('claude').textContent).toContain('the disk is full');
+  expect(row('claude').querySelector('[data-testid="harness-update-row-run"]')!.textContent).toContain('Try again');
+  const blind = row('grok');
   expect(blind.querySelector('.version')?.getAttribute('title')).toContain('Checks by itself');
   blind.querySelector<HTMLButtonElement>('[data-testid="harness-update-row-blind"]')!.click();
   await settle(); await vi.advanceTimersByTimeAsync(1500); await settle();
@@ -75,29 +77,24 @@ test('failed updates retain their reason and retry and unknown releases keep the
   expect(blind.querySelector('[data-testid="harness-update-row-blind"]')).toBeNull();
 });
 
-test('Providers shows no version and no update control, and starts no check', async () => {
+test('the Machines page lists no agent and starts no agent check of its own', async () => {
   const local = await machine('local', 'This PC');
   const load = vi.spyOn(local, 'loadHarnessUpdates');
-  mounted = mount(AccountsPage, { target: document.body, props: { store: local } });
+  const { default: MachinesPage } = await import('./MachinesPage.svelte');
+  mounted = mount(MachinesPage, { target: document.body, props: {} });
   await settle();
-  // Versions and updates live on Machines and updates, one place per machine.
-  expect(document.querySelector('[data-testid="accounts-page"] [data-testid="provider-settings"]')).not.toBeNull();
-  expect(document.querySelector('[data-update-provider]')).toBeNull();
-  expect(document.querySelector('[data-testid="accounts-page"] .version')).toBeNull();
-  expect(document.querySelector('[data-testid="harness-updates-check"]')).toBeNull();
-  expect(document.querySelector('[data-testid="setting-auto-update-harnesses"]')).toBeNull();
-  expect(document.querySelector('[data-testid="harness-update-row-run"]')).toBeNull();
-  expect(document.querySelector('[data-testid="harness-update-row-blind"]')).toBeNull();
-  expect(load).not.toHaveBeenCalled();
-  local.harnessUpdates = []; await settle();
+  // Versions live on each machine's Providers page; Machines only says an update is waiting.
+  expect(document.querySelector('[data-testid="machines-page"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="harness-updates-card"]')).toBeNull();
+  expect(document.querySelector('[data-testid="machine-agent-update"]')).toBeNull();
   expect(load).not.toHaveBeenCalled();
 });
 
-test('Machines refreshes an empty reading once and disables actions after disconnection', async () => {
+test('Providers refreshes an empty reading once, disables actions after disconnection, and shows a paired device nothing', async () => {
   const local = await machine('local', 'This PC');
   local.harnessUpdates = [];
   const load = vi.spyOn(local, 'loadHarnessUpdates');
-  await showMachines();
+  await showProviders(local);
   expect(load).toHaveBeenCalledExactlyOnceWith(true);
   local.connection = 'closed'; await settle();
   const actions = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="harness-updates-card"] button:not(.info-tip)')];

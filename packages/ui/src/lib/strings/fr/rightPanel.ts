@@ -3,6 +3,8 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   rightPanel: {
+    chat: 'Discussion',
+    backToChat: 'Revenir à la discussion',
     resize: 'Redimensionner le panneau, double-clic pour réinitialiser',
     maximize: 'Agrandir le panneau',
     restore: 'Restaurer le panneau',
@@ -20,6 +22,7 @@ export const fr: Translation = {
     file: 'Fichier',
     tasks: 'Tâches',
     device: 'Appareil',
+    window: 'Fenêtre',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
     untitled: 'Navigateur'

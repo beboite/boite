@@ -3,21 +3,46 @@ import { strings } from './strings';
 import type { MenuFit } from './menu-fit';
 /** Position desktop popovers at their anchor and phone menus above the keyboard. */
 export function floating(node: HTMLElement, options: { anchor: () => HTMLElement | null; side?: 'right'; placement?: 'top' | 'bottom'; align?: 'start' | 'end'; sheet?: boolean; matchWidth?: boolean; cap?: number; fit?: (anchor: DOMRect, height: number, topInset: number, cap: number) => MenuFit; dismiss?: () => void }) {
-  const mobile = window.matchMedia('(max-width: 720px)').matches;
   let backdrop: HTMLButtonElement | null = null;
   let backdropMotion: MutationObserver | null = null;
   let closeHistory = () => {};
-  if (mobile && options.sheet !== false && options.dismiss) {
-    backdrop = document.createElement('button');
-    backdrop.className = 'mobile-sheet-backdrop';
-    backdrop.setAttribute('popover', 'manual');
-    backdrop.setAttribute('aria-label', strings.common.close);
-    backdrop.onclick = options.dismiss;
-    document.body.append(backdrop);
-    backdrop.showPopover?.();
-    backdropMotion = new MutationObserver(() => backdrop?.classList.toggle('closing', node.classList.contains('closing')));
-    backdropMotion.observe(node, { attributes: true, attributeFilter: ['class'] });
-    closeHistory = mobileOverlay(options.dismiss);
+  let sheet = false;
+  let desktopWidth = '';
+  let desktopOrigin = '';
+  function setSheet(next: boolean) {
+    if (sheet === next) return;
+    sheet = next;
+    if (sheet) {
+      desktopWidth = node.style.width;
+      desktopOrigin = node.style.transformOrigin;
+      node.dataset.mobileSheet = 'true';
+      if (!options.dismiss) return;
+      backdrop = document.createElement('button');
+      backdrop.className = 'mobile-sheet-backdrop';
+      backdrop.setAttribute('popover', 'manual');
+      backdrop.setAttribute('aria-label', strings.common.close);
+      backdrop.onclick = options.dismiss;
+      document.body.append(backdrop);
+      backdrop.showPopover?.();
+      // A newly opened backdrop must stay below the menu already in the top layer.
+      const focused = node.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+      node.hidePopover?.();
+      node.showPopover?.();
+      focused?.focus({ preventScroll: true });
+      backdropMotion = new MutationObserver(() => backdrop?.classList.toggle('closing', node.classList.contains('closing')));
+      backdropMotion.observe(node, { attributes: true, attributeFilter: ['class'] });
+      closeHistory = mobileOverlay(options.dismiss);
+    } else {
+      closeHistory();
+      closeHistory = () => {};
+      backdropMotion?.disconnect();
+      backdropMotion = null;
+      backdrop?.remove();
+      backdrop = null;
+      delete node.dataset.mobileSheet;
+      node.style.width = desktopWidth;
+      node.style.transformOrigin = desktopOrigin;
+    }
   }
   // The composer's glass blur establishes a containing block for fixed children.
   // The top layer keeps viewport coordinates valid without moving the DOM node,
@@ -30,6 +55,7 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
   const gap = 6;
   const margin = 12;
   function place() {
+    setSheet(window.matchMedia('(max-width: 720px)').matches && options.sheet !== false);
     const anchor = options.anchor();
     if (!anchor) return;
     const box = anchor.getBoundingClientRect();
@@ -37,8 +63,7 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
     const viewport = window.visualViewport;
     const height = viewport?.height ?? window.innerHeight;
     const offset = viewport?.offsetTop ?? 0;
-    if (mobile && options.sheet !== false) {
-      node.dataset.mobileSheet = 'true';
+    if (sheet) {
       node.style.width = `${width - margin * 2}px`;
       node.style.maxHeight = `${Math.max(0, height - margin * 2) * .75}px`;
       node.style.top = `${Math.max(offset + margin, offset + height - node.offsetHeight - margin)}px`;
@@ -81,5 +106,5 @@ export function floating(node: HTMLElement, options: { anchor: () => HTMLElement
   window.addEventListener('scroll', place, true);
   window.visualViewport?.addEventListener('resize', place);
   window.visualViewport?.addEventListener('scroll', place);
-  return { destroy() { closeHistory(); backdropMotion?.disconnect(); backdrop?.remove(); observer.disconnect(); anchor?.removeEventListener('animationend', place); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); window.visualViewport?.removeEventListener('scroll', place); } };
+  return { destroy() { setSheet(false); observer.disconnect(); anchor?.removeEventListener('animationend', place); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); window.visualViewport?.removeEventListener('scroll', place); } };
 }

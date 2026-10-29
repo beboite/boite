@@ -30,12 +30,11 @@ environment variables, with `{isolationDir}` substituted at spawn:
 - Antigravity moves with `GEMINI_HOME`, files `antigravity-acp/acp_token.json`
   under it, and has no default account at all: its descriptor says
   `isolation.alwaysIsolated`, so `accounts.add` gives every account a directory
-  of its own whatever the request asked for.
-- The Antigravity CLI moves with nothing. `agy` keeps its token in the system
-  keyring and its settings under `~/.gemini/antigravity-cli`, and no variable
-  points either elsewhere, so its descriptor declares an empty map and only the
-  default account exists. Its `auth.kind` is `none`: there is no session file to
-  read, and a signed-out agy shows up in the model probe instead.
+  of its own whatever the request asked for. The agent reads its user skills
+  under `GEMINI_HOME`, so the descriptor shares `config/skills` and
+  `antigravity-cli/skills` from the user's own `~/.gemini`; its MCP servers and
+  settings stay out. Project skills (`.gemini/skills`, `.agents/skills`, then
+  the legacy `.agent/skills`) the agent reads itself in the thread's folder.
 
 The same environment goes to every process of that account: a turn, a probe, a
 login. The OS profile owns the map; drivers use the resolved account environment.
@@ -296,7 +295,7 @@ and no terminal.
 - An account of its own, for a provider whose profile has no isolation variable
   and no login block. Such an account would run on the user's own login anyway,
   so `accounts.add` refuses it, names the profile's `isolation` field and says to
-  use the default account. The Antigravity CLI is the shipped example.
+  use the default account. No shipped provider is such a case.
 
 The account controls display each refusal with its field and reason.
 
@@ -359,7 +358,7 @@ the in-memory client mirrors it:
 - With no other account able to run, a removed account is refused as above and
   a signed-out one names itself in the turn's check, as before.
 - A title for such a thread is written on the account its next turn would use.
-- A persistent agent keeps the account its profile names.
+- A bot keeps the account its profile names.
 
 The composer follows the same rule. A draft opens on the remembered account
 while it is signed in, else on another of that provider. The picker shows a

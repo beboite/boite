@@ -1,14 +1,9 @@
 /*
- * The agents page, built like the chat beside it: a list of conversations on
- * the app's frame, cut like the thread list (the switch on top, rows in a
- * card, launchers at the foot), and one framed conversation beside it that
- * reads like a thread. Its cards, hints and rows speak the settings grammar
- * of app.css.
+ * The agents page is the chat with the agents list for its column: the list
+ * stands on the app's frame in the thread list's own frame (RailFrame), the
+ * card beside it holds the agent's header and its thread's ordinary chat view.
+ * Forms and settings speak the settings grammar of app.css.
  */
-/* No entrance of its own: the list beside the card stays put through a switch from the threads, and only the card's content fades in (`.agents-body`). */
-.agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; }
-/* The same gap as between the thread list and the chat card (App.svelte's `.body`). */
-@media (min-width: 721px) { .agents-page { gap: var(--frame-gap); } }
 
 /* The list stands in the thread list's frame (RailFrame) under its head (RailHead); only its rows are its own. */
 .agents-rail { --ring: var(--color-frame); }
@@ -16,28 +11,47 @@
 .agents-search input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; padding: 0; font-size: var(--text-sm); box-shadow: none; }
 .agents-search input:focus { outline: none; }
 .agents-rail .agents-search { margin: 8px 10px 0; }
-.agents-card { margin-bottom: 10px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
+.agents-rail .agents-card { margin-bottom: 10px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
 
-/* The page beside it: who, how it stands, and its views as words. */
-.agents-main { --ring: var(--color-background); flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* The card beside it, where the chat card stands on the thread page. */
+.agents-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.agents-main > .agents-card { --ring: var(--color-background); position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.agents-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: fade var(--dur-2) var(--ease-out-quint); }
 .agents-detail-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 56px; box-sizing: border-box; padding: 8px clamp(12px, 3vw, 24px); border-bottom: 1px solid var(--color-border); }
-.agents-identity { flex: 1; min-width: 0; height: auto; justify-content: flex-start; gap: 10px; padding: 4px 10px 4px 4px; margin-left: -4px; border-radius: var(--radius-lg); text-align: left; color: var(--color-foreground); }
-.agents-identity:hover:not(:disabled) { background: var(--color-hover); }
-.agents-identity-text { display: grid; gap: 1px; min-width: 0; }
-.agents-identity-text strong { font-size: var(--text-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agents-identity-text small { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agents-identity-text small[data-status=running] { color: var(--color-accent); }
-.agents-identity-text small[data-status=waiting] { color: var(--color-live); }
 .agents-detail-heading { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; font-size: var(--text-base); font-weight: 600; }
-.agents-actions { display: flex; align-items: center; gap: 2px; flex: none; }
-.agents-actions .planned { gap: 5px; padding: 0 8px; color: var(--color-muted-foreground); }
-.agents-actions .planned.active, .agents-actions .back-chat { color: var(--color-foreground); }
-.agents-actions .planned.active { background: var(--color-active); }
-.agents-actions .back-chat { gap: 6px; }
-.agents-actions .menu .trigger.ghost { width: var(--control); height: var(--control); padding: 0; }
 .agent-mobile-back { flex: none; }
 .agents-body { flex: 1; min-height: 0; overflow-y: auto; padding: 24px clamp(20px, 4vw, 48px) 40px; animation: fade var(--dur-2) var(--ease-out-quint); }
-.agents-body.chat { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+
+/* The agent's header: its robot, its name, the live line; the desk and the menu on the right. */
+.agent-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 60px; box-sizing: border-box; padding: 8px clamp(10px, 2vw, 18px); border-bottom: 1px solid var(--color-border); }
+.agent-head-identity { flex: 1; min-width: 0; height: auto; justify-content: flex-start; gap: 12px; padding: 4px 10px 4px 7px; margin-left: -4px; border-radius: var(--radius-lg); text-align: left; color: var(--color-foreground); }
+.agent-head-identity:hover:not(:disabled) { background: var(--color-hover); }
+.agent-head-robot { display: inline-flex; flex: none; }
+.agent-head-text { display: grid; gap: 2px; min-width: 0; }
+.agent-head-text strong { font-size: var(--text-md); font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-live { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+.agent-live-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-live-time { flex: none; display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+/* Hue says status only: what waits on the user in the live colour, a failure in danger; work reads in the foreground, the robot's ring breathing beside it. */
+.agent-live[data-state='working'] .agent-live-text { color: var(--color-foreground); }
+.agent-live[data-state='waiting'] .agent-live-text { color: var(--color-live); }
+.agent-live[data-state='error'] .agent-live-text { color: var(--color-danger); }
+.agent-head-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.agent-head-actions > button.active { background: var(--color-active); color: var(--color-foreground); }
+.agent-head-actions .menu .trigger.ghost { width: var(--control); height: var(--control); padding: 0; }
+.agent-problem { flex: none; display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px clamp(12px, 3vw, 24px); border-bottom: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-live) 10%, transparent); color: var(--color-foreground); font-size: var(--text-sm); }
+.agent-problem > svg { flex: none; color: var(--color-live); }
+.agent-problem > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agent-problem > button { flex: none; }
+
+/* Settings and brain: a sheet over the conversation, which stays where it was underneath. */
+.agent-sheet { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--color-background); animation: rise var(--dur-3) var(--ease-out-quint); outline: none; }
+.agent-sheet.closing { animation: fade-out var(--dur-2) var(--ease-out-quint) forwards; }
+.agent-sheet-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 8px clamp(12px, 3vw, 24px); border-bottom: 1px solid var(--color-border); }
+.agent-sheet-head h2 { flex: 1; min-width: 0; margin: 0; font-size: var(--text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 24px clamp(20px, 4vw, 48px) 40px; }
+.agent-sheet-body > .agents-form, .agent-sheet-body > .agent-routines { margin-bottom: 24px; }
+
 /* A new agent's identity: its robot beside the name, the robot's two tools under it. */
 .agent-identity { display: flex; align-items: flex-start; gap: 20px; min-width: 0; }
 .agent-portrait { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: none; }
@@ -58,15 +72,15 @@
 .agent-machine { display: inline-flex; align-items: center; gap: 8px; min-height: var(--control); font-size: var(--text-sm); }
 
 /* The settings grammar, for this page. */
-.agents-page .card { max-width: var(--settings-width); padding: var(--settings-padding); margin: 0 0 16px; box-shadow: none; min-width: 0; }
-.agents-page .card > h2, .agent-card-head h2 { font-size: var(--text-md); font-weight: 600; margin-bottom: 14px; }
-.agents-page .card > h2:has(+ .hint) { margin-bottom: 4px; }
-.agents-page .card > h2 + .hint { margin-bottom: 16px; }
-.agents-page .hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-.agents-page .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 52px; padding: 12px 0; }
-.agents-page .switch-row + .switch-row { border-top: 1px solid var(--color-border); }
-.agents-page .switch-row .text { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: 500; }
-.agents-page .switch-row .text .hint { display: block; margin-top: 3px; font-weight: 400; overflow-wrap: anywhere; }
+.agents-main .card { max-width: var(--settings-width); padding: var(--settings-padding); margin: 0 0 16px; box-shadow: none; min-width: 0; }
+.agents-main .card > h2, .agent-card-head h2 { font-size: var(--text-md); font-weight: 600; margin-bottom: 14px; }
+.agents-main .card > h2:has(+ .hint) { margin-bottom: 4px; }
+.agents-main .card > h2 + .hint { margin-bottom: 16px; }
+.agents-main .hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
+.agents-main .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 52px; padding: 12px 0; }
+.agents-main .switch-row + .switch-row { border-top: 1px solid var(--color-border); }
+.agents-main .switch-row .text { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: 500; }
+.agents-main .switch-row .text .hint { display: block; margin-top: 3px; font-weight: 400; overflow-wrap: anywhere; }
 .agent-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .agent-card-head h2, .agent-card-head h3 { margin: 0; }
 .agent-card-head h3 { font-size: var(--text-base); font-weight: 500; }
@@ -76,7 +90,7 @@
 .agents-form .card, .agents-form.card { display: flex; flex-direction: column; gap: 16px; }
 .agents-form .card > h2, .agents-form.card > h2 { margin-bottom: -4px; }
 .agents-form .card > h2 + .hint, .agents-form.card > h2 + .hint { margin: -8px 0 0; }
-.agents-page fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.agents-main fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-padding); }
 .agent-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-sm); font-weight: 500; min-width: 0; }
 .agent-field > span:first-child { display: flex; flex-direction: column; gap: 2px; }
@@ -112,133 +126,13 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 /* Lists and records. */
 .agent-empty { padding: 16px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
 .agent-state { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
-.agents-page [data-status=running].agent-state, .agents-page [data-status=review].agent-state { color: var(--color-accent); }
-.agents-page [data-status=done].agent-state { color: var(--color-success); }
-.agents-page [data-status=waiting].agent-state, .agents-page [data-status=interrupted].agent-state { color: var(--color-live); }
-.agents-page [data-status=error].agent-state { color: var(--color-danger); }
+.agents-main [data-status=running].agent-state, .agents-main [data-status=review].agent-state { color: var(--color-accent); }
+.agents-main [data-status=done].agent-state { color: var(--color-success); }
+.agents-main [data-status=waiting].agent-state, .agents-main [data-status=interrupted].agent-state { color: var(--color-live); }
+.agents-main [data-status=error].agent-state { color: var(--color-danger); }
 .agent-error { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin: 12px clamp(20px, 4vw, 48px) 0; padding: 10px 14px; border-radius: var(--radius-md); background: var(--color-surface-2); border-left: 3px solid var(--color-danger); overflow-wrap: anywhere; font-size: var(--text-sm); }
-.agent-link-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; max-width: var(--settings-width); height: auto; min-height: 44px; padding: 10px 14px; margin-bottom: 6px; text-align: left; }
-.card .agent-link-row { margin: 0; padding: 10px 0; border-radius: 0; background: none; box-shadow: none; border: 0; }
-.card .agent-link-row + .agent-link-row { border-top: 1px solid var(--color-border); }
-.agents-body > .section-label { display: block; max-width: var(--settings-width); margin: 8px 0 10px; }
-.agents-body > .section-label ~ .section-label { margin-top: 24px; }
-.agent-work p, .agent-task p { margin: 8px 0; font-size: var(--text-sm); }
-.agent-work-prompt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-muted-foreground); }
-.agent-work .agent-form-actions { margin-top: 12px; }
-.agent-decision { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); gap: 12px; }
-.agent-decision label { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-sm); }
-.agent-decision .agent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.agent-task + .agent-task { border-top: 1px solid var(--color-border); }
-.agent-task { padding: 14px 0; display: flex; flex-direction: column; gap: 8px; }
-.agent-task:first-of-type { padding-top: 0; }
-.agent-task .agent-card-head { margin: 0; align-items: flex-start; }
-.agent-mission-brief p { margin-top: 8px; }
 .agent-prewrap { white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-record { padding: 10px 0; font-size: var(--text-sm); }
-.agent-record + .agent-record { border-top: 1px solid var(--color-border); }
-.agent-record summary { cursor: pointer; font-weight: 500; }
-.agent-record p { margin: 8px 0; }
-.agent-knowledge { display: contents; }
 .agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-
-/* Members and missions, the panes a header icon opens. */
-.agent-member { display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; height: auto; min-height: 52px; padding: 8px; border: 0; border-radius: var(--radius-md); text-align: left; color: var(--color-foreground); }
-.card .agent-member { margin: 0 -8px; width: calc(100% + 16px); }
-.agent-member-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
-.agent-member-text strong { font-size: var(--text-base); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agent-member-text small { color: var(--color-muted-foreground); font-size: var(--text-sm); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agent-member-text input { width: 100%; box-sizing: border-box; margin-top: 4px; font-weight: 400; }
-.agent-roles { display: flex; flex-direction: column; gap: 4px; }
-.agent-roles .agent-form-actions { margin-top: 12px; }
-.agent-start { max-width: var(--settings-width); }
-.agent-field > span.agent-label:first-child { flex-direction: row; align-items: center; gap: 2px; }
-
-/*
- * The conversation, cut like a thread: bubbles for the user, prose for the
- * agents, the composer at the bottom. The composer sits under the transcript's
- * scroll box, not over it, so it draws the thread composer's surface without
- * its backdrop blur (render-cost.test.ts).
- */
-.agent-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.agent-chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 20px 12px; overscroll-behavior: contain; }
-.agent-chat-column { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: var(--content); margin: 0 auto; min-height: 100%; }
-.agent-older { display: flex; align-self: center; margin: 4px auto; }
-.agent-day { display: flex; align-items: center; gap: 12px; margin: 4px 0 -4px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-.agent-day::before, .agent-day::after { content: ''; flex: 1; height: 1px; background: var(--color-border); }
-.agent-day span::first-letter { text-transform: uppercase; }
-.agent-message { display: flex; flex-direction: column; min-width: 0; animation: rise var(--dur-3) var(--ease-out-quint); }
-.agent-message.from-user { align-items: flex-end; }
-.agent-message .bubble { max-width: min(85%, var(--prose)); padding: 12px 16px; background: var(--color-accent-soft); border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent); border-radius: var(--radius-bubble); border-bottom-right-radius: var(--radius-sm); box-shadow: var(--shadow-e1); }
-.agent-message .user-text { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: var(--text-reading); line-height: var(--leading-reading); }
-.agent-message.from-user > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin: 4px 2px 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
-.agent-message:not(.first) { margin-top: -14px; }
-/* A labelled reply (a notice, a planned task, a thread's ending) starts its own run, even from the same agent. */
-.agent-message.labelled:not(.first) { margin-top: 0; }
-.agent-message.from-agent > header { display: flex; align-items: center; gap: 8px; margin: 0 0 6px 2px; }
-.agent-message.from-agent > header strong { font-size: var(--text-sm); font-weight: 600; }
-.agent-message .answer { max-width: var(--prose); overflow-wrap: anywhere; }
-.agent-chat-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 32px 16px; text-align: center; color: var(--color-muted-foreground); }
-.agent-chat-empty p { max-width: 420px; }
-/* The other side at work, the way a messenger shows it typing: three dots in a bubble. */
-.agent-typing { display: flex; align-items: center; gap: 8px; animation: rise var(--dur-3) var(--ease-out-quint); }
-.typing-bubble { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-bubble); border-bottom-left-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-muted-foreground); font-size: var(--text-sm); }
-.agent-typing[data-status=waiting] .typing-bubble { color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 45%, var(--color-border)); }
-.typing-bubble .dots { display: inline-flex; gap: 4px; }
-.typing-bubble .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-muted-foreground); animation: typing-dot 1.2s ease-in-out infinite var(--loops); }
-.typing-bubble .dots i:nth-child(2) { animation-delay: 0.15s; }
-.typing-bubble .dots i:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typing-dot { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .typing-bubble .dots i { animation: none; opacity: 0.6; } }
-html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0.6; }
-/* A thread entrusted to the agent: the take-over marked across the conversation like a started thread, the ending as a label over the agent's bubble. */
-.agent-marker { align-self: stretch; display: flex; align-items: center; gap: 10px; margin: 2px 0; font-size: var(--text-xs); color: var(--color-accent); }
-.agent-marker .rule { flex: 1; min-width: 12px; height: 1px; background: color-mix(in oklch, var(--color-accent) 45%, transparent); }
-.agent-marker .label { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; height: auto; color: var(--color-accent); font-size: var(--text-xs); font-weight: 600; white-space: normal; text-align: center; overflow-wrap: anywhere; }
-.agent-marker .label svg { flex: none; }
-.agent-message .event-label { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: auto; margin: 0 0 6px; padding: 2px 6px 2px 4px; font-size: var(--text-xs); font-weight: 600; color: var(--color-muted-foreground); white-space: normal; text-align: left; }
-.agent-message .event-label svg { flex: none; color: var(--color-success); }
-.agent-message .event-label[data-event=blocked], .agent-message .event-label[data-event=blocked] svg { color: var(--color-live); }
-.agent-message .event-label[data-event=stopped] svg { color: var(--color-danger); }
-.agent-message .event-label:disabled { opacity: 1; cursor: default; }
-.planned-label { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 4px; font-size: var(--text-xs); font-weight: 600; color: var(--color-accent); }
-/* What the agent attached while it worked, under its answer the way a thread shows it. */
-.agent-files { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: var(--prose); margin-top: 8px; }
-/* The memory pass after a reply: quiet, its one-line summary on hover or on a tap. */
-.agent-memory-pass { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 6px 0 0 2px; }
-.agent-memory-pass .memory-chip { display: inline-flex; align-items: center; gap: 5px; height: auto; padding: 2px 8px 2px 6px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); }
-.agent-memory-pass .memory-chip:disabled { opacity: 1; cursor: default; }
-.agent-memory-pass[data-status=running] .memory-chip { opacity: 0.6; }
-.agent-memory-pass .memory-summary { max-width: min(100%, var(--prose)); margin: 0 0 0 4px; font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); overflow-wrap: anywhere; animation: rise var(--dur-2) var(--ease-out-quint); }
-.agent-message.from-agent > footer { margin: 4px 4px 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
-.agent-message.from-user > footer .failed { color: var(--color-danger); }
-.agent-chat-column > .card { max-width: none; }
-.agent-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--color-live) 45%, var(--color-border)); border-radius: var(--radius-lg); background: var(--color-surface); animation: rise var(--dur-3) var(--ease-out-quint); }
-.agent-ask[data-status=error], .agent-ask[data-status=interrupted] { border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border)); }
-.agent-ask > header { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.agent-ask > header strong { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 600; }
-.agent-ask > header button { gap: 6px; flex: none; }
-.agent-ask-question { margin: 0; font-size: var(--text-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-ask-answers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.agent-ask-answers .chip { height: var(--control); padding: 0 12px; cursor: pointer; font-size: var(--text-sm); font-weight: 500; }
-.agent-ask-free { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-ask-free input { flex: 1; min-width: 0; height: var(--control); }
-.agent-ask-free button { flex: none; width: var(--control); height: var(--control); border-radius: var(--radius-md); }
-.agent-ask .agent-error { margin: 0; }
-.agent-composer-wrap { flex: none; padding: 8px 20px 16px; }
-.agent-composer { position: relative; display: flex; flex-direction: column; width: 100%; max-width: var(--content); margin: 0 auto; background: var(--composer-glaze) var(--color-composer-surface); border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-composer); transition: border-color var(--dur-2) var(--ease-out-quint); }
-.agent-composer:focus-within { border-color: var(--color-composer-focus); }
-.agent-composer textarea { display: block; width: 100%; min-height: 44px; max-height: 200px; padding: 12px 14px 6px; border: none; background: transparent; box-shadow: none; resize: none; font: inherit; font-size: var(--text-base); line-height: 1.5; field-sizing: content; }
-.agent-composer textarea:focus { outline: none; border: none; }
-.agent-composer-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px 10px; }
-.agent-composer-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.agent-composer-chips .chip { height: var(--control); padding: 0 10px; gap: 7px; border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 500; cursor: pointer; }
-.agent-composer-chips .chip.ghost-chip { border-color: transparent; background: transparent; color: var(--color-muted-foreground); font-weight: 400; }
-.agent-composer-chips .chip.ghost-chip:hover { background: var(--color-hover); color: var(--color-foreground); }
-.agent-composer .send { margin-left: auto; width: var(--control); height: var(--control); border-radius: var(--radius-md); flex: none; }
-.agent-recipients { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-recipients .chip.on { border-color: var(--color-edge); background: var(--color-active); color: var(--color-foreground); }
-.agent-recipients .chip { padding-left: 6px; }
-.agent-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Planning: the form that plans a task, and each routine in words. */
 .agent-schedule .segmented { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); align-self: flex-start; }
@@ -282,33 +176,25 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 .agent-welcome > svg { box-sizing: content-box; padding: 16px; border-radius: 50%; background: var(--color-surface-2); color: var(--color-foreground); }
 .agent-welcome > p { font-size: var(--text-base); }
 
-/* A phone: the list is the screen, a page opens over it with a back arrow and no tab bar. */
+/* A phone: the list is the screen, the conversation opens over it with a back arrow. */
 @media (max-width: 720px) {
-  .agents-page { flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
-  .agents-page .agents-rail { --ring: var(--color-background); background: var(--color-background); }
+  .agents-rail { --ring: var(--color-background); background: var(--color-background); }
   .agents-main { display: none; }
-  .agents-page.detail-open .agents-rail { display: none; }
-  .agents-page.detail-open .agents-main { display: flex; flex: 1; }
-  .agents-page.no-agents:not(.detail-open) .agents-rail { flex: none; }
-  .agents-page.no-agents:not(.detail-open) .agents-main { display: flex; flex: 1; }
-  .agents-detail-head .menu .trigger.ghost, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
+  :root.agents-detail-open .agents-rail { display: none; }
+  :root.agents-detail-open .agents-main { display: flex; }
+  .agent-head { gap: 2px; min-height: 56px; padding: 6px 8px 6px 4px; }
+  .agent-head-actions .menu .trigger.ghost, .agent-head > button.icon, .agent-head-actions > button.icon, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
   .agents-detail-head { gap: 2px; min-height: 56px; padding: 6px 8px 6px 4px; }
-  .agents-detail-head > button.small:not(.icon) { font-size: 0; gap: 0; width: var(--control-touch); height: var(--control-touch); padding: 0; }
-  .agents-body { padding: 16px 16px 32px; }
-  .agent-chat-scroll { padding: 12px 12px 8px; }
-  .agent-composer-wrap { padding: 6px 10px 10px; }
-  .agent-composer { box-shadow: var(--shadow-e1); }
-  .agent-composer textarea { font-size: var(--text-md); }
+  .agents-body, .agent-sheet-body { padding: 16px 16px 32px; }
   .agent-error { margin: 12px 16px 0; }
-  .agents-page .card { padding: 16px; }
+  .agents-main .card { padding: 16px; }
   .agent-more > summary { padding: 14px 16px; }
   .agent-row-field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .agent-row-label { min-height: 0; }
   .agent-identity { gap: 14px; }
   .agent-more[open] { padding: 0 16px 16px !important; }
   .agent-more[open] > summary { margin: 0 -16px; }
-  .agent-message .bubble { max-width: 90%; padding: 10px 14px; }
-  .agents-page .switch-row { flex-wrap: wrap; }
+  .agents-main .switch-row { flex-wrap: wrap; }
   .routine-prompt, .routine-last, .routine-card .agent-actions { padding-left: 0; }
 }
 /* The folder agents' brains live under: the path, then the way to move them. */
@@ -323,3 +209,169 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 .agent-brain-folders { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .agent-brain-folders > code { flex: 1 0 100%; font-size: var(--text-xs); color: var(--color-muted-foreground); overflow-wrap: anywhere; }
 .agent-brain-root ~ .agent-error { margin: 12px 0 0; }
+
+/*
+ * The desk keeps Now above three tabs. Activity and daily usage open on
+ * request; the active pane keeps its forms mounted when another tab opens.
+ */
+.agent-desk { display: flex; flex-direction: column; gap: 20px; height: 100%; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 12px 12px 28px; container-type: inline-size; }
+.agent-desk > * { flex: none; }
+.agent-desk .hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
+.desk-now { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); }
+.desk-now-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.desk-now-robot { flex: none; display: inline-flex; padding: 3px; }
+.desk-now-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.desk-now-line { font-size: var(--text-md); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; animation: rise var(--dur-3) var(--ease-out-quint); }
+.desk-now[data-state='waiting'] .desk-now-line { color: var(--color-live); }
+.desk-now[data-state='error'] .desk-now-line { color: var(--color-danger); }
+.desk-now-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
+.desk-activity { border-top: 1px solid var(--color-border); padding-top: 4px; }
+.desk-activity > summary { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); color: var(--color-muted-foreground); font-size: var(--text-xs); cursor: pointer; list-style: none; }
+.desk-activity > summary:hover { color: var(--color-foreground); }
+.desk-activity > summary::-webkit-details-marker, .desk-day > summary::-webkit-details-marker { display: none; }
+.desk-activity[open] > summary .fold-caret, .desk-day[open] > summary .fold-caret { transform: rotate(90deg); }
+.desk-tabs { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.desk-tabs > button { flex: 1; min-width: 0; min-height: var(--control); gap: 6px; padding: 4px 6px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-muted-foreground); font-size: var(--text-sm); box-shadow: none; }
+.desk-tabs > button:hover { background: var(--color-hover); color: var(--color-foreground); }
+.desk-tabs > button[aria-selected='true'] { background: var(--color-surface-3); color: var(--color-foreground); box-shadow: var(--shadow-e1); }
+.desk-tabs > button > svg { flex: none; }
+.desk-tab-count { font-size: var(--text-xs); color: var(--color-subtle); font-variant-numeric: tabular-nums; }
+.desk-tabs .desk-tab-alert { color: var(--color-danger); }
+.desk-pane[hidden] { display: none; }
+.desk-pane { outline-offset: 4px; }
+/* The last calls on a slim timeline: a hairline down the marks, the running one spinning, each new one rising in. */
+.desk-steps { list-style: none; margin: 0; padding: 2px 0 0 15px; display: flex; flex-direction: column; gap: 1px; position: relative; }
+.desk-steps::before { content: ''; position: absolute; left: 22px; top: 10px; bottom: 10px; width: 1px; background: var(--color-border); }
+.desk-steps li { position: relative; display: flex; align-items: center; gap: 10px; min-height: 24px; font-size: var(--text-sm); color: var(--color-muted-foreground); animation: rise var(--dur-3) var(--ease-out-quint); }
+.desk-steps li[data-status='running'] { color: var(--color-foreground); }
+.desk-step-mark { flex: none; z-index: 1; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; background: var(--color-surface); color: var(--color-success); }
+.desk-steps li[data-status='running'] .desk-step-mark { color: var(--color-foreground); }
+.desk-steps li[data-status='running'] .desk-step-mark svg { animation: spin 1s linear infinite var(--loops); }
+.desk-steps li[data-status='error'] .desk-step-mark { color: var(--color-danger); }
+.desk-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-step-text.mono { font-family: var(--font-mono); font-size: var(--text-xs); }
+.agent-desk .desk-error { margin: 0; }
+/* A section: a small label, then rows parted by hairlines. */
+.desk-section { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.desk-head { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); padding: 0 2px; }
+.desk-head h3 { flex: 1; margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--color-muted-foreground); }
+.desk-count { font-size: var(--text-xs); font-weight: 500; color: var(--color-subtle); font-variant-numeric: tabular-nums; margin-right: auto; }
+.desk-head h3:has(+ .desk-count) { flex: none; }
+.desk-empty { margin: 0; padding: 6px 2px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
+.desk-rows { display: flex; flex-direction: column; }
+.desk-rows > * + * { border-top: 1px solid var(--color-border); }
+/* A thread on its desk, one row: the dot says how it stands, the title, when it moved, one meta line; the question under it. */
+.desk-row { --tone: var(--color-subtle); position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 8px 2px 8px 4px; border-radius: var(--radius-md); animation: rise var(--dur-3) var(--ease-out-quint); transition: background var(--dur-2) var(--ease-out-quint); }
+.desk-row:hover, .desk-row:focus-within { background: var(--color-hover); }
+.desk-card-open { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: none; cursor: pointer; }
+.desk-card-open:hover { background: none; }
+.desk-card-open:focus-visible { outline-offset: -2px; }
+.desk-row > :not(.desk-card-open) { position: relative; z-index: 1; pointer-events: none; }
+.desk-row button:not(.desk-card-open), .desk-row a { pointer-events: auto; }
+.desk-dot { --tone: var(--color-edge); flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; border: 1.5px solid var(--tone); background: transparent; transition: background var(--dur-2) var(--ease-out-quint), border-color var(--dur-2) var(--ease-out-quint); }
+.desk-dot[data-tone='accent'] { --tone: var(--color-accent); }
+.desk-dot[data-tone='live'] { --tone: var(--color-live); }
+.desk-dot[data-tone='danger'] { --tone: var(--color-danger); }
+.desk-dot[data-tone='success'] { --tone: var(--color-success); }
+.desk-row:is([data-state='working'], [data-state='needs-you'], [data-state='failed'], [data-state='merged'], [data-state='done']) .desk-dot { background: var(--tone); }
+.desk-row[data-state='queued'] .desk-dot { border-style: dashed; --tone: var(--color-muted-foreground); }
+.desk-row:is([data-state='working'], [data-state='needs-you'], [data-state='queued']) .desk-dot { animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+.desk-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.desk-row-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
+.desk-card-title { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: 500; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-card-when { flex: none; font-size: var(--text-xs); color: var(--color-subtle); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.desk-card-drop { flex: none; width: 20px; height: 20px; margin: 0 -2px 0 -4px; color: var(--color-subtle); opacity: 0; transition: opacity var(--dur-2) var(--ease-out-quint); }
+.desk-row:hover .desk-card-drop, .desk-row:focus-within .desk-card-drop { opacity: 1; }
+.desk-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); line-height: 1.4; }
+.desk-chip { --tone: var(--color-muted-foreground); color: var(--tone); font-weight: 500; animation: pop var(--dur-2) var(--ease-out-quint); }
+.desk-chip[data-tone='live'] { --tone: var(--color-live); }
+.desk-chip[data-tone='danger'] { --tone: var(--color-danger); }
+.desk-chip[data-tone='success'] { --tone: var(--color-success); }
+.desk-card-silent { color: var(--color-live); }
+.desk-card-unreachable { color: var(--color-danger); }
+.desk-card-pr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.desk-pr-badge, .desk-pr-checks { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.desk-card-pr[data-pr='open'] .desk-pr-badge, .desk-card-pr[data-pr='draft'] .desk-pr-badge { color: var(--color-live); }
+.desk-card-pr[data-pr='merged'] .desk-pr-badge { color: var(--color-success); }
+.desk-card-pr[data-pr='closed'] .desk-pr-badge { color: var(--color-danger); }
+.desk-card-pr[data-checks='failing'] .desk-pr-checks { color: var(--color-danger); }
+.desk-card-pr[data-checks='passing'] .desk-pr-checks { color: var(--color-success); }
+.desk-card-pr[data-checks='pending'] .desk-pr-checks svg { animation: spin 1s linear infinite var(--loops); }
+/* The question a thread asks, under its line: the words, then its options; no box of its own. */
+.desk-question { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 2px; }
+.desk-question > p { margin: 0; font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.desk-options { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Its routines as rows: the clock, the name over when it runs and runs next, the actions as icons on hover and focus. */
+.agent-desk .agent-routines { display: flex; flex-direction: column; gap: 4px; max-width: none; }
+.desk-routine { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 8px 2px 8px 4px; border-radius: var(--radius-md); transition: background var(--dur-2) var(--ease-out-quint); }
+.desk-routine:hover, .desk-routine:focus-within { background: var(--color-hover); }
+.desk-routine-icon { flex: none; display: inline-flex; margin-top: 3px; color: var(--color-muted-foreground); }
+.desk-routine-icon[data-state='paused'] { color: var(--color-live); }
+.desk-routine-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.desk-routine-text strong { font-size: var(--text-base); font-weight: 500; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-routine-when { font-size: var(--text-xs); color: var(--color-muted-foreground); line-height: 1.4; }
+.desk-routine-when .routine-state { font-size: inherit; font-weight: 400; color: var(--color-muted-foreground); white-space: normal; }
+.desk-routine-when .routine-state[data-state='next'] { color: var(--color-foreground); }
+.desk-routine-when .routine-state[data-state='paused'] { color: var(--color-live); }
+.desk-routine-last { font-size: var(--text-xs); font-weight: 400; white-space: normal; }
+.agent-desk .desk-routine-last[data-status='quiet'], .agent-desk .desk-routine-last[data-status='done'] { color: var(--color-muted-foreground); }
+.agent-desk .desk-routine-last[data-status='error'] { color: var(--color-danger); }
+.desk-routine-actions { flex: none; display: flex; gap: 0; margin: -2px -2px 0 0; opacity: 0; transition: opacity var(--dur-2) var(--ease-out-quint); }
+.desk-routine:hover .desk-routine-actions, .desk-routine:focus-within .desk-routine-actions { opacity: 1; }
+.desk-routine-actions button { width: 24px; height: 24px; color: var(--color-muted-foreground); }
+.agent-desk .agent-schedule, .agent-desk .agent-schedule.card { margin: 4px 0 8px; padding: 12px; }
+.agent-desk .agent-field textarea { min-height: 96px; }
+/* Its memory: the last pass on one subtle line, the file as a two-line preview that opens, its ways of working folded under. */
+.desk-memory-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; padding: 0 2px; font-size: var(--text-xs); color: var(--color-subtle); min-width: 0; }
+.desk-memory-pass > svg { flex: none; }
+.desk-memory-pass[data-status='running'] > svg { animation: pulse 1.6s var(--loop-ease-in-out-48) infinite var(--loops); }
+.desk-memory-pass[data-status='error'] { color: var(--color-danger); }
+.desk-memory-pass-when { flex: none; white-space: nowrap; }
+.desk-memory-pass-summary { flex-basis: 100%; min-width: 0; padding-left: 18px; overflow-wrap: anywhere; }
+.desk-memory { padding: 4px 2px 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
+.desk-memory:not(.open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.desk-memory .prose { font-size: inherit; }
+/* A preview, not a page: headings at the text's size, lists tight. */
+.agent-desk .desk-memory .prose :is(h1, h2, h3, h4) { font-size: var(--text-sm); font-weight: 600; margin: 0 0 2px; line-height: 1.5; }
+.agent-desk .desk-memory .prose :is(p, ul, ol) { margin: 0 0 4px; }
+.agent-desk .desk-memory .prose :is(ul, ol) { padding-left: 18px; }
+.agent-desk .desk-memory .prose li { margin: 0; }
+.desk-memory .prose > :first-child { margin-top: 0; }
+.desk-memory .prose > :last-child { margin-bottom: 0; }
+.desk-memory-more { align-self: flex-start; gap: 4px; padding: 0 4px; margin-left: -2px; color: var(--color-subtle); }
+.desk-ways > summary { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); padding: 0 2px; cursor: pointer; list-style: none; font-size: var(--text-xs); color: var(--color-subtle); }
+.desk-ways > summary::-webkit-details-marker { display: none; }
+.desk-ways > summary:hover { color: var(--color-foreground); }
+.desk-ways > summary code { font-size: var(--text-xs); }
+.desk-ways[open] > summary { color: var(--color-foreground); }
+/* Its day: the counts on one line, the spend at its end, a slim bar for the budget under them. */
+.desk-day { margin-top: auto; border-top: 1px solid var(--color-border); padding-top: 8px; }
+.desk-day > summary { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); cursor: pointer; list-style: none; }
+.desk-day > summary:hover { color: var(--color-foreground); }
+.desk-day[open] .desk-budget { padding-top: 8px; }
+.desk-budget { display: flex; flex-direction: column; gap: 6px; padding: 0 2px; }
+.desk-today-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
+.desk-stat strong { font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); }
+.desk-spent { margin-left: auto; color: var(--color-foreground); font-weight: 500; }
+.desk-meter { height: 3px; border-radius: var(--radius-full); background: var(--color-surface-3); overflow: hidden; }
+.desk-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--color-muted-foreground); transition: width var(--dur-3) var(--ease-out-quint); }
+.desk-budget[data-reached='true'] .desk-meter > span { background: var(--color-danger); }
+.desk-budget-note { margin: 0; font-size: var(--text-xs); color: var(--color-danger); }
+.desk-budget-set { align-self: flex-start; }
+@container (max-width: 310px) {
+  .desk-tabs > button > svg:not(.desk-tab-alert) { display: none; }
+}
+/* Reduced motion stills the desk: no pulse, no spin, no entrance. */
+@media (prefers-reduced-motion: reduce) {
+  .desk-dot, .desk-step-mark svg, .desk-card-pr svg, .desk-memory-pass > svg { animation: none !important; }
+  .desk-now-line, .desk-steps li, .desk-row, .desk-chip { animation: none; }
+}
+html[data-motion='reduced'] :is(.desk-memory-pass > svg, .desk-dot, .desk-step-mark svg, .desk-card-pr svg) { animation: none !important; }
+html[data-motion='reduced'] :is(.desk-now-line, .desk-steps li, .desk-row, .desk-chip) { animation: none; }
+@media (max-width: 720px) {
+  .agent-desk { padding: 12px 12px 24px; }
+  .desk-tabs > button, .desk-day > summary, .desk-activity > summary { min-height: var(--control-touch); }
+  .desk-card-drop, .desk-routine-actions { opacity: 1; }
+  .desk-card-drop { width: var(--control-touch); height: var(--control-touch); margin: -10px -8px -10px -6px; }
+  .desk-routine-actions button { width: 32px; height: 32px; }
+}

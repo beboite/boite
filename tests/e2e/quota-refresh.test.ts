@@ -61,7 +61,7 @@ test('limits identify the owning machine in the desktop glance and desktop and p
       await page.click('[data-testid="limits-glance-page"]');
     }
     await page.waitFor(`document.querySelector('[data-testid="limits-page"]')`);
-    const heading = width === 1280 ? '[data-testid="limits-page"] h1' : '[data-testid="settings"] > header h1';
+    const heading = width === 1280 ? '[data-testid="limits-page"] h1' : '[data-testid="mobile-settings-header"] h1';
     expect((await page.text(heading)).trim()).toBe('Account limits for Builder');
     expect(await page.evaluate(`document.querySelector('${heading}')?.getClientRects().length > 0`)).toBe(true);
     // A renamed machine remains identifiable even on a narrow phone.
@@ -78,6 +78,50 @@ test('limits identify the owning machine in the desktop glance and desktop and p
     expect(await page.text(scope)).not.toContain('Build server');
     expect(page.errors()).toEqual([]);
     await page.evaluate(`localStorage.removeItem('boite.machine-profiles')`);
+  }
+}, 60_000);
+
+test('a single quota window fills the row in the desktop glance and narrow tray', async () => {
+  for (const view of ['desktop', 'tray']) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: view === 'desktop' ? 1280 : 390, height: view === 'desktop' ? 850 : 460, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(`${origin}/?fake=1&open=recent${view === 'tray' ? '&view=quotas' : ''}`);
+    await page.evaluate(`(async () => {
+      const { FakeClient } = await import('/src/lib/fake-client.ts');
+      const call = FakeClient.prototype.call;
+      globalThis.quotaWindowCount = 1;
+      FakeClient.prototype.call = async function(method, params) {
+        const result = await call.call(this, method, params);
+        if (method !== 'quotas.list') return result;
+        return result.map(row => ({ ...row, windows: row.windows.slice(0, globalThis.quotaWindowCount) }));
+      };
+    })()`);
+    if (view === 'desktop') await page.click('[data-testid="nav-limits"]');
+    const refresh = `[data-testid="${view === 'tray' ? 'quota' : 'limits-glance'}-refresh"]`;
+    const meters = '[data-testid="quota-provider"][data-provider="codex"] .meters';
+    await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false'`);
+    for (const count of [1, 2, 1]) {
+      await page.evaluate(`globalThis.quotaWindowCount = ${count}`);
+      await page.click(refresh);
+      await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false' && document.querySelectorAll('${meters} .mini-window').length === ${count}`);
+      if (count === 1) await capture(`quota-single-window-${view}.png`);
+      const layout = await page.evaluate<{ available: number; windows: { left: number; right: number; width: number; trackRight: number }[] }>(`(() => {
+        const meters = document.querySelector('${meters}');
+        const box = meters.getBoundingClientRect();
+        return { available: box.width, windows: [...meters.children].map(window => {
+          const rect = window.getBoundingClientRect();
+          return { left: rect.left - box.left, right: rect.right - box.left, width: rect.width,
+            trackRight: window.querySelector('.track').getBoundingClientRect().right - box.left };
+        }) };
+      })()`);
+      expect(layout.windows[0]!.left).toBeCloseTo(0, 0);
+      expect(layout.windows.at(-1)!.right).toBeCloseTo(layout.available, 0);
+      expect(layout.windows.at(-1)!.trackRight).toBeCloseTo(layout.available, 0);
+      if (count === 2) {
+        expect(layout.windows[0]!.width).toBeCloseTo(layout.windows[1]!.width, 0);
+        expect(layout.windows[1]!.left).toBeGreaterThan(layout.windows[0]!.right);
+      }
+    }
+    expect(page.errors()).toEqual([]);
   }
 }, 60_000);
 
@@ -352,13 +396,24 @@ test('the same popup shares priorities across the app, tray and phone through th
   const client = await harness.connect();
   let tray: BrowserPage | undefined;
   try {
+    // Use the browser's local calendar, so these stay distant and nearby on any run date.
+    const resets = await page.evaluate<{ at: number; label: string }[]>(`[28, 1].map(days => {
+      const now = new Date();
+      const date = new Date(now);
+      date.setDate(date.getDate() + days);
+      date.setHours(20, 55, 0, 0);
+      const options = days === 1 ? { weekday: 'long' } : {
+        month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+      };
+      return { at: date.getTime(), label: new Intl.DateTimeFormat('en', options).format(date) };
+    })`);
     const names = ['Personal', 'Work', 'Research', 'Studio', 'Travel'];
     const accounts = [];
     for (const label of names) accounts.push(await client.call('accounts.add', { providerId: 'echo', label, useDefaultLocation: false }));
     const rows: AccountQuota[] = accounts.map((account, index) => ({
       accountId: account.id, providerId: index === 1 ? 'codex' : 'claude', providerName: index === 1 ? 'Codex' : 'Claude', label: 'Cached profile',
       enabled: true, status: 'ready', checkedAt: Date.now(), error: null,
-      windows: [{ id: 'week', label: 'Weekly', usedPercent: index === 1 ? 100 : 25, resetsAt: new Date(2026, 9, 7, 20, 55).getTime() }],
+      windows: [{ id: index === 0 ? 'month' : 'week', label: index === 0 ? 'Monthly' : 'Weekly', usedPercent: index === 1 ? 100 : 25, resetsAt: resets[index === 0 ? 0 : 1]!.at }],
       ...(index === 1 ? { credits: { kind: 'balance' as const, enabled: true, remaining: 42.5, limit: null, unlimited: false } } : {}),
     }));
     // Keep real accounts, persistence, events and transports. Only provider readings are scripted, without live logins.
@@ -387,7 +442,9 @@ test('the same popup shares priorities across the app, tray and phone through th
       expect(await browser.evaluate(`document.querySelector('${panel} footer button').textContent`)).toBe('Limits page');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
       expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
-      expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[0]!.id}"] .reset').textContent`)).toMatch(/^Wednesday /);
+      for (const [index, reset] of resets.entries()) {
+        expect(await browser.text(`[data-account-id="${accounts[index]!.id}"] .reset`)).toStartWith(`${reset.label} `);
+      }
       expect(await browser.evaluate(`document.querySelectorAll('${panel} .reorder').length`)).toBe(0);
       // Five profiles fit in the usual popup without scrolling to reach the last one.
       expect(await browser.evaluate(`(() => {
@@ -471,6 +528,9 @@ test('the same popup shares priorities across the app, tray and phone through th
     await page.click('[data-testid="sidebar-toggle"]');
     await page.click('[data-testid="nav-limits"]');
     await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    for (const [index, reset] of resets.entries()) {
+      expect(await page.text(`[data-account-id="${accounts[index]!.id}"] .reset`)).toStartWith(`${reset.label} `);
+    }
     await page.waitFor(`document.querySelector('[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]')?.disabled === false`);
     const touch = await page.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(async () => {
       // The phone sheet animates and its ResizeObserver places it after the rows appear.

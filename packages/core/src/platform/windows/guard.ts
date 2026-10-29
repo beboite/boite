@@ -10,7 +10,7 @@
  * once both protections are off, so an idle core does not keep a pump waking
  * ten times a second. Other operating systems use the separate POSIX backend.
  */
-import { workerEntry } from './worker-entry.ts';
+import { describeWorkerError, workerEntry } from './worker-entry.ts';
 import type { GuardWorkerCommand, GuardWorkerMessage } from './guard-worker.ts';
 
 import type { GuardEventSink, GuardStatus } from '../types.ts';
@@ -192,13 +192,6 @@ function ensureWorker(): boolean {
   return true;
 }
 
-function describeWorkerError(event: unknown): string {
-  if (event instanceof Error) return event.message;
-  if (typeof event === 'object' && event !== null && 'message' in event) {
-    return String((event as { message: unknown }).message);
-  }
-  return 'worker error';
-}
 
 /**
  * The Worker cannot run. It is stopped rather than dropped: an unreferenced

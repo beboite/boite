@@ -5,7 +5,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { lstat, open, readlink } from 'node:fs/promises';
 import type { Core } from '../core.ts';
 import { folderGone, messageOf, refused } from '../errors.ts';
-import { notARepository, OUTSIDE_A_REPOSITORY } from './errors.ts';
+import { gitFailed } from './errors.ts';
 import { gitSubcommand, gitThread, logGit } from './git-log.ts';
 
 /**
@@ -146,7 +146,7 @@ function logGitTimeout(core: Core, threadId: ThreadId, args: readonly string[], 
 }
 
 /** The same, for a blob: `git cat-file blob` hands back bytes, and whether they are text is the question. */
-async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; data: Uint8Array }> {
+async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; data: Uint8Array; stderr: string }> {
   return inReadSlot(core, GIT_READ_TIMEOUT_MS, async () => {
     const spawned = spawnRead(core, threadId, cwd, args, 'reading a file at a ref');
     const at = performance.now();
@@ -157,23 +157,55 @@ async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: strin
       spawned.exited,
     ]), GIT_READ_TIMEOUT_MS, () => logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at));
     try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
-    return { code, data: new Uint8Array(buffer) };
+    return { code, data: new Uint8Array(buffer), stderr };
   });
 }
 
 /**
- * One side of a diff at a ref: `<ref>:<path>`. A missing blob is null,
- * distinct from an empty file. A path that is not a git repository is refused
- * by name, as `git.status` refuses it.
+ * One side of a diff at a ref: `<ref>:<path>`. A path the ref does not hold is
+ * null, distinct from an empty file. Everything else that keeps git from
+ * answering is refused, never shown as that absent side: an unknown ref, an
+ * object gone from the store, a git that failed. A folder outside a repository
+ * is refused by name, as `git.status` refuses it.
  */
 export async function readRefSide(core: Core, threadId: ThreadId, cwd: string, ref: string, atRef: string): Promise<DiffSide> {
   const name = `${ref}:${atRef}`;
   if (!batchUnsupported.has(core)) {
     const batched = await catFileBatch(core, threadId, cwd, name);
+    if (batched === 'missing') return absentAt(core, threadId, cwd, ref, name);
     if (batched !== 'unsupported') return batched;
     batchUnsupported.add(core);
   }
-  return readRefSideInSteps(core, threadId, cwd, name);
+  return readRefSideInSteps(core, threadId, cwd, ref, name);
+}
+
+const ABSENT: DiffSide = { data: null, tooBig: false };
+
+/**
+ * Why git found nothing at `<ref>:<path>`, asked only when it did: `cat-file`
+ * says `missing` alike for a path the ref lacks, a ref that does not exist and
+ * a blob lost from the store. Only the first is an absent side. `resolved` is
+ * what an earlier `rev-parse` of the name already answered, when one ran.
+ */
+async function absentAt(core: Core, threadId: ThreadId, cwd: string, ref: string, name: string, resolved?: string | null): Promise<DiffSide> {
+  const named = resolved === undefined ? await probe(core, threadId, cwd, name) : resolved;
+  if (named !== null) {
+    throw refused(`git.diff cannot read ${name}: it names ${named}, which the repository does not hold`, { ref, object: named });
+  }
+  // HEAD before the first commit names no tree, and every path is new.
+  if (await probe(core, threadId, cwd, `${ref}^{tree}`) === null && ref !== 'HEAD') {
+    throw refused(`git.diff found no revision ${ref} in this repository`, { field: 'ref', ref });
+  }
+  return ABSENT;
+}
+
+/** `rev-parse --verify --quiet`: the object a name resolves to, null for a name that resolves to none, refused when git itself failed. */
+async function probe(core: Core, threadId: ThreadId, cwd: string, name: string): Promise<string | null> {
+  const args = ['rev-parse', '--verify', '--quiet', name];
+  const run = await git(core, threadId, cwd, args);
+  if (run.code === 1) return null;
+  if (run.code !== 0) gitFailed(threadId, args, run);
+  return run.stdout.trim();
 }
 
 /** The cores whose git turned `cat-file --batch -z` down, older than 2.36: they read in three steps from then on. */
@@ -189,7 +221,7 @@ const BATCH_HEADER = /^[0-9a-f]{40,64} (\S+) (\d+)$/;
  * blob over `SIDE_CEILING_BYTES` is refused from its header, its git stopped
  * before the bytes are read.
  */
-async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: string): Promise<DiffSide | 'unsupported'> {
+async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: string): Promise<DiffSide | 'missing' | 'unsupported'> {
   const args = ['cat-file', '--batch', '-z'];
   return inReadSlot(core, GIT_READ_TIMEOUT_MS, async () => {
     let spawned;
@@ -206,7 +238,7 @@ async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: s
     } catch { /* read below: the exit code and stderr say why */ }
     const at = performance.now();
     let stopped = false;
-    const reading = (async (): Promise<DiffSide> => {
+    const reading = (async (): Promise<DiffSide | 'missing' | 'cut'> => {
       const reader = proc.stdout.getReader();
       const chunks: Uint8Array[] = [];
       let length = 0;
@@ -223,8 +255,11 @@ async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: s
           if (newline >= 0) {
             const line = new TextDecoder().decode(joined.subarray(0, newline));
             const found = BATCH_HEADER.exec(line);
-            // `<name> missing`, `<name> ambiguous`: no object, so no side.
-            if (found === null) return { data: null, tooBig: false };
+            // `<name> missing` is asked about by `absentAt`; `<name> ambiguous` names no single file.
+            if (found === null) {
+              if (line === `${name} missing`) return 'missing';
+              throw refused(`git.diff cannot read ${name}: git answers "${line}"`, { name });
+            }
             header = { type: found[1] as string, size: Number(found[2]), start: newline + 1 };
             if (header.type === 'blob' && header.size > SIDE_CEILING_BYTES) {
               stopped = true;
@@ -239,10 +274,10 @@ async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: s
           // Drained to the end, not cancelled: a closed pipe would cost git its exit code on the newline after the blob.
           while (!(await reader.read()).done) { /* the newline that ends the answer */ }
           // A tree or a commit at that name is no file to compare.
-          if (header.type !== 'blob') return { data: null, tooBig: false };
+          if (header.type !== 'blob') return ABSENT;
           return { data: joined.slice(header.start, header.start + header.size), tooBig: false };
         }
-        if (done) return { data: null, tooBig: false };
+        if (done) return 'cut';
       }
     })();
     const [side, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
@@ -250,11 +285,13 @@ async function catFileBatch(core: Core, threadId: ThreadId, cwd: string, name: s
       new Response(proc.stderr).text(),
       spawned.exited,
     ]), GIT_READ_TIMEOUT_MS, () => logGitTimeout(core, threadId, args, GIT_READ_TIMEOUT_MS, at));
-    if (stopped) return side;
+    if (stopped) return side as DiffSide;
     if (code === 129 && /unknown (switch|option)/i.test(stderr)) return 'unsupported';
     try { logGit(core, threadId, args, code, performance.now() - at, stderr); } catch { /* A diagnostic storage failure must not break reads. */ }
-    if (code === OUTSIDE_A_REPOSITORY) notARepository(threadId, stderr);
-    return code === 0 ? side : { data: null, tooBig: false };
+    if (code !== 0) gitFailed(threadId, args, { code, stderr });
+    // An answer that ends before its header or its bytes is a git that broke off, not a file.
+    if (side === 'cut') throw refused(`git.diff cannot read ${name}: git cat-file ended its answer early`, { name });
+    return side;
   });
 }
 
@@ -272,20 +309,27 @@ function joinChunks(chunks: Uint8Array[], length: number): Uint8Array {
 }
 
 /**
- * The same with three gits, for one that does not know `cat-file --batch -z`.
+ * The same in steps, for a git that does not know `cat-file --batch -z`.
  * The name is resolved to the blob's own id before either read: a branch that
  * moves between them would otherwise size one object and read another.
  */
-async function readRefSideInSteps(core: Core, threadId: ThreadId, cwd: string, name: string): Promise<DiffSide> {
-  const resolved = await git(core, threadId, cwd, ['rev-parse', '--verify', '--quiet', name]);
-  if (resolved.code === OUTSIDE_A_REPOSITORY) notARepository(threadId, resolved.stderr);
-  const blob = resolved.code === 0 ? resolved.stdout.trim() : '';
-  const sized = blob.length > 0 ? await git(core, threadId, cwd, ['cat-file', '-s', blob]) : null;
-  const blobBytes = sized !== null && sized.code === 0 ? Number(sized.stdout.trim()) : null;
-  const refSideTooBig = blobBytes !== null && Number.isFinite(blobBytes) && blobBytes > SIDE_CEILING_BYTES;
-  const shown =
-    blob.length === 0 || refSideTooBig ? null : await gitBytes(core, threadId, cwd, ['cat-file', 'blob', blob]);
-  return { data: shown !== null && shown.code === 0 ? shown.data : null, tooBig: refSideTooBig };
+async function readRefSideInSteps(core: Core, threadId: ThreadId, cwd: string, ref: string, name: string): Promise<DiffSide> {
+  const blob = await probe(core, threadId, cwd, name);
+  if (blob === null) return absentAt(core, threadId, cwd, ref, name, null);
+  const typed = await git(core, threadId, cwd, ['cat-file', '-t', blob]);
+  // The name resolved, so a type git cannot give is an object the store lost.
+  if (typed.code !== 0) return absentAt(core, threadId, cwd, ref, name, blob);
+  // A tree or a commit at that name is no file to compare, as in one batch.
+  if (typed.stdout.trim() !== 'blob') return ABSENT;
+  const sizeArgs = ['cat-file', '-s', blob];
+  const sized = await git(core, threadId, cwd, sizeArgs);
+  if (sized.code !== 0) gitFailed(threadId, sizeArgs, sized);
+  const blobBytes = Number(sized.stdout.trim());
+  if (Number.isFinite(blobBytes) && blobBytes > SIDE_CEILING_BYTES) return { data: null, tooBig: true };
+  const blobArgs = ['cat-file', 'blob', blob];
+  const shown = await gitBytes(core, threadId, cwd, blobArgs);
+  if (shown.code !== 0) gitFailed(threadId, blobArgs, { code: shown.code, stderr: shown.stderr });
+  return { data: shown.data, tooBig: false };
 }
 
 interface DiffSide {
@@ -293,18 +337,41 @@ interface DiffSide {
   tooBig: boolean;
 }
 
-export async function readTreeSide(path: string): Promise<DiffSide> {
+/** A file the working tree no longer has: gone, or a parent replaced by a file. */
+function vanished(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+function unreadable(shown: string, error: unknown): never {
+  throw refused(`git.diff cannot read ${shown} in the working tree: ${messageOf(error)}`, { path: shown });
+}
+
+/**
+ * The working-tree side. A file that is not there is the absent side; one that
+ * is there and cannot be read (no permission, an I/O error) is refused, never
+ * shown as deleted. `shown` names it in that refusal.
+ */
+export async function readTreeSide(path: string, shown: string): Promise<DiffSide> {
   let info;
-  try { info = await lstat(path); } catch { return { data: null, tooBig: false }; }
+  try {
+    info = await lstat(path);
+  } catch (error) {
+    if (vanished(error)) return ABSENT;
+    return unreadable(shown, error);
+  }
   // A symlink's diff is the link text. Opening it would follow a swap to a
   // file outside the worktree and put those bytes in the panel.
   if (info.isSymbolicLink()) {
     try {
       const link = Buffer.from(await readlink(path));
       return { data: link, tooBig: link.length > SIDE_CEILING_BYTES };
-    } catch { return { data: null, tooBig: false }; }
+    } catch (error) {
+      if (vanished(error)) return ABSENT;
+      return unreadable(shown, error);
+    }
   }
-  if (!info.isFile()) return { data: null, tooBig: false };
+  if (!info.isFile()) return ABSENT;
   let current: Uint8Array | null = null;
   let newSideTooBig = false;
   // Size before read, on the handle rather than the path. A multi-gigabyte
@@ -326,7 +393,8 @@ export async function readTreeSide(path: string): Promise<DiffSide> {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       current = buffer.subarray(0, bytesRead);
     }
-  } catch {
+  } catch (error) {
+    if (!vanished(error)) unreadable(shown, error);
     current = null;
   } finally {
     await handle?.close();

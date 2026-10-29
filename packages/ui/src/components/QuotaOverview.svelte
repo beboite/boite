@@ -11,7 +11,7 @@
   import { shownWindows } from '../lib/quota-display';
 
   let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
-    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
+    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect?: () => void;
     order?: string[]; onreorder?: (order: string[]) => Promise<boolean>;
   } = $props();
 
@@ -144,7 +144,7 @@
   {#if rows.length === 0}
     <div class="empty" data-testid="quota-empty">
       <p>{strings.quotas.empty}</p>
-      <button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>
+      {#if connect}<button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>
   {/if}
   <!-- The headline is the primary window, never the lowest one; credits still take over once any window runs dry. -->
@@ -170,7 +170,7 @@
           <span class="summary-content">
             <span class="headline">
               <span class="name ui-label" title={name}>{name}</span>
-              {#if !paid}<span class="amount ui-label" class:low={used !== null && quotaTone(used) !== 'ok'} title={shown.primary ? quotaWindowName(shown.primary.label) : undefined} data-testid="quota-headline">{used === null ? strings.quotas.noReading : `${tenth(remainingPercent(used))}%`}</span>{/if}
+              {#if !paid}<span class="amount ui-label" class:low={used !== null && quotaTone(used) !== 'ok'} title={shown.primary ? quotaWindowName(shown.primary.label) : undefined} data-testid="quota-headline">{used === null ? strings.quotas.noReading : left(used)}</span>{/if}
               {#if windows.length}<ChevronDown size={12} />{/if}
             </span>
             {#if paid && credits}
@@ -217,7 +217,7 @@
   .summary { flex: 1; min-width: 0; width: 100%; height: auto; min-height: 44px; padding: 2px 4px; line-height: 1.2; display: flex; align-items: start; gap: 8px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
   .summary:disabled { opacity: 1; cursor: default; }
   .logo { flex: none; width: 20px; height: 20px; display: grid; place-items: center; }
-  .summary-content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .summary-content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .headline { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
   .amount { flex: none; color: var(--color-foreground); font-size: var(--text-md); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -227,9 +227,11 @@
   .summary.reorderable { cursor: grab; }
   .summary.reorderable .name { touch-action: none; }
   .dragging .summary { cursor: grabbing; }
-  .meters { display: flex; flex-wrap: wrap; gap: 3px 8px; }
-  .mini-window { flex: 1 1 84px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
-  .mini-label { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
+  /* Two windows per line; a lone window uses the full row. */
+  .meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+  .mini-window { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
+  .mini-window:only-child { grid-column: 1 / -1; }
+  .mini-label { width: 4.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
   /* The window the headline reads. */
   .mini-window.lead .mini-label { color: var(--color-foreground); font-weight: 500; }

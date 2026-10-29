@@ -2,7 +2,7 @@ import { pullRequestAddress, type PullRequestWatch, type PullRequestWatchSeen, t
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
 import {
-  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, parseDetail, parseFingerprint, parseRemarks,
+  CLOSER_QUERY, DETAIL_QUERY, FINGERPRINT_QUERY, REMARK_PAGES, evaluate, initialMemory, mergeChanges, parseCloser, stillTrue, parseDetail, parseFingerprint, parseRemarks,
   rateLimited, remarkPath, wakeMessage, type Fingerprint, type Remark, type RemarkKind, type WatchChange, type WatchDetail, type WatchMemory,
 } from './pull-request-watch-read.ts';
 import { RequiredContexts, withRequired } from './pull-request-required.ts';
@@ -91,7 +91,7 @@ export class PullRequestWatches {
       // A restart reads each watch again soon, a few seconds apart.
       for (const record of records) this.#runtime.set(runtimeKey(threadId, record.url), { nextReadAt: Date.now() + 2_000 * ++stagger, failures: 0, paused: null, reading: false, detail: null, rules: null });
     }
-    this.#unsubscribe = core.bus.onAny((name, payload) => {
+    this.#unsubscribe = core.bus.onCommitted((name, payload) => {
       if (this.#closed) return;
       if (name === 'thread.removed') this.#endWith((payload as { threadId: ThreadId }).threadId);
       else if (name === 'thread.updated') {
@@ -128,7 +128,6 @@ export class PullRequestWatches {
     if (thread.archived) throw refused('watching a pull request needs an active conversation', { threadId });
     // A delegated agent's wake is its next turn, and that answer goes to its parent; a workflow step or a reviewer answers its run once.
     if (thread.parentThreadId && !this.core.delegation.delegated(threadId)) throw refused('a workflow step or a reviewer cannot watch a pull request: its run reads its one answer', { threadId, field: 'threadId', expected: 'a conversation or a delegated agent' });
-    if (thread.agentSessionId) throw refused('a persistent agent session takes work through Agents, not pull request watches', { threadId });
     const address = pullRequestAddress(url);
     const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
     if (address.host !== host) throw refused(`pull request host must be ${host}`, { field: 'url', expected: `https://${host}/owner/repository/pull/number` });
@@ -243,9 +242,16 @@ export class PullRequestWatches {
       }
       // Rules alone expired: the checks already read are judged against them, with no detail read.
       const read = statusMoved || remarksDue || !kept ? await this.#shared(memo, `detail ${record.url}`, () => this.#graphql(threadId, record, DETAIL_QUERY).then(parseDetail)) : kept;
+      // Merged or closed between the two reads: that is the news, not leaving the queue.
+      if (read.state !== 'OPEN') {
+        if (!baseline) await this.#end(threadId, record, runtime, memo, read.state);
+        return read.state;
+      }
       const detail = withRequired(read, await this.#requiredOf(threadId, record, read.base));
       const remarks = remarksDue ? await this.#shared(memo, `remarks ${record.url}`, () => this.#remarks(threadId, record)) : null;
       // A stop or an unwatch that landed during the reads wins.
+      if (this.#find(threadId, record.url) !== record) return 'OPEN';
+      await this.core.linkedPullRequests.observe(threadId, record.url, 'OPEN', { head: read.branch ?? '', headRepository: read.headRepository ?? '' });
       if (this.#find(threadId, record.url) !== record) return 'OPEN';
       const { changes, next } = evaluate(record.memory, detail, remarks);
       runtime.detail = read;
@@ -255,6 +261,8 @@ export class PullRequestWatches {
       if (remarks !== null) record.remarksReadAt = now;
       record.seen = seenOf(detail, next, now);
       this.#answered(runtime, record);
+      record.pending = stillTrue(record.pending, next);
+      if (!record.pending.length) record.pendingSince = null;
       if (changes.length && !baseline) {
         record.pending = mergeChanges(record.pending, changes);
         record.pendingSince ??= now;
@@ -292,6 +300,8 @@ export class PullRequestWatches {
    */
   async #end(threadId: ThreadId, record: WatchRecord, runtime: Runtime, memo: Map<string, Promise<unknown>>, state: 'MERGED' | 'CLOSED'): Promise<void> {
     const closer = await this.#shared(memo, `closer ${record.url}`, () => this.#graphql(threadId, record, CLOSER_QUERY).then(parseCloser));
+    if (this.#find(threadId, record.url) !== record) return;
+    await this.core.linkedPullRequests.observe(threadId, record.url, state);
     if (this.#find(threadId, record.url) !== record) return;
     this.#answered(runtime, record);
     this.core.log('info', `pull request #${record.number} is ${state.toLowerCase()}${closer.by ? ` by ${closer.by}` : ''}: its watch ended`, { source: 'pull-request-watch', threadId });
@@ -356,10 +366,10 @@ export class PullRequestWatches {
     if (!due.length || this.core.stopping) return;
     const thread = this.core.journal.getThread(threadId);
     if (!thread || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.core.threads.runner.handles.has(threadId)) return;
+    if (this.core.threads.isBusy(threadId)) return;
     const { text, label } = wakeMessage(due.map(record => ({ number: record.number, url: record.url, changes: record.pending })));
     try {
-      this.core.threads.startTurn(threadId, text, [], undefined, 'pull-request', undefined, undefined, label);
+      this.core.threads.startTurn(threadId, { prompt: text, display: label }, { kind: 'pull-request' });
     } catch (error) {
       // Tried again after another interval, never in a tight loop.
       for (const record of due) record.pendingSince = now + this.#timing.intervalMs - this.#timing.coalesceMs;
@@ -439,7 +449,8 @@ const rulesKey = (record: WatchRecord, base: string) => `${record.host} ${record
 
 function seenOf(detail: WatchDetail, memory: WatchMemory, now: number): PullRequestWatchSeen {
   return {
-    checkedAt: now, head: detail.head.slice(0, 7), base: detail.base, conflicting: memory.conflicting,
+    checkedAt: now, head: detail.head.slice(0, 7), base: detail.base, conflicting: memory.conflicting, behind: memory.behind === true,
+    queue: detail.queue === null ? null : { position: detail.queue },
     checks: { total: detail.checks.length, running: detail.checks.filter(check => check.status === 'pending').length, failed: detail.checks.filter(check => check.status === 'failed').length },
   };
 }

@@ -73,7 +73,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature, among `accountPools`, `desktopApp` and `gateway`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. `desktopApp` and `gateway` are `{}`, objects with no field ([Desktop apps](#desktop-apps), [Gateways](#gateways)). A plugin may provide several. |
+| `provides` | An object naming at least one feature, among `accountPools`, `desktopApp` and `gateway`. `accountPools` is `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `claude`, `codex`, `grok`, `muse`, `opencode`, `opencode-v2` and `pi`; a retired provider id (`antigravity-cli`) is accepted and dropped, so a plugin installed under an older Boite keeps loading. `desktopApp` and `gateway` are `{}`, objects with no field ([Desktop apps](#desktop-apps), [Gateways](#gateways)). A plugin may provide several. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the
@@ -264,7 +264,7 @@ an app checks the flag before it names a machine.
 
 The desktop shell connected to the core it started on the same computer
 answers it: it unminimizes and focuses its window, then opens the thread, the
-Agents page on that agent (switching the Resident agents experiment on if it was
+Bots page on that bot (switching the Bots experiment on if it was
 off), or the app updates in Settings, Machines. A target with `coreId` opens on
 the window's machine whose core has that id; when the window has no such
 machine, or has it but not connected, it says so on the page it shows and opens
@@ -444,6 +444,10 @@ When the core checks:
 - when the owner clicks Check for updates on the plugin's row
   (`plugins.checkUpdates {id?}`), whether it is installed or not. A check
   finished less than ten seconds before answers instead of a new read.
+- when the owner opens Settings > Plugins, for recommendations not installed
+  yet. The list appears immediately and the available versions refresh as
+  their sources answer. Their rows also offer Check for updates and show
+  checking or failure notes before installation.
 - when the owner installs or updates the plugin, before the download: a first
   install brings the release the source names, not a pinned entry several
   releases behind. A source that fails or takes more than 15 seconds leaves

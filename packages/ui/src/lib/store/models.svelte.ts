@@ -486,7 +486,7 @@ export class Models {
     // second read, which would wait behind a refresh still running.
     const known = this.catalogHas(choice.providerId, choice.accountId, choice.model) &&
       (provider.protocol !== 'acp' || choice.effort === null || s.modelsOf(provider.id, choice.accountId).find((m) => m.id === choice.model)?.effort !== undefined);
-    if (!known && ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
+    if (!known && ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi'].includes(provider.protocol)) {
       const client = this.ctx.client;
       if (!client) return null;
       const epoch = this.probeEpoch;

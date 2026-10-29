@@ -10,13 +10,18 @@
   import { chatPrefs } from '../lib/chat-prefs.svelte';
   import MessageOutline from './MessageOutline.svelte';
   import AgentMessageGroup from './AgentMessageGroup.svelte';
-  import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
+  import WakeMarker from './WakeMarker.svelte';
+  import TurnFoldRow from './TurnFoldRow.svelte';
+  import { AgentTimeline, memoryPassOf, summaryMarks } from '../lib/agent-turns';
+  import { groupTimeline } from '../lib/timeline-group';
+  import { agentMailFor } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import { teamLaunches } from '../lib/delegation-progress';
   import UserMessage from './UserMessage.svelte';
   import Deferred, { parts } from './Deferred.svelte';
   import { provideViewerHost, type Gallery } from '../lib/media-gallery';
   import AssistantMessage from './AssistantMessage.svelte';
+  import FailedAttempts from './FailedAttempts.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
@@ -29,7 +34,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, keepOnly, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
-  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, loadKeepingReader, wantedRange } from '../lib/history-gaps';
+  import { GapRows, NO_GAPS, READ_AHEAD, RangeAsk, gapHeight, heldNear, loadKeepingReader, wantedRange } from '../lib/history-gaps';
   import TimelineGap from './TimelineGap.svelte';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -40,8 +45,8 @@
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
   import { MessageReveal } from '../lib/message-reveal.svelte';
-  import { placeViews, turnViews, viewPart } from '../lib/inline-view';
-  import { filesLast, publishedFile, quietKeepalives } from '../lib/message-order';
+  import { ViewPlacement, turnViews, viewPart } from '../lib/inline-view';
+  import { filesLast, firstAssistantByTurn, firstByTurn, publishedFile, quietKeepalives } from '../lib/message-order';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -62,10 +67,7 @@
   function releaseHeld(): void {
     for (const url of held) if (!viewing?.items.some(item => item.src === url)) { URL.revokeObjectURL(url); held.delete(url); }
   }
-  provideViewerHost({
-    open: (gallery) => { viewing = gallery; releaseHeld(); },
-    release: (url) => { held.add(url); releaseHeld(); }
-  });
+  provideViewerHost({ open: (gallery) => { viewing = gallery; releaseHeld(); }, release: (url) => { held.add(url); releaseHeld(); } });
   onDestroy(() => { viewing = null; releaseHeld(); });
   /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
   let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
@@ -88,24 +90,15 @@
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
   /** The turns of the thread this list shows, open or delegated. */
   const shownTurns = $derived(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []);
-  /** Rows that follow the message sharing their millisecond: agent mail and a launch card, anchored with `<=`. */
-  const after = (row: Message) => row.id.startsWith('coordination:') || row.id.startsWith('delegation:');
-  const grouped = $derived.by(() => {
-    if (mail.length === 0 && launches.size === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map(), notices: new Map<string, MemoryEvent[]>() };
-    const activity: Message[] = [...launches.values()].map(({ id, createdAt }) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt }));
-    const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
-    const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    // Output that already existed in this millisecond precedes its exchange.
-    const sorted = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
-      a.createdAt - b.createdAt || Number(after(a)) - Number(after(b)) || a.id.localeCompare(b.id));
-    const { rows, notices } = mergeNoticeRows(sorted, memoryRows);
-    return { ...groupAgentMail(rows, mail), notices };
-  });
+  const grouped = $derived.by(() => groupTimeline(messages, threadId, shownTurns, mail, launches, workflowRows, memoryRows));
   /** The pages each turn published: its answer places them, or they go after it once the turn ends (`placeViews`). */
   let shownViews: ReadonlyMap<string, Message[]> | undefined;
   const views = $derived.by(() => (shownViews = turnViews(grouped.timeline, shownViews)));
-  /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line. */
-  const timeline = $derived(quietKeepalives(placeViews(filesLast(grouped.timeline, shownTurns), shownTurns, views), shownTurns));
+  /** A finished turn's published files go after its answer, its pages after them; Boite's cache pings are one line; an agent's own thread folds its finished turns (`lib/agent-turns.ts`). */
+  const agentTimeline = new AgentTimeline(), viewPlacement = new ViewPlacement();
+  const placed = $derived(viewPlacement.build(filesLast(grouped.timeline, shownTurns), shownTurns, views));
+  const shaped = $derived(agentTimeline.build(quietKeepalives(placed, shownTurns), shownTurns, memoryPassOf(store, threadId)));
+  const timeline = $derived(shaped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -114,7 +107,7 @@
   const placement = $derived(store.openThread?.id === threadId ? store.messagePlacement?.(threadId, messages) ?? null : null);
   const positional = $derived((placement?.first ?? null) !== null);
   const gapped = $derived.by(() => {
-    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline), messages, placement?.gaps ?? NO_GAPS);
+    const placed = gapRows.place(cut.build(timeline, memoryPlacement.inline, placement?.gaps), messages, placement?.gaps ?? NO_GAPS);
     // A row that grew or was cut weighs something else until it is measured.
     if (placed.at(cut.changedFrom) < slots.dirty) slots.dirty = placed.at(cut.changedFrom);
     return placed;
@@ -187,6 +180,7 @@
   });
   let viewHeight = $state(savedReading?.height ?? 0);
   let navigationTarget = $state<string | null>(null);
+  let failureTarget = $state<{ id: string } | null>(null);
   let promptTarget = $state<string | null>(savedReading?.followPrompt ?? null);
   let reservePrompt = $state<string | null>(savedReading?.reservePrompt ?? null);
   let lifting = $state(false);
@@ -220,6 +214,7 @@
     const box = viewport;
     const index = rowIndexOf(rows, id, part);
     if (!box || index < 0) return;
+    failureTarget = { id };
     navigationTarget = rows[index]!.id;
     pinned = false;
     behind = true;
@@ -535,7 +530,7 @@
     const box = viewport;
     if (!box) return;
     const height = box.scrollHeight;
-    const resized = height !== scrolledHeight;
+    const resized = height !== scrolledHeight, shrank = height < scrolledHeight;
     scrolledHeight = height;
     // The browser keeping the text in place as a row above grows moves the list down, never nearer its bottom.
     const distance = height - box.scrollTop - box.clientHeight, closer = distance < scrolledGap - 1; scrolledGap = distance;
@@ -553,8 +548,8 @@
       if (distance > 1) return;
       endGlide(false);
     }
-    // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
-    if (rose && pinned && distance > 1) leftBottom = true;
+    // A busy phone can deliver touchstart after its scroll; content growth alone cannot clamp it upward.
+    if (rose && pinned && distance > 1 && !shrank && !relaid) leftBottom = true;
     // Scrolled down into the tolerance, the reader is back: a streaming answer keeps moving the very bottom. Moved down
     // as far from it, by a row growing above after a small notch up, the list took it back and bounced each notch.
     if (descended && closer && atBottom(box)) leftBottom = false;
@@ -583,6 +578,10 @@
    *  "Jump to latest" starts, whose scroll events neither unpin the list nor bring the button back. */
   const hold = new PointerHold(), glide = new BottomGlide(), edge = new BottomEdge();
   function press(event: PointerEvent | TouchEvent) { releaseNavigation(); hold.press(event); }
+  function inspectFailures(opening: boolean) {
+    if (opening) { releaseNavigation(); pinned = false; leftBottom = true; rememberAnchor(); }
+    else if (viewport && viewport.scrollHeight <= viewport.clientHeight + 1) { pinned = true; leftBottom = false; behind = false; }
+  }
   /** The turn whose answer is under the pointer: its summary shows from any of its messages (`pointedTurn`). */
   let pointed = $state<string | null>(null);
   /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
@@ -669,8 +668,8 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        // Followed, the live end lets go of the messages far above it, and the heights measured for them.
-        if (untrack(following) && untrack(() => store.releaseOlder(threadId)) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
+        // Followed, the live end lets go of the messages far above it, and the heights measured for them; never those within reach of the view.
+        if (untrack(following) && untrack(() => store.releaseOlder(threadId, () => heldNear(totals(rows), rows, messages, viewHeight * (READ_AHEAD + 1), views))) > 0) void tick().then(() => keepOnly([heights, risen], rows, messages));
         scrolledHeight = box.scrollHeight; edge.follow(box); scrollTop = box.scrollTop;
       }
       pinned = true; behind = false;
@@ -701,16 +700,10 @@
   // Finished and streaming messages are derived apart, so a delta never rescans the thread.
   const progress = new TurnProgress(() => messages);
   /** One model attribution per turn, independent of the rendered window and streamed parts. */
-  const firstAssistantInTurn = $derived.by(() => {
-    const result = new Map<string, string>();
-    for (const message of messages) {
-      // A view or a published file is drawn after the answer, wherever it was published: the answer's first message carries the model.
-      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message) && !publishedFile(message)) result.set(message.turnId, message.id);
-    }
-    return result;
-  });
+  const firstAssistantInTurn = $derived(firstAssistantByTurn(messages));
   /** The last row of each turn: a later message of the same turn replaces an earlier one. */
   const lastInTurn = $derived(new Map(timeline.map((message): [string, string] => [message.turnId, message.id])));
+  const firstInTurn = $derived(firstByTurn(messages));
   /** Each turn's answers, rebuilt when a message comes or goes, never on a part or a delta. */
   const answers = $derived(answersByTurn(messages));
   const fileCache = new TurnFileCache();
@@ -724,19 +717,18 @@
   }
 
   /**
-   * Edit, retry and fork go through the core's rewind and fork, which a
-   * persistent agent's session refuses, and only on a thread at rest: a turn
-   * still running is stopped first (Escape).
+   * Edit and retry go through the core's rewind, fork through its fork, and
+   * only on a thread at rest: a turn still running is stopped first (Escape).
+   * A persistent agent's thread rewinds like any other, but has no project to
+   * fork into.
    */
-  const branchable = $derived.by(() => {
-    const thread = store.openThread;
-    return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
-  });
+  const branchable = $derived(store.openThread?.id === threadId && (!!store.openThread.agentSessionId || store.openThread.projectId !== null));
+  const forkable = $derived(branchable && !store.openThread?.agentSessionId);
   // A prompt still waiting in the queue would run after the edit, on the rewound thread, as would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   async function editMessage(message: Message): Promise<void> {
-    if (await editWhole(store, threadId, message)) focusComposer();
+    if (await editWhole(store, threadId, message)) focusComposer({ typing: true });
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
@@ -750,7 +742,7 @@
 <div class="timeline-wrap" style:--dock-room="{dockRoom.height}px" style:--dock-clearance="{dockRoom.clearance}px">
   {#if store.findOpen && FindBar}
     <FindBar {messages} {viewport} request={store.findRequest} jump={(id, part) => jumpToMessage(id, part)}
-      rowOf={(id, part) => rows[rowIndexOf(rows, id, part)] ?? { id, from: 0 }} onclose={() => (store.findOpen = false)} />
+      rowOf={(id, part) => { const row = rows[rowIndexOf(rows, id, part)]; return row?.failures ? { id: `failure:${id}`, from: 0 } : row ?? { id, from: 0 }; }} onclose={() => (store.findOpen = false)} />
   {/if}
   {#if !narrow.current}<MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = rows[0]?.gap ? Math.max(0, (totals(rows)[1] ?? 0) - viewport.clientHeight) : 0; pinned = false; loadAbove(viewport); } }} />{/if}
@@ -769,7 +761,8 @@
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) || publishedFile(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
-        {@const closes = row.last && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
+        {@const quietFold = shaped.folds.get(message.id)}
+        {@const closes = row.last && !quietFold && turn !== undefined && turn.execution?.operation !== 'keepalive' && lastInTurn.get(turn.id) === message.id}
         {@const joined = seam(rows[view.start + index - 1], row)}
         <article
           use:track={{ row, joined }}
@@ -780,7 +773,11 @@
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role} data-turn={message.turnId}
         >
-          {#if launches.has(message.id)}
+          {#if row.failures}
+            <FailedAttempts {store} {threadId} messages={row.failures} turns={shownTurns} {signedOut} canFork={!narrow.current && forkable && !store.openThread?.incognito} reveal={failureTarget} oninspect={inspectFailures} />
+          {:else if quietFold}
+            <TurnFoldRow fold={quietFold} at={message.createdAt} wake={turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event' ? turn.execution.operation : undefined} />
+          {:else if launches.has(message.id)}
             <DelegationActivity {store} agents={launches.get(message.id)!.agents} />
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
@@ -793,8 +790,10 @@
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
+          {:else if message.role !== 'assistant' && firstInTurn.get(message.turnId) === message.id && (turn?.execution?.operation === 'routine' || turn?.execution?.operation === 'event')}
+            <WakeMarker {message} kind={turn.execution.operation} />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} accepted={!!turn} responded={progress.responded(message.turnId)} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} from={row.from} to={row.to} {signedOut} showModel={row.first && firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} views={views.get(message.turnId)} />
@@ -802,12 +801,13 @@
           {#if turn && closes}
             {@const files = filesOf(turn)}
             {#if files}<TurnFiles {store} {...files} loadDiffs={() => Promise.all(files.deferred.map(source => store.loadToolOutput(threadId, source.messageId, source.toolId))).then(() => {})} />{/if}
-            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages} pointed={pointed === turn.id}
+              {...summaryMarks(shaped, turn.id, () => store.panel.open('desk'))}>
               {#snippet actions()}
                 <MessageActions
                   text={() => turnAnswer(messages, turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
-                  fork={!narrow.current && branchable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
+                  fork={!narrow.current && forkable && !store.openThread?.incognito && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
                 />
               {/snippet}
             </MessageTurnSummary>

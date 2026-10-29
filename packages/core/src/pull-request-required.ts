@@ -51,8 +51,8 @@ const missing = (message: string) => /HTTP 404|Not Found|Branch not found/i.test
  * Marks the checks the base branch requires, and adds each required context
  * that has no check on the head yet as a pending one, as GitHub shows it
  * ("Expected"), except on a draft: it cannot merge, and a repository may keep
- * a required name for its ready run alone (beboite/boite's draft run names its
- * planning job apart). A check run matches by its own name, without its workflow.
+ * a required name for its ready run alone, as a draft run that names its
+ * planning job apart does. A check run matches by its own name, without its workflow.
  * Once the rules answered they alone decide, so a context they dropped stops
  * counting even on checks read before; until then (`null`) each check's own
  * `isRequired` stands.

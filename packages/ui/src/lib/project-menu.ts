@@ -1,4 +1,4 @@
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { AppWindow, Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, FolderMinus, GitBranch, History, Import, KeyRound, PencilLine, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -34,11 +34,11 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
   up: boolean;
   down: boolean;
   move: (direction: -1 | 1) => void;
-}) {
+}, opened?: () => void) {
   const client = owner.client;
   const clientGeneration = owner.clientGeneration;
   const management: MenuItem[] = [
-    { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft },
+    { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft, back: true },
     separator('back-sep'),
     ...(reorder ? [
       { id: 'move-up', label: strings.sidebar.moveProjectUp, glyph: ArrowUp, disabled: !reorder.up },
@@ -59,9 +59,12 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
             get checked() { return (owner.projects.find(current => current.id === project.id)?.autoRemoveWorktrees ?? project.autoRemoveWorktrees) === true; },
             get disabled() { return owner.client !== client || owner.clientGeneration !== clientGeneration || !owner.owner || owner.connection !== 'ready' || owner.projectAutoRemoveWorktreesBusy(project.id); }
           }] : []),
+          ...(project.kind === 'drafts' ? [] : [{ id: 'windows', label: strings.windows.settings.allowedHeading, glyph: AppWindow }]),
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
+    // The keys kept for this project: a paired device lists them too.
+    { id: 'secrets', label: strings.secrets.heading, glyph: KeyRound },
     ...(owner.owner && project.kind !== 'drafts' ? [separator('archive-sep')] : []),
     ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject, glyph: Archive, disabled: project.archived === true }]),
     ...(owner.owner ? [{ id: 'remove', label: strings.sidebar.removeProject, glyph: Trash2, danger: true }] : [])
@@ -70,9 +73,10 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     // A thread cannot start in a folder that is gone; the core refuses it too.
     { id: 'new', label: strings.sidebar.newThread, glyph: Plus, disabled: project.missing === true, ...(project.missing === true ? { title: strings.sidebar.projectMissing } : {}) },
     { id: 'copy', label: strings.sidebar.copyPath, title: project.path, glyph: Copy },
+    ...(project.kind !== 'drafts' ? [{ id: 'rename', label: strings.common.rename, glyph: PencilLine }] : []),
     { id: 'archived', label: strings.sidebar.viewArchivedThreads, glyph: History },
     ...(owner.owner || project.kind !== 'drafts' || reorder
-      ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›' }]
+      ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›', submenu: true }]
       : [])
   ];
   contextMenu.open(
@@ -83,8 +87,22 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'back') return contextMenu.follow(main, pick);
       if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
       // A new thread is a new draft: one already written there stays in the list.
-      if (action === 'new') await workspace.select(owner, undefined, project.id, { fresh: true });
+      // `opened`: a phone's list makes way for the draft's composer.
+      if (action === 'new') { await workspace.select(owner, undefined, project.id, { fresh: true }); opened?.(); }
       if (action === 'copy') await owner.copy(project.path);
+      if (action === 'rename') {
+        if (owner.client !== client || owner.clientGeneration !== clientGeneration) return;
+        const current = owner.projects.find(p => p.id === project.id);
+        if (!current) return;
+        const name = await confirm.prompt({
+          title: strings.sidebar.renameProject,
+          inputLabel: strings.sidebar.projectName,
+          initialText: current.name,
+          confirmLabel: strings.common.save,
+          cancelLabel: strings.common.cancel
+        });
+        if (name !== null && owner.client === client && owner.clientGeneration === clientGeneration) await owner.renameProject(project.id, name);
+      }
       if (action === 'archived') {
         if (workspace.active !== owner) await workspace.select(owner);
         owner.showSettings('general', 'archived');
@@ -105,9 +123,13 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         const current = owner.projects.find(projectOnOwner => projectOnOwner.id === project.id);
         if (current?.autoRemoveWorktrees !== undefined) await owner.setProjectAutoRemoveWorktrees(project.id, !current.autoRemoveWorktrees);
       }
-      if (action === 'worktrees') {
+      if (action === 'worktrees' || action === 'windows') {
         if (workspace.active !== owner) await workspace.select(owner);
-        owner.showSettings('general', 'worktrees');
+        owner.showSettings('general', action);
+      }
+      if (action === 'secrets') {
+        if (workspace.active !== owner) await workspace.select(owner);
+        owner.showSettings('general', 'secrets');
       }
       if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
       if (action === 'import') {

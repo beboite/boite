@@ -212,7 +212,7 @@ fn a_core_stopped_for_an_install_stays_stopped_until_the_hold_is_released() {
     let first = current_endpoint(&state).expect("the first core answers");
     let first_pid = spawned_pid(&state).unwrap();
     let control = Mutex::new(crate::update_stop::InstallState::Waiting);
-    assert!(state.wait_for_install(&control, || {}).expect("the idle core stops on request"));
+    assert!(state.wait_for_install(&control, false, || true, || {}).expect("the idle core stops on request"));
     assert!(!platform::process::alive(first_pid), "the core outlived the stop");
     // The window asks again once it lost the core: nothing may start.
     assert_eq!(current_endpoint(&state).err().as_deref(), Some(HELD));

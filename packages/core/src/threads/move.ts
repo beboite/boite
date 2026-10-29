@@ -39,7 +39,6 @@ export function agentMoveNote(from: MoveEnd, to: MoveEnd, branch: string | null)
   return `You moved this thread from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}.`;
 }
 
-const IN_FLIGHT = ['queued', 'running', 'waiting'];
 
 function checkStop(threadId: ThreadId, stopBackground: unknown): void {
   if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
@@ -113,7 +112,7 @@ export class ThreadMove {
   }
 
   private inFlight(thread: ThreadSummary): boolean {
-    return IN_FLIGHT.includes(thread.status) || this.threads.runner.handles.has(thread.id);
+    return this.threads.isBusy(thread.id);
   }
 
   /** Every client hears the row with its pending move, which lives in memory and changes nothing stored. */
@@ -222,7 +221,7 @@ export class ThreadMove {
   private check(thread: ThreadSummary, projectId: ProjectId, stopBackground: boolean | undefined, phase: Phase): Project {
     const threadId = thread.id;
     if (thread.agentSessionId || thread.projectId === null) {
-      throw refused('a persistent agent session takes its work through Agents and cannot be moved', { threadId, field: 'threadId', expected: 'a conversation thread' });
+      throw refused('a bot\'s thread stays its own and cannot move to a project', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
     if (thread.parentThreadId) {
       throw refused('a sub-thread moves with its parent; move the parent thread instead', {
@@ -240,7 +239,7 @@ export class ThreadMove {
     const busyNow = (one: ThreadSummary): boolean => {
       if (one.id === threadId && phase === 'request') return false;
       if (one.id === threadId && phase === 'apply') return this.threads.runner.handles.has(one.id) || one.status === 'running' || one.status === 'waiting';
-      return IN_FLIGHT.includes(one.status) || this.threads.runner.handles.has(one.id);
+      return this.threads.isBusy(one.id);
     };
     const busy = [thread, ...this.children(thread)].find(busyNow);
     if (busy !== undefined) {
@@ -264,6 +263,9 @@ export class ThreadMove {
   }
 
   private write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent', branchNamingPending: boolean): ThreadSummary {
+    // The journal refuses each moved row in a checkout being removed; asked once up front too,
+    // since the loop releases agents and leaves notes before each row it writes.
+    this.core.worktrees.reservations.assertFree(cwd, 'a moved conversation', { threadId: thread.id });
     const source = this.core.journal.getProject(thread.projectId ?? '');
     const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
     const to: MoveEnd = { projectId: target.id, name: target.name, cwd };

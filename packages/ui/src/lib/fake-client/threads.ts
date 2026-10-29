@@ -1,10 +1,11 @@
 import { noteUserMessage } from './checklist';
 import { createFakeThread, publishFakeThread } from './create-thread';
+import { trustContactMail } from './contact-hold';
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError, threadActive } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
@@ -56,14 +57,11 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
   return structuredClone(toSummary(thread));
 }
 
-export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
-  const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
-  const project = ctx.projects.find(p => p.id === mission?.projectId);
-  const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`, undefined, ctx.settings.worktreeStorage, project.id) : null;
-  if (project && placed) registerFakeWorktree(ctx, project.id, placed);
+/** A persistent agent's own thread: projectless, in its workspace folder, titled with its name. */
+export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string): string {
   const now = Date.now();
-  const thread: Thread = { id: `t-${++ctx.seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
-    title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
+  const thread: Thread = { id: `t-${++ctx.seq}`, projectId: null, agentSessionId: sessionId, ...agent.selection,
+    title: agent.name, titleSource: 'user', speed: null, cwd: `${DATA_DIR}/agent-workspaces/${agent.id}/agent-${agent.id}`, branch: null,
     status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
     createdAt: now, updatedAt: now, messages: [], messagesBefore: null, turns: [], commands: [] };
   ctx.threads.set(thread.id, thread);
@@ -222,6 +220,7 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
     if (family.deletedAt > before) continue;
     ctx.deletedThreads.delete(id);
     for (const thread of family.threads) {
+      ctx.composer.forgetThread(thread.id);
       ctx.mergedPrFixtures.delete(thread.id);
       ctx.mergedPrArchive.delete(thread.id);
       ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && !isThreadTerminal(thread.id, p.threadId));
@@ -277,20 +276,42 @@ export async function deleteExpiredDoneThreads(ctx: FakeContext, remove: (id: st
 }
 
 export function threadMethods(ctx: FakeContext) {
+  const creations = new Map<string, { key: string; created: Promise<string> }>();
   const removing = new Set<string>();
   return {
     ...sideQuestionMethods(ctx, (source, messages) => writeFakeFork(ctx, source, messages)),
-    'threads.pullRequest': async (params) => {
-      const thread = ctx.threads.get(params.threadId);
-      return thread?.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
-    },
     'threads.list': async (params) => {
       return [...ctx.threads.values()]
         .filter((t) => (params.projectId ? t.projectId === params.projectId : true))
         .filter((t) => (params.includeArchived ? true : !t.archived))
         .map((t) => structuredClone(toSummary(t)));
     },
-    'threads.create': async (params) => publishFakeThread(ctx, await createFakeThread(ctx, params), params.subscribe),
+    'threads.create': async (params) => {
+      // The core's creation receipts: asked again under its request id, a creation answers with the conversation it made.
+      const id = params.clientRequestId;
+      if (id !== undefined && (typeof id !== 'string' || id.length === 0 || id.length > 128)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'clientRequestId must be a string of 1 to 128 characters', data: { field: 'clientRequestId', expected: '1 to 128 characters' } });
+      }
+      const key = JSON.stringify([params.projectId, params.providerId, params.accountId, params.title ?? null, params.cwd ?? null,
+        params.model ?? null, params.effort ?? null, params.speed ?? null, params.permissionMode ?? 'default', params.worktree ?? null,
+        params.incognito === true, params.context ?? null]);
+      const previous = id === undefined ? undefined : creations.get(id);
+      if (previous) {
+        if (previous.key !== key) throw refusal('clientRequestId was already used for another conversation', { field: 'clientRequestId', expected: 'a new id for a different conversation' });
+        const threadId = await previous.created;
+        const made = ctx.threads.get(threadId);
+        if (!made) throw refusal('the conversation this request started was deleted since', { field: 'clientRequestId', threadId, reason: 'deleted' });
+        if (params.subscribe) ctx.bus.subscribed.add(made.id);
+        return structuredClone(toSummary(made));
+      }
+      const creating = createFakeThread(ctx, params).then(thread => publishFakeThread(ctx, thread, params.subscribe));
+      if (id !== undefined) {
+        const receipt = { key, created: creating.then(thread => thread.id) };
+        creations.set(id, receipt);
+        receipt.created.catch(() => { if (creations.get(id) === receipt) creations.delete(id); });
+      }
+      return creating;
+    },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
       const problem = snapshotOptionsProblem(params) ?? pageBytesProblem(params.maxBytes);
@@ -398,6 +419,7 @@ export function threadMethods(ctx: FakeContext) {
       if (changedModel || speed !== (thread.speed ?? null)) checkSpeed(ctx, nextProviderId, nextAccountId, model, speed);
       checkSelection(ctx, thread, params);
       const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
+      const executionBefore = [thread.providerId, thread.accountId, thread.model, thread.effort, thread.speed ?? null].join('\0');
       if (params.accountId !== undefined && params.accountId !== thread.accountId) {
         const account = ctx.accounts.find((entry) => entry.id === params.accountId);
         const provider = account && ctx.providers.find((entry) => entry.id === account.providerId);
@@ -438,12 +460,18 @@ export function threadMethods(ctx: FakeContext) {
         }
       }
       if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+      // Native mode changes are synchronous here; align only a mode-only transition from this execution's own version.
+      if (params.permissionMode !== undefined && executionBefore === [thread.providerId, thread.accountId, thread.model, thread.effort, thread.speed ?? null].join('\0')) {
+        for (const turn of thread.turns) if (turn.status === 'running' && turn.execution?.selectionVersion === version) {
+          turn.execution.selectionVersion = thread.selectionVersion ?? 0;
+        }
+      }
       return ctx.touch(thread);
     },
     'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
-      if (params.archived !== false && params.onlyIfIdle === true) assertIdleFamily(ctx, thread.id);
+      if (params.archived !== false && params.onlyIfIdle === true) assertIdleFamily(ctx, thread.id, true);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
       if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
@@ -455,6 +483,8 @@ export function threadMethods(ctx: FakeContext) {
         // As the core: archive and Mark done end the thread's pull request watches.
         thread.pullRequestWatches = [];
         cancelFamilySideQuestions(ctx, thread.id);
+        // As the core: a conversation put away stops its runs, a paused one included.
+        if (!thread.parentThreadId) ctx.workflows.stopRoot(thread.id, 'The thread was archived.');
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));
         // A restore during the stops keeps processes; new child work keeps its own.
@@ -547,6 +577,11 @@ export function threadMethods(ctx: FakeContext) {
       ctx.touch(thread);
       return { ok: true };
     },
+    'threads.trustContactHistory': async (params) => {
+      ctx.thread(params.threadId);
+      trustContactMail(ctx, params.threadId);
+      return { ok: true };
+    },
     'threads.subscribe': async (params) => {
       // The core runs `threads.require` first, so an unknown id is a NotFound.
       ctx.thread(params.threadId);
@@ -587,7 +622,6 @@ export function threadMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'turns.start': async (params) => {
-      if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       requireFakeCwd(ctx, ctx.thread(params.threadId));
       const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
@@ -614,8 +648,13 @@ export function threadMethods(ctx: FakeContext) {
         if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
         if (!account) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'accountId: the account of this conversation was removed; choose another account in it first', data: { threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account' } });
+        if (account.providerId !== provider.id) throw new RpcFailure({ code: RpcErrorCode.Refused,
+          message: `accountId: account ${account.id} belongs to provider ${account.providerId}; expected provider ${provider.id}`,
+          data: { field: 'accountId', accountId: account.id, providerId: account.providerId, expected: provider.id } });
         checkRunnable(provider, account);
       }
+      // As the core: echo in default mode keeps its tool-free route.
+      if (thread.contactHold && !(provider.protocol === 'echo' && thread.permissionMode === 'default')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'shared file policy: this tool has no enforceable shared execution boundary' });
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
       const rootId = thread.parentThreadId;
@@ -637,14 +676,12 @@ export function threadMethods(ctx: FakeContext) {
       if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
       if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
       if (ctx.providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
-      if (ctx.providers.find((p) => p.id === thread.providerId)?.protocol === 'agy') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the Antigravity CLI takes no /compact in print mode' });
       return ctx.startTurn(params.threadId, '[compact]', [], 'compact');
     },
     // The core's `threads/branching.ts`: the same refusals, by field. The fake
     // has no native transcript, so every rewind and fork is the seeded path.
     'threads.rewind': async (params) => {
       const thread = ctx.thread(params.threadId);
-      if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be rewound', data: { threadId: thread.id, field: 'threadId', expected: 'a conversation thread' } });
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot rewind an archived thread', data: { threadId: thread.id, field: 'threadId', expected: 'a thread that is not archived' } });
       if (threadActive(thread.status) || ctx.inFlight.has(thread.id)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has a turn running or queued; stop it before editing a message', data: { threadId: thread.id, reason: 'turn-in-flight', status: thread.status, expected: 'an idle thread' } });

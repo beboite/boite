@@ -1,10 +1,17 @@
-import { BracketLinks, richInline, codeLinkHtml, threadAddress, threadLinkHtml } from './chat-links';
+import { inline, mathHtml } from './markdown-inline';
+import { closesFence, fenceLanguage, openFence } from './fences';
 /**
  * The markdown an agent answer needs: paragraphs, headings, nested and task
  * lists, block quotes, tables, rules, fenced and inline code, bold, italic,
- * strikethrough, links. Everything is escaped first, so the output is safe to
- * put in the page. No images: a `data:` picture arrives as a tool document,
+ * strikethrough, links. Inline structure follows CommonMark; rendered text and
+ * attributes are escaped. No images: a `data:` picture arrives as a tool document,
  * and an answer never fetches a remote one.
+ *
+ * A closed ```` ```mermaid ```` block and math between `$$…$$`, `\[…\]`,
+ * `\(…\)` or in a ```` ```math ```` block become marked elements that still
+ * show their source (`md-mermaid`, `md-math`); `lib/rich-markdown.ts` draws
+ * them once they are in the page. A single `$` is never math: prices and
+ * `$PATH` stay text.
  */
 
 function escape(text: string): string {
@@ -15,44 +22,6 @@ function escape(text: string): string {
     .replaceAll('"', '&quot;');
 }
 
-function inline(text: string, rich = false): string {
-  const code: string[] = [];
-  let marker = '\0';
-  while (text.includes(marker)) marker += '\0';
-  // The lead stands in for a lookbehind (Safari before 16.4 cannot parse one): a
-  // previous span always ends on a backtick, so consuming one character is equivalent.
-  const protectedText = text.replace(/(^|[^`])(`+)(.+?)\2(?!`)/g, (_match, lead: string, _ticks: string, value: string) => {
-    // A thread is linked even without rich links: opening it needs no file access.
-    const link = rich ? codeLinkHtml(value) : threadAddress(value) ? threadLinkHtml(value, value) : null;
-    code.push(`<code>${link ?? escape(value)}</code>`);
-    return `${lead}${marker}${code.length - 1}${marker}`;
-  });
-  // Format around opaque spans, then restore them without parsing their contents.
-  return (rich ? richInline(protectedText, inlineFormatting) : inlineFormatting(protectedText)).split(marker).map((part, index) => index % 2 ? code[Number(part)]! : part).join('');
-}
-
-function inlineFormatting(text: string): string {
-  let out = escape(text);
-  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
-  out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  return webLinks(out);
-}
-
-/** `[label](http://...)` as a link, in linear time where a regex retried from every `[`. */
-function webLinks(text: string): string {
-  if (!text.includes('](http')) return text;
-  const links = new BracketLinks(text, true);
-  let out = '';
-  let start = 0;
-  for (let link = links.next(0); link; link = links.next(link.end)) {
-    out += `${text.slice(start, link.index)}<a href="${link.target}" target="_blank" rel="noopener noreferrer">${link.label}</a>`;
-    start = link.end;
-  }
-  return out + text.slice(start);
-}
-
-const FENCE = /^```([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.+)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const ITEM = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
@@ -158,7 +127,7 @@ export function renderMarkdown(source: string, rich = false): string {
 
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return;
-    html.push(`<p>${paragraph.map(text => inline(text, rich)).join('\n')}</p>`);
+    html.push(`<p>${inline(paragraph.join('\n'), rich)}</p>`);
     paragraph = [];
   };
   const flushList = (): void => {
@@ -171,7 +140,8 @@ export function renderMarkdown(source: string, rich = false): string {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    const fence = readFence(lines, index);
+    // An indented line under an open item belongs to the item, a fence included, as it always has.
+    const fence = list.takes(line) ? null : readFence(lines, index);
     if (fence) {
       flushAll();
       html.push(fence.html);
@@ -181,6 +151,14 @@ export function renderMarkdown(source: string, rich = false): string {
 
     if (line.trim() === '') {
       flushAll();
+      continue;
+    }
+
+    const math = readDisplayMath(lines, index);
+    if (math) {
+      flushAll();
+      html.push(math.html);
+      index = math.end;
       continue;
     }
 
@@ -237,14 +215,47 @@ export function renderMarkdown(source: string, rich = false): string {
 
 interface Block { html: string; end: number }
 
+/** A fenced block under the grammar of `lib/fences.ts`, its code shifted left by the opening line's indent. */
 function readFence(lines: string[], start: number): Block | null {
-  const fence = FENCE.exec(lines[start] ?? '');
+  const fence = openFence(lines[start] ?? '');
   if (!fence) return null;
+  const outdent = new RegExp(`^ {0,${fence.indent}}`);
   const code: string[] = [];
   let end = start + 1;
-  while (end < lines.length && !FENCE.test(lines[end] ?? '')) code.push(lines[end++] ?? '');
-  const language = fence[1] ? ` data-language="${escape(fence[1])}"` : '';
-  return { html: `<pre${language}><code>${escape(code.join('\n'))}</code></pre>`, end };
+  while (end < lines.length && !closesFence(lines[end] ?? '', fence)) code.push((lines[end++] ?? '').replace(outdent, ''));
+  const source = code.join('\n');
+  // Only a closed block is drawn: one still being written stays code.
+  const closed = end < lines.length;
+  const name = fenceLanguage(fence);
+  const kind = name.toLowerCase();
+  if (closed && kind === 'math' && source.trim()) {
+    return { html: mathHtml('div', source.trim(), lines.slice(start, end + 1).join('\n'), true), end };
+  }
+  const language = name ? ` data-language="${escape(name)}"` : '';
+  const pre = `<pre${language}><code>${escape(source)}</code></pre>`;
+  if (closed && kind === 'mermaid' && source.trim()) return { html: `<div class="md-mermaid" data-source="${escape(source)}">${pre}</div>`, end };
+  return { html: pre, end };
+}
+
+/**
+ * A formula on lines of its own: `$$` or `\[` opens it at the start of a
+ * line and its closing mark ends a line, the same one or a later one. With no
+ * closing mark, the lines stay text.
+ */
+function readDisplayMath(lines: string[], start: number): Block | null {
+  const first = (lines[start] ?? '').trim();
+  const close = first.startsWith('$$') ? '$$' : first.startsWith('\\[') ? '\\]' : null;
+  if (!close) return null;
+  for (let end = start; end < lines.length; end++) {
+    const line = (lines[end] ?? '').trim();
+    if (!line.endsWith(close) || (end === start && line.length < 4)) continue;
+    const source = lines.slice(start, end + 1).map(text => text.trim()).join('\n');
+    const tex = source.slice(2, -2).trim();
+    // `$$a$$ and $$b$$` on one line is two formulas in a paragraph, not one from `a` to `b`.
+    if (!tex || tex.includes(close === '$$' ? '$$' : '\\]')) return null;
+    return { html: mathHtml('div', tex, source, true), end };
+  }
+  return null;
 }
 
 function readQuote(lines: string[], start: number, rich: boolean): Block | null {
@@ -308,10 +319,14 @@ class MarkdownList {
     return previous;
   }
 
+  /** Whether `continue` would add this line to the open item. */
+  takes(line: string): boolean {
+    return this.stack.length > 0 && /^\s{2,}\S/.test(line);
+  }
+
   continue(line: string): boolean {
-    const open = this.stack[this.stack.length - 1];
-    if (!open || !/^\s{2,}\S/.test(line)) return false;
-    open.text += ` ${line.trim()}`;
+    if (!this.takes(line)) return false;
+    this.stack[this.stack.length - 1]!.text += ` ${line.trim()}`;
     return true;
   }
 

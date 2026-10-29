@@ -46,7 +46,7 @@ account retention policies can change independently of Boite.
 | pi on OpenAI | Same OpenAI model mapping as Codex | `documented` |
 | OpenCode `anthropic/` | Five-minute default | `documented` |
 | OpenCode `openai/` | Same OpenAI model mapping as Codex | `documented` |
-| Grok, Antigravity, agy, Muse and unmapped endpoints | No timer supplied by the current driver | None |
+| Grok, Antigravity, Muse and unmapped endpoints | No timer supplied by the current driver | None |
 | echo | Five-minute deterministic fixture | Fixed |
 
 ### Claude
@@ -125,8 +125,10 @@ A wait starts when a real turn of the thread ends `done`. Each ping is planned
 from the thread's `promptCache` and checked again when its timer fires. A ping
 goes when all of these hold:
 
-- the thread is the user's conversation: not archived, not a delegated agent,
-  not a resident agent, and it has a session to resume;
+- the thread is the user's conversation, a bot's included: not
+  archived, not a delegated agent, and it has a session to resume;
+- no automatic compaction is planned: compaction takes precedence over a ping
+  so refreshing the cache cannot postpone it indefinitely;
 - one of its delegated agents is queued, running or waiting, or one of its
   workflows runs;
 - its `promptCache` was written by the thread's current model and account, and

@@ -233,6 +233,8 @@
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.05);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-frame: 0 3px 8px rgb(0 0 0 / 0.24);
+  /* The left edge of a phone's screen sliding over another (`lib/screen-slide.svelte.ts`). */
+  --shadow-screen: -8px 0 24px -6px rgb(0 0 0 / 0.5);
 
   /* The composer and its activity dock share a top reflection. The dock floats over
      the scrolling timeline, so its fill is nearly opaque: the blur only softens
@@ -309,6 +311,8 @@
   --robot-leaf: #59c97b;
   --robot-halo: #ffd447;
   --robot-bulb: #ff6b6b;
+  --robot-bandage: #f6d6b4;
+  --robot-bandage-pad: #e7b98f;
 
   --titlebar: 44px;
   /* A caption button, Windows' own width, the bar's full height. */
@@ -371,6 +375,9 @@
   --dur-demo-word: 150ms;
   --ease-slide: cubic-bezier(0.2, 0, 0, 1);
   --z-whip: 100;
+  --z-window-resize: 11000;
+  --window-resize-edge: 5px;
+  --window-resize-corner: 12px;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: dark;
@@ -737,6 +744,7 @@ html[data-chat-width='full'] {
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
   --shadow-frame: 0 2px 6px rgb(0 0 0 / 0.07);
+  --shadow-screen: -8px 0 24px -6px rgb(0 0 0 / 0.14);
   --composer-glaze: linear-gradient(145deg, rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.18) 48%, transparent);
   --shadow-composer: 0 6px 20px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.8);
   --shadow-control: inset 0 1px 0 rgb(255 255 255 / 0.7);
@@ -1312,8 +1320,12 @@ button.chip {
   background: var(--control-glaze) var(--color-control-surface);
 }
 
+/* Flex, so a `ui-label` inside centres its capitals on the cap's face; as an
+   inline block it sat at the top, 3 px above the middle. */
 .kbd {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 5px;
   border: 1px solid var(--color-edge);
   border-bottom-width: 2px;
@@ -1383,10 +1395,9 @@ tr:last-child td {
 /* A page's root stands its 880 px column in the middle of a wide window rather
    than against its left edge, whatever padding the page sets itself. The
    gutter is reserved on both sides, so a scrollbar does not push the column
-   off centre. A page nested in another (a machine's settings) is not moved,
-   and a narrow window keeps each page's own padding. */
+   off centre. A narrow window keeps each page's own padding. */
 @media (min-width: 721px) {
-  .settings .framed > :is(.page, .machine-settings) {
+  .settings .framed > .page {
     padding-inline: max(clamp(20px, 4vw, 64px), calc((100% - var(--settings-width)) / 2));
     scrollbar-gutter: stable both-edges;
   }
@@ -1639,7 +1650,7 @@ tr:last-child td {
   }
 }
 
-/* The edge-scrollbars experiment (lib/edge-scrollbars.ts): native bars take no
+/* The edge-scrollbars feature (lib/edge-scrollbars.ts): native bars take no
    room and an overlay thumb fades in as the mouse nears a container's edge.
    The script sets the class only for a fine pointer without forced colors, and
    these selectors outrank the `*` rules above. */
@@ -1758,6 +1769,9 @@ html[data-theme='grain'] {
    */
   --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g' x='0' y='0' width='160' height='160' filterUnits='userSpaceOnUse' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0.14 0.14'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
   --grain-fade: linear-gradient(135deg, #d8d8de 0%, #7a7a84 28%, #2a2a31 62%, #050507 100%);
+  /* A phone's screen sliding over another (lib/screen-slide.svelte.ts) carries the fade it covers
+     once in place, not this theme's flat background. */
+  --screen-background: var(--grain-fade) no-repeat var(--color-background);
 }
 
 /* The window material blurs what is behind the window; an opaque fade would
@@ -2016,6 +2030,35 @@ html[data-glass] #app {
   }
 }
 
+/* A phone's screens (`lib/screen-slide.svelte.ts`): the one on top comes in
+   from the right edge and leaves by it, opaque all the way; the one under it
+   moves a quarter of the width the other way, as a native stack does. Only
+   transforms move, so nothing is laid out again on the way. */
+@keyframes screen-in {
+  from { transform: translateX(100%); }
+}
+
+@keyframes screen-out {
+  to { transform: translateX(100%); }
+}
+
+@keyframes screen-under-in {
+  from { transform: translateX(-25%); }
+}
+
+@keyframes screen-under-out {
+  to { transform: translateX(-25%); }
+}
+
+/* A phone's bottom sheet rises from below the screen and goes back down. */
+@keyframes sheet-up {
+  from { transform: translateY(calc(100% + 40px)); }
+}
+
+@keyframes sheet-down {
+  to { transform: translateY(calc(100% + 40px)); }
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -2075,6 +2118,9 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); animation: fade var(--dur-2) var(--ease-out-quint); }
   .mobile-sheet-backdrop.closing { animation-name: fade-out; pointer-events: none; }
   [data-mobile-sheet='true'] { position: fixed !important; max-width: none !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  /* A sheet rises from the bottom edge and goes back down, where its popover pops in place (lib/floating.ts). */
+  [data-mobile-sheet='true'] { animation-name: sheet-up !important; animation-duration: var(--dur-3) !important; animation-timing-function: var(--ease-slide) !important; }
+  [data-mobile-sheet='true'].closing { animation-name: sheet-down !important; }
   /* No outline rail on a phone (MessageList.svelte): the timeline's left edge matches its right. */
   :root { --outline-room: 20px; }
   :root { --text-reading: var(--text-md); --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }

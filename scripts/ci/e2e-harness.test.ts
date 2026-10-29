@@ -48,8 +48,7 @@ test('every E2E shard stops a hung run before its job limit and uploads the repo
   // job's first step, while the upload step can still run.
   const workflow = readFileSync(join(repo, '.github/workflows/ci.yml'), 'utf8');
   const e2e = steps('e2e-1');
-  // Right after the stale-draft stop, which stays first (required-checks.test.ts).
-  expect([...e2e.keys()].slice(0, 2)).toEqual(['Stop a stale draft run', 'Note when the job started']);
+  expect([...e2e.keys()][0]).toBe('Note when the job started');
   expect(e2e.get('Note when the job started')).toContain('BOITE_JOB_STARTED_MS=');
   const run = e2e.get('Browser and core end-to-end tests') ?? '';
   const minutes = /bun scripts\/ci\/flaky\.ts --job-started \$env:BOITE_JOB_STARTED_MS --job-minutes (\d+) @files/.exec(run)?.[1];

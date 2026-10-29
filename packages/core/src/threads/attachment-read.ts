@@ -14,6 +14,7 @@ type Attachment = Extract<MessagePart, { type: 'file' | 'image' }>;
 export async function readMessageAttachment(core: Core, params: RpcParams<'messages.attachment'>): Promise<RpcResult<'messages.attachment'>> {
   const { threadId, messageId, partIndex } = params;
   const thread = core.threads.require(threadId);
+  const permit = core.sharedAccess.publication(threadId, messageId);
   if (!Number.isSafeInteger(partIndex) || partIndex < 0) throw invalidParams('messages.attachment.partIndex: expected a nonnegative integer', { field: 'partIndex', expected: 'a nonnegative integer' });
   // An incognito family leaves nothing behind, a browser's disk cache included.
   const parent = thread.parentThreadId ? core.journal.getThread(thread.parentThreadId) : null;
@@ -23,13 +24,15 @@ export async function readMessageAttachment(core: Core, params: RpcParams<'messa
   const original = (): Attachment => read ??= attachmentOf(core, threadId, messageId, partIndex);
   if (params.display === true) {
     const copy = await displayed(core, threadId, messageId, partIndex, params.thumb === true ? 'thumb' : 'large', original);
+    permit?.check();
     if (copy !== null) {
       // A copy the journal could not keep has no bytes for the route to read: it comes in the frame.
       if (params.ticket !== true || !copy.kept) return { data: Buffer.from(copy.bytes).toString('base64'), mimeType: 'image/webp' };
       const size = copy.size;
       const ticket = core.fileTickets.mintBytes(`${threadId}:${messageId}:${partIndex}:${size}`, () => {
+        permit?.check();
         const kept = core.media.kept(threadId, messageId, partIndex, size);
-        return kept !== null && kept.length > 0 ? { data: kept, mime: 'image/webp', ...noStore } : null;
+        return kept !== null && kept.length > 0 ? { data: kept, mime: 'image/webp', ...noStore, ...(permit ? {noStore: true as const} : {}) } : null;
       });
       return { data: '', url: `${FILE_ROUTE}/${ticket}`, mimeType: 'image/webp', bytes: copy.bytes.length };
     }
@@ -37,9 +40,10 @@ export async function readMessageAttachment(core: Core, params: RpcParams<'messa
   const part = original();
   if (params.ticket !== true) return { data: part.data };
   const ticket = core.fileTickets.mintBytes(`${threadId}:${messageId}:${partIndex}:original`, () => {
+    permit?.check();
     let found: Attachment;
     try { found = attachmentOf(core, threadId, messageId, partIndex); } catch { return null; }
-    return { data: Buffer.from(found.data, 'base64'), mime: found.mimeType, ...(found.type === 'file' && found.name ? { name: found.name } : {}), ...noStore };
+    return { data: Buffer.from(found.data, 'base64'), mime: found.mimeType, ...(found.type === 'file' && found.name ? { name: found.name } : {}), ...noStore, ...(permit ? {noStore: true as const} : {}) };
   });
   return { data: '', url: `${FILE_ROUTE}/${ticket}`, mimeType: part.mimeType, bytes: Buffer.byteLength(part.data, 'base64') };
 }

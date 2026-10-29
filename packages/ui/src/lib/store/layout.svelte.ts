@@ -1,4 +1,4 @@
-import { parseGroupRelayUrl, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, type QuotaAlert, type ThreadId } from '@boite/contracts';
 import { appPage } from '../app-origin';
 import { servesThisPage } from '../endpoint';
 import {
@@ -10,14 +10,18 @@ import {
   readNotificationKinds,
   readNotifications,
   requestNotificationPermission,
+  sameKinds,
   sendNotification,
   shouldNotify,
   toastFor,
+  limitToast,
+  limitsKey,
   writeNotificationKinds,
   writeNotifications,
   type NotifyKind
 } from '../notify';
 import { PUSH_ENABLED_KEY } from '../pwa';
+import type { Client } from '../client';
 import { experimentOn } from '../experiments.svelte';
 import type { DropKind } from '../native-drop';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
@@ -31,6 +35,9 @@ import { contactsShown } from '../contacts-rail.svelte';
 const deviceKinds = $state({ list: readNotificationKinds() });
 
 /** What the window shows around the chat: the page, the sidebar, the palette, the panel, the toasts. */
+/** What opens over an agent's conversation: its settings, or its brain (instructions and memory). */
+export type AgentPane = 'settings' | 'brain';
+
 export class Layout {
   projectPickerOpen = $state(false);
   /** Toasts for threads the user is not looking at, per machine. */
@@ -60,7 +67,7 @@ export class Layout {
   dropping = $state<DropKind | false>(false);
   search = $state('');
   /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
-  agentsTarget = $state<{ agentId: string; request: number; pane?: 'settings'; kind?: 'profile' | 'group' | 'team' | 'mission' } | null>(null);
+  agentsTarget = $state<{ agentId: string; request: number; pane?: AgentPane } | null>(null);
   /** The contact the Contacts page shows, by core id; null shows the page that adds one. */
   contact = $state<string | null>(null);
 
@@ -106,20 +113,31 @@ export class Layout {
     if (tab === 'resources') void this.ctx.store.refreshResources();
   }
 
+  /**
+   * The thread list and its chat. Coming from an agent's thread, the chat goes
+   * back to the ordinary thread it showed last, else where the user left off:
+   * an agent's conversation belongs beside the agents list.
+   */
   showChat(): void {
     this.ctx.threads.invalidateNavigation();
     this.page = 'chat';
+    const open = this.ctx.threads.openThread;
+    if (!open?.agentSessionId) return;
+    const back = this.ctx.threads.lastChatThreadId;
+    const row = back ? this.ctx.threads.threads.find(t => t.id === back && !t.archived) : undefined;
+    if (row) void this.ctx.store.open(row.id);
+    else void this.ctx.projects.openWhereLeft();
   }
 
   /**
-   * The Agents page is an experiment: with it off, nothing leads there. `pane`
-   * opens the agent on its settings; `kind` names a group, a team or a mission
-   * instead of an agent.
+   * The Agents page is an experiment: with it off, nothing leads there.
+   * `agentId` opens that agent's thread there; `pane` opens its settings or
+   * its brain over the conversation.
    */
-  showAgents(agentId: string | null = null, pane?: 'settings', kind?: 'profile' | 'group' | 'team' | 'mission'): void {
+  showAgents(agentId: string | null = null, pane?: AgentPane): void {
     if (!experimentOn('resident-agents')) return;
     this.ctx.threads.invalidateNavigation();
-    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}), ...(kind && kind !== 'profile' ? { kind } : {}) };
+    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1, ...(pane ? { pane } : {}) };
     this.page = 'agents';
     this.sidebarOpen = false;
   }
@@ -185,6 +203,21 @@ export class Layout {
     })();
   }
 
+  /**
+   * A limit alert, whatever is on screen: it belongs to no thread. A click
+   * opens Settings, Limits, on the machine that sent it.
+   */
+  notifyLimit(alert: QuotaAlert): void {
+    if (!readNotifications() || !readNotificationKinds().includes('limits')) return;
+    const s = this.ctx.store;
+    const origin = s.endpointUrl ? new URL(s.endpointUrl).origin : undefined;
+    void (async () => {
+      const core = origin !== undefined && origin !== location.origin ? notificationCore(s) : undefined;
+      if (await pushCovers(origin, core !== undefined && s.group !== null)) return;
+      await sendNotification({ ...limitToast(alert, limitsKey(s.machineId)), origin, ...(core === undefined ? {} : { core }) });
+    })();
+  }
+
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */
   async setNotifications(enabled: boolean): Promise<void> {
     this.notifications = enabled;
@@ -218,6 +251,24 @@ export class Layout {
     const home = readPushHome();
     const client = home !== null ? pushHomeClient(home) : this.mayHoldPush() ? this.ctx.store.client : null;
     void client?.call('push.kinds', { kinds: pushKinds() }).catch(() => undefined);
+  }
+
+  /**
+   * On a paired device, once its core answers: a subscription saved before a
+   * kind existed (Limits) lacks it, so the device's choice is sent again. The
+   * Phone app settings do the same when they open.
+   */
+  checkPushKinds(client: Pick<Client, 'call'>): void {
+    try {
+      if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on') return;
+    } catch {
+      return;
+    }
+    const home = readPushHome();
+    if (home !== null ? home !== (this.ctx.store.endpointUrl ?? '') : !this.mayHoldPush()) return;
+    void client.call('push.status', {}).then((result) => {
+      if (result.subscribed && !sameKinds(result.kinds ?? [], pushKinds())) return client.call('push.kinds', { kinds: pushKinds() });
+    }).catch(() => undefined);
   }
 
   /** The shown machine is one this page subscribes on: the one serving it, or any on the phone app's page. */

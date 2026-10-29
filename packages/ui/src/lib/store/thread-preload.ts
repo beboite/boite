@@ -1,6 +1,6 @@
 /*
  * The page `open()` asks for, and the presses that ask for it ahead of their
- * click (the `press-preload` experiment, `lib/press-preload.ts`).
+ * click (`lib/press-preload.ts`).
  *
  * A press sends what the open would send, built by the same `askPage`, with
  * the subscription and without the open's other effects: a core with bundled

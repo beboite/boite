@@ -10,6 +10,12 @@ and `POST /forget` use a random enhanced installation identifier. Rate limits
 cover each source IP and the shared ingestion budget. Cloudflare enforces these
 per location, not as a monthly billing ceiling.
 
+`POST /consent` accepts only a choice (`basic`, `enhanced` or `off`) and a random
+receipt UUID. It records an anonymous `consent_choice` without an installation
+ID or a person profile, even for refusals. Distinct `receipt_id` counts prevent
+retried requests from inflating the dashboard. Existing preferences are never
+reported automatically; the UI must disclose this count before a selection.
+
 ## Deployment
 
 ```sh

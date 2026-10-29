@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bytes, clockTime, effortName, elapsed, formatTokens, levelName, longDay, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
+import { bytes, clockTime, dayClock, effortName, elapsed, formatTokens, levelName, longDay, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
 import { setLocaleSetting } from './i18n.svelte';
 
 test('elapsed reads like a stopwatch', () => {
@@ -38,7 +38,7 @@ test('clockTime gives the hour today, a weekday this week and a date beyond', ()
 
 test('durations, sizes, effort levels and quota windows follow the language the app speaks', async () => {
   const friday = new Date(2026, 8, 25, 20, 55).getTime();
-  expect(quotaResetTime(friday)).toMatch(/^Friday /);
+  expect(quotaResetTime(friday, friday)).toMatch(/^Friday /);
   expect(millis(38_000)).toBe('38.0 s');
   // Xhigh reads as the providers spell it, whatever label the core sends.
   expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Xhigh');
@@ -58,7 +58,7 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(quotaWindowName('Weekly · Opus')).toBe('Hebdomadaire · Opus');
     expect(quotaWindowName('Gemini Pro · 5 hours')).toBe('Gemini Pro · 5 heures');
     expect(quotaWindowName('Credits')).toBe('Crédits');
-    expect(quotaResetTime(friday)).toBe('vendredi 20:55');
+    expect(quotaResetTime(friday, friday)).toBe('vendredi 20:55');
     expect(levelName({ id: 'none', label: 'None' })).toBe('Aucun');
     // A subagent row names its model's effort in French, an unknown id as sent.
     const model = { effort: { levels: [{ id: 'high', label: 'High' }] } };
@@ -68,4 +68,30 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(longDay(new Date(2026, 8, 15, 10, 31).getTime())).toBe('mardi 15 septembre');
     expect(formatTokens(84_400).replace(/\s/g, ' ')).toBe('84,4 k');
   } finally { await setLocaleSetting('en'); }
+});
+
+test('quota resets beyond the next seven calendar days show their date instead of an ambiguous weekday', async () => {
+  const now = new Date(2026, 9, 25, 9, 0).getTime();
+  const today = new Date(2026, 9, 25, 14, 0).getTime();
+  const monthly = new Date(2026, 10, 22, 9, 35).getTime();
+  const nextYear = new Date(2027, 0, 3, 9, 35).getTime();
+  expect(quotaResetTime(today, now)).toMatch(/^Sunday /);
+  expect(quotaResetTime(monthly, now)).toBe(`Nov 22 ${dayClock(monthly)}`);
+  expect(quotaResetTime(nextYear, now)).toBe(`Jan 3, 2027 ${dayClock(nextYear)}`);
+  await setLocaleSetting('fr');
+  try {
+    expect(quotaResetTime(today, now)).toBe('dimanche 14:00');
+    expect(quotaResetTime(monthly, now)).toBe('22 nov. 09:35');
+    expect(quotaResetTime(nextYear, now)).toBe('3 janv. 2027 09:35');
+  } finally { await setLocaleSetting('en'); }
+});
+
+test('quota reset dates use local calendar boundaries, including across daylight saving changes', () => {
+  const now = new Date(2026, 9, 24, 23, 0).getTime();
+  const thisWeek = new Date(2026, 9, 30, 23, 30).getTime();
+  const nextWeek = new Date(2026, 9, 31, 0, 0).getTime();
+  const past = new Date(2026, 9, 17, 9, 35).getTime();
+  expect(quotaResetTime(thisWeek, now)).toMatch(/^Friday /);
+  expect(quotaResetTime(nextWeek, now)).toBe(`Oct 31 ${dayClock(nextWeek)}`);
+  expect(quotaResetTime(past, now)).toBe(`Oct 17 ${dayClock(past)}`);
 });

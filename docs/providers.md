@@ -65,6 +65,19 @@ cross-site cookies; those dashboards remain available through that button.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
 
+### Switching the gateway from Limits
+
+Once a gateway is saved, Limits starts with a switch, Use Douane or Use
+CLIProxyAPI, beside its address (or Douane on this machine in local mode). It
+saves as it flips, through `subscriptionProxy.setEnabled`, and changes only
+`enabled`: the kind, the URLs and the key stay as the owner saved them. A
+paired phone reaches it too, which is the one way a phone changes the gateway
+([phone](phone.md)); configuring one stays owner-only. Before anything is
+saved there is no switch, and the method refuses with `no subscription proxy
+is configured`. Off restores native authentication as a saved Use a
+subscription proxy does. `?fake=1&gateway=douane` (or `cliproxyapi`) starts
+the in-memory client with a saved gateway that is off.
+
 ### Douane on this machine
 
 The proxy card's first choice is where the gateway runs: Remote gateway (the
@@ -173,6 +186,23 @@ key and would send that token to the gateway, so `GROK_AUTH_PATH` points it at
 finds no sign-in, and the account's own stays for when the proxy is off. This
 was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
+Muse Code uses Douane only after its quotas response announces a non-disabled
+entry in the native `meta` pool and the core verifies both native routes without
+inference: the catalog must contain Muse metadata, and an OPTIONS request to the
+Responses route must advertise POST. Older gateways returning 404 or dashboard
+HTML keep native authentication. A Muse model served by OpenCode Go does not
+connect Muse Code. Without that pool, with CLIProxyAPI, or with the gateway
+off, Muse keeps its native sign-in. Discovery updates the connection state
+even when Meta has not reported a quota window yet.
+
+Muse's MSP host reads an isolated gateway configuration under the core's data
+directory, with `endpoint_transport.base_url` pinned to `/muse-code` and
+`auth: "bearer"`. Its catalog uses `/muse-code/models` and its turns use
+`/muse-code/responses`, both restricted to Meta by Douane. `META_API_KEY`
+carries the proxy key only in the child environment; it overrides saved
+authentication. Native settings and sign-ins remain intact. Models and
+efforts still come from Muse's own MSP discovery, with their upstream ids.
+
 Both OpenCode versions gain the gateway as an additional provider, named after
 its kind (`douane` or `cliproxyapi`), calling its Chat Completions route.
 OpenCode 1 uses the singular `provider` configuration with
@@ -184,6 +214,19 @@ permissions and other providers are preserved. The key is never embedded in
 that configuration, and disabling the proxy restores the descriptor's original
 environment and native account checks.
 
+OpenCode 2 uses ACP for login and model discovery. Conversation execution uses
+an owned `serve --stdio --port 0` process on loopback, with a random Basic-auth
+password and the same isolated environment. Closing its stdin ends its lease.
+The native event stream draws tools, reasoning, permissions and usage; plain
+tool text stays output, while images and file diffs stay attached documents.
+Follow-ups use the native prompt inbox with `delivery: "steer"`, so queued
+messages and Send now join the running execution. OpenCode 2's ACP endpoint
+rejects concurrent prompts. Events received during a follow-up submission wait
+until its acceptance is journalled, keeping the user message before its reply.
+Accepted inbox IDs remain tracked until delivery or cancellation, so a previous
+execution's terminal event cannot discard a late follow-up. Yolo mode approves
+native permissions without opening a permission card, including child sessions.
+
 The picker lists OpenCode's own models first, then the gateway's as
 `douane/<gateway id>`: Gemini, Muse, the open families, and Antigravity Claude
 models whose catalog row explicitly includes `openai` in
@@ -193,6 +236,10 @@ their native harnesses. Older catalogs without endpoint metadata still offer
 Gemini, Muse and open models. Gateway model IDs retain their routing prefix in
 the provider configuration, so selecting `douane/antigravity/claude-opus-4-6-thinking`
 calls the gateway with `antigravity/claude-opus-4-6-thinking`.
+The picker groups gateway models by their upstream provider, even in short
+catalogs and search results. For example, `douane/opencode` and
+`douane/openrouter` distinguish two MiniMax entries. Favorites show the same
+source, and a model's tooltip gives its complete id.
 
 The injected models preserve positive integer `context_length` (or
 `context_window`) and `max_output_tokens` as their context and output limits.
@@ -289,12 +336,14 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   shipped one. `schemaVersion` is `1` and is checked. `name` and `shortName` are
   what the picker and the chips show.
 - `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `muse`,
-  `pi`, `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
+  `pi` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
 - `roots` bounds core-owned provider file access. Paths outside them and `..`
   segments are refused. It is not an OS filesystem sandbox for the agent.
 - `profiles` holds one `OsProfile` per operating system, keyed `windows`, `linux`,
   `macos`. A provider with no profile for the running OS is not offered.
+- `env` supplies common environment defaults for every OS profile; each profile's
+  `env` overrides them before path tokens are expanded.
 - `auth.kind` is `oauth-cli`, `api-key` or `none`, and `auth.session` names the
   files inside the isolation directory that carry the login, which is what the
   core reads to tell `ok` from `unauthenticated`. `auth.sqlite` is the same
@@ -421,10 +470,7 @@ session protocol either.
   `codex update` which package manager owns the install. The launcher is a
   Node process that otherwise stays up beside each Codex process. A wrapper script in front of it, which may set limits of its
   own, is still what runs (`packages/core/src/providers/codex-launcher.ts`).
-- `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
-  adds its print-mode flags itself, because the same binary also answers
-  `agy models` for the probe, so the Antigravity CLI declares none; anything a
-  descriptor puts there goes first on both command lines.
+- `launch.args` put the agent into the mode Boite speaks to.
 - `isolation` is the environment that makes one account blind to the others, with
   `{isolationDir}` substituted per account at spawn ([accounts.md](accounts.md)).
 - `close.processes` names what the core closes when an account is removed, and is
@@ -499,9 +545,7 @@ descriptor folder, so a shipped login command can name a script beside it.
 at spawn, in the `isolation` map and in a login command's `env`.
 
 The driver adds model, effort and permission arguments; they are not descriptor
-tokens. The `agy` driver
-builds the whole print-mode line itself (below). Grok needs it for the permission
-mode alone: the `grok` quirk splices
+tokens. Grok needs it for the permission mode alone: the `grok` quirk splices
 `--permission-mode <mode>` before the `agent` subcommand, or `--always-approve`
 after it, on the way to the spawn. A probe has no thread, so it launches the
 declared line as it is.
@@ -614,7 +658,7 @@ left for the next of those moments.
 
 ## What ships
 
-Ten descriptors ship, and only the first nine are ever visible to a user: `echo`
+Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -624,10 +668,9 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | OpenCode | `acp` | `opencode acp --port 0` |
 | OpenCode 2 | `acp` | `opencode2 acp`, experimental and off until turned on |
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
-| Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json -p=` |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
 | Codex | `codex-appserver` | `codex app-server` |
-| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` |
+| Muse Code | `muse` | `muse serve --trust-workspace [MUSE_HOST_SETTINGS] [mode flags]` |
 | pi | `pi` | Package bin through Node or `pi --mode rpc` |
 | Echo | `echo` | In-process fixture |
 
@@ -678,7 +721,21 @@ descriptor uses additional fields available to other providers:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. `quirks: ["grok"]` selects Grok behavior
+plan mode. An `invoke_subagent` call (titled `Running invoke_subagent` or `Run
+invoke_subagent?`; agents before 1.4.1 name it `start_subagent`; without
+`_meta.is_mcp_tool_call`) carries the batch it launched as `nativeAgents`, listed in Subagents: the call returns once the batch
+is launched, its output is the launch's description, and the agent reports no
+child ids, names, models or results, so the batch stays running while the turn
+runs and reads unknown after it; only a failed launch is final, with its error.
+A shell call (`kind: execute`) still running when the prompt answers is the
+thread's background work: the process stays up past the warm window, and the
+thread's next turns run on it, until the command's own update ends it, and Stop on the idle thread closes the process,
+the only way to end such a command since `session/cancel` stops prompts alone.
+A GIF goes to the agent as a saved file, the server taking PNG, JPEG and WebP
+blocks only. On Linux the launch environment names the first CA bundle found
+(`NIX_SSL_CERT_FILE`, then the usual `/etc` paths) as `SSL_CERT_FILE` unless
+`SSL_CERT_FILE` or `SSL_CERT_DIR` is set, since the server's bundled Python
+finds none on NixOS. `quirks: ["grok"]` selects Grok behavior
 (`packages/core/src/drivers/grok.ts`). Text sent while a prompt runs, an
 asynchronous answer or a coordination message, goes out as Grok's
 `_x.ai/interject { sessionId, text }`, which joins the running turn at its next
@@ -744,12 +801,17 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 - Its own subagent tool is denied, as version 1's `task` is, since delegation
   goes through Boite. The profile's `env` sends it in version 2's syntax, a
   `permissions` rule on the `subagent` action, as `OPENCODE_CONFIG_CONTENT`.
+- Default profiles use separate XDG homes: `~/.local/share/opencode-v2`,
+  `~/.config/opencode-v2`, `~/.local/state/opencode-v2` and
+  `~/.cache/opencode-v2`. OpenCode adds its `opencode/` subdirectory to each.
+  This keeps version 1's database locks and incompatible plugins out of version
+  2. Login checks, login terminals, hooks and isolated-account sharing use
+  these same homes, rather than an inherited version 1 XDG directory.
 - A sign-in is a row of `opencode/opencode.db`, in its `credential`, `account`
   or `control_account` table, which `auth.sqlite` names. Version 2 never reads
   version 1's `auth.json`: each is signed in on its own, even on the default
-  account, whose folder the two share. The same database holds the sessions of
-  both. Version 2 loads a session version 1 created; version 1 answers -32603
-  to one version 2 created, so a thread moved to version 2 stays there.
+  account. Session databases are separate too; a thread cannot reuse a native
+  session from the other version.
 - Every command but `acp` talks to a background service that outlives it and
   listens on one fixed port, so a second account could never start its own.
   Boite never starts it: turns and probes run over `acp`, which serves itself,
@@ -760,9 +822,8 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 - OpenCode Go usage is read with the key version 2 stored for `opencode-go`
   in the `credential` table (`packages/core/src/providers/opencode.ts`).
 - The plugin API changed: a plugin written for version 1 does not load in
-  version 2. The descriptor shares the same `opencode/plugins` folder with an
-  isolated account and Settings counts what is in it, whatever it was written
-  for.
+  version 2. Version 2 loads plugins from its own configuration home only.
+  Isolated version 2 accounts share those plugins; Settings counts that source.
 - Its managed install on Windows x64 is the npm platform tarball, unpacked to
   `{agentsDir}/package/bin/opencode.exe`, the first executable candidate. It
   never claims the `opencode` name, so OpenCode 1 stays where it is. Linux and
@@ -780,6 +841,50 @@ gateway, declared with the same provider block Boite writes, as a Chat
 Completions `image_url` part. OpenCode 1 stays at `images: false`: 1.19.2 also
 advertises images, but replaces one with an error text for a gateway model
 that declares no image input, which is every model the gateway block lists.
+
+`BOITE_E2E_OPENCODE2_BINARY=/absolute/path/to/opencode2 bun test packages/core/test/opencode2.compat.test.ts`
+uses the installed binary with a local API and disposable profiles. On 2.1.1
+it covers model discovery, a file-reading tool, cold resume, plan mode, stop
+and another turn while a version 1 database is locked and its plugin API is
+incompatible. It needs no login or external model. Windows and macOS remain
+unchecked by this run.
+
+## A local ACP command
+
+The Providers page has a Local ACP command card for any agent that speaks ACP
+over stdio: a name, the command that starts it, its arguments one per field and
+its environment variables. `providers.addLocal` checks each field
+(`checkLocalAcpCommand` in `packages/contracts/src/local-acp.ts`, which the
+in-memory client runs too) and refuses with the field it names (`name`,
+`command`, `args[1]`, `env.KEY`), which the form marks.
+
+- The id comes from the name: lowercase letters, digits and dashes. A name
+  whose id a provider already has, or whose `<id>.json` already exists, is
+  refused; nothing is overwritten.
+- The command is a program on PATH or an absolute path. A relative path is
+  refused, and so is a program this machine cannot start; on Windows a `.cmd`,
+  `.bat` or `.ps1` launcher is refused with the program to enter instead.
+- Arguments go to the program as written, one argument per field, with no shell
+  and no quoting. `{home}` and the other load-time tokens expand as in any
+  descriptor.
+- Environment values are saved in plain text in the provider file. An API key
+  belongs in the agent's own sign-in. A variable named `__proto__` is refused:
+  the descriptor loader builds a plain object, which drops that key.
+
+The core writes an ordinary user descriptor to `<dataDir>/providers/<id>.json`
+(`localAcpDescriptor` in `packages/core/src/providers/local-command.ts`) and
+reloads, so the loader, the ACP driver and `providers.dryRun` treat it like a
+file written by hand. It has no login and no isolation: the default account
+starts the agent with its own sign-in and settings. Its only model is
+`default`, which leaves the agent on the model it is configured with until the
+models probe reads the agent's list. A file that fails to load is deleted again
+and the refusal is returned.
+
+The provider's details offer Remove provider. `providers.removeLocal` refuses a
+shipped provider and a provider with a turn running, releases its warm
+processes and deletes the file. Accounts and threads stay, and come back when
+the same name is added again. Both methods are the owner's; there is no edit,
+only remove and add.
 
 ## Turning a provider off
 
@@ -803,42 +908,21 @@ are released at once; a turn already queued or running ends by itself.
 Nothing is removed. Accounts, threads, the managed install and the user's own
 install stay as they are, and turning the provider back on adopts an existing
 login the way a fresh install does. The page lists the off providers last,
-dimmed, under Turned off, with no install or sign-in step; a row that holds
-two providers, Antigravity and its CLI, has one switch per provider inside
-it. The clients hide an off provider from every list that offers one, the
+dimmed, under Turned off, with no install or sign-in step. The clients hide an off provider from every list that offers one, the
 model picker included, and a thread that was on it shows a Turned off chip in
 its composer. The method is the owner's: a paired device reads `enabled` and
 cannot change it.
 
-## The Antigravity CLI
+## Retired providers
 
-`antigravity` is the managed ACP server with isolated logins.
-`antigravity-cli` runs an already installed and signed-in `agy` from PATH or its
-Windows installation path. Both appear in one provider family. agy's system
-keyring token and `~/.gemini/antigravity-cli` settings cannot be relocated, so it
-supports only the default account. A signed-out model probe asks the user to
-sign in through agy's terminal.
-
-Turns, probes and usage reads set `AGY_CLI_DISABLE_AUTO_UPDATE=true` to prevent
-a detached updater from opening a console. The explicit updater leaves it unset.
-`BROWSER={browserNoop}` also prevents automatic browser windows.
-
-The driver and `drivers/agy/` modules use
-`--input-format stream-json --output-format stream-json -p=`. The empty value
-is required; bare `-p` consumes the next argument. Each prompt is one stdin JSON
-line with `event: 'user'` and a user message. `init` supplies `conversation_id`,
-`step_update` streams text or tools by `step_index`, and `result` completes the
-turn. `result.status: 'ERROR'` fails with its message. Usage sums that turn's
-steps, counting thinking as output; the last answer feeds the context count
-without a reported window.
-
-A new process resumes through `--conversation <id>`. Model, effort and mode are
-launch flags in the process key; changing them reopens the same conversation.
-A positive `warmProcessMinutes` keeps the process between turns. Otherwise stdin
-closes and exit has eight seconds; a following turn waits. Stop ends the
-registered process tree or POSIX group, subject to [trace limits](trace.md#linux-and-macos).
-Stop during model discovery sends no prompt. Print mode refuses `/compact` and
-other interactive-only commands.
+Boite once shipped `antigravity-cli`, which ran the user's own `agy` in print
+mode; the managed `antigravity` ACP server replaces it. A data directory from
+that Boite still names it, so `providers/retired.ts` lists the id and startup
+cleans up after it (`account-retirement.ts`): its accounts and the limits
+switch of its `quota:antigravity-cli` source leave. A conversation on it stays
+listed and readable, and reads as on a removed account: its next turn refuses
+until the user picks another account in its model picker. An installed plugin
+whose account pool names it keeps loading, without that id.
 
 ## The models probe
 
@@ -887,8 +971,10 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   starts for an account that just signed in. A sign-in whose session did not
   open within 30 seconds is still signed in; the next look at the models probes.
 - Under the `antigravity` quirk a probe waits 90 seconds instead of 20. The
-  agent is a PyInstaller one-file program that unpacks about 1.2 GB before its
-  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free.
+  agent is a PyInstaller one-file program that unpacks itself before its
+  server reads a line: 45 to 54 seconds on an 8 GB laptop with 600 MB free
+  under 1.1.1, whose Windows build unpacked about 1.2 GB. The 1.4.1 builds are
+  smaller (Linux 930 MB, Windows 86 MB plus a 146 MB harness).
   Each launch, probe, sign-in or session, unpacks into its own folder under
   `<isolationDir>/tmp`, set as `TEMP`, `TMP` and `TMPDIR`, and the folder goes
   once the process has exited. Every one of them ends in a forced stop, which
@@ -916,13 +1002,6 @@ a Job Object and in the trace like any other, then asks the protocol's own quest
   `reasoning_effort_variants`); a model the catalog does not describe gets
   `low` to `max` with `high` preselected, which is Muse's own default. A host
   that is not signed in lists nothing, and the descriptor's models stand.
-- agy: `agy models`, one `id<TAB>label` line per model. agy lists
-  reasoning variants as separate IDs, so two or more variants of one base become
-  one model
-  whose effort scale is those variants, `medium` preselected when it is there.
-  The thread's model and effort then go out as the one id agy knows,
-  `--model <base>-<level>`. A variant alone, and an id without a level
-  suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
   takes and two providers can ship a name. The thinking level `get_state` reports
@@ -953,6 +1032,24 @@ Cleanup starts the registry's bounded stop before waiting for process pipes to
 close. A missing close event gets one additional second, then a
 `provider.probeCleanup` warning. The original models or discovery error still
 reach the caller, and the next request for that account can proceed.
+
+Every list an account answers is also saved in the journal
+(`providers/saved-catalogs.ts`), under a hash of the descriptor, the resolved
+executable, the account's gateway settings and its status, identity and
+isolation folder. When the account has not answered since the core started, or
+since a reload or an account change dropped its list, a probe with no `refresh`
+and no `model`, on a provider turned on, returns the saved list at once if that
+hash still matches, and a `refresh` read starts behind it; its answer reaches
+clients as `providers.probed`. Until that read answers the saved list answers
+model checks, and a read that fails leaves it in place, as a refreshed one does. Starting
+the agent is what costs: on 2026-10-22 an Antigravity probe took 12.3 s on the
+desktop, an OpenCode 2 probe 3 to 5 s on the server, and the picker showed
+nothing until it answered. A list a driver already holds, from a sign-in's or
+a turn's own session, answers instead and starts nothing. While nothing has
+been read yet, every such probe gets the saved list, a second one while the
+first refresh still reads and one after it failed included, held for model
+checks the same way. Any change to the account (`accounts.updated`, a sign-in under
+the same identity included) and its removal delete its saved list.
 A model picked from a list the core gave on this connection lands at once, and
 a draft created on it is not read again, except an ACP effort that list carries
 no scale for. A list restored from browser storage, or one the core has not
@@ -985,6 +1082,60 @@ rewritten. ACP and Muse use their native unrestricted mode and Boite accepts
 remaining approval requests; ACP has no standard hook-disable call. Antigravity
 uses its permission-skip flag. Questions seeking input still ask for real
 answers; YOLO does not invent form values or complete a device sign-in.
+
+Protected shared work adds an immutable file/tool capability to the host-selected
+mode and account. Claude removes native tools and user MCP/plugins/hooks and
+provides only in-process protected tools. Codex disables alternate execution
+features and MCP servers, applies a granular filesystem root deny and offline
+profile, and provides host dynamic tools. `boite_exec` runs project commands
+through the OS boundary; job-only `boite_commit` uses fixed trusted Git operations.
+Default/acceptEdits require host approval, bypass/YOLO retain automatic approvals,
+and plan/dontAsk refuse mediated commands. Restricted context tool lists expose
+no generic command tool. Native mode changes retire/re-admit the capability.
+The protected fingerprint participates in warm identity. Codex cold protected
+starts replay through a fresh native thread because `thread/resume` cannot
+replace dynamic tools. Ordinary local sessions keep the mappings below.
+See [protected shared execution](contacts.md#native-linux-tool-execution) for
+host prerequisites and the deterministic native driver proof.
+
+OpenCode 1.19.3 uses its native ACP plugin hooks to deny every
+non-core tool and command, plus a core-only remote MCP server. It supports only
+its native default/build and plan modes. Other versions need a verified hook
+path and bundled SDK inventory before admission. Other ACP implementations, including
+OpenCode 2, cannot obtain this capability by advertising ACP permission support.
+Private discovery retains the selected API/OAuth account and JSON provider/model
+selection, including normalized JSONC and custom configuration files. Only SDKs
+bundled by this native version may load; external SDK imports, legacy TOML and
+remote-configuration credentials are refused explicitly. User plugins, MCP,
+commands and project configuration cannot follow the protected session.
+An explicit protected model must appear in the native catalogue or the selected
+account's injected provider and be confirmed by ACP before a prompt. Missing,
+refused or unconfirmed selections stop the turn without API traffic. Warm
+turns recheck the current native model, including announced drift; choosing
+the native default remains a separate selection. Ordinary local ACP keeps its
+existing best-effort model preference.
+
+pi 1.4.0 uses its own extension API: builtins, discovered extensions, MCP, skills,
+prompts and project context are disabled, and a core extension registers only
+protected tools and rejects other tool calls. Selected native account
+authentication remains available to trusted provider control; model selection
+is captured privately. Command-valued keys/headers and executable environment
+preloads are refused before launch. Only YOLO and bypass modes
+are admitted, because pi RPC has no native approval mode. The descriptor keeps
+`capabilities.approvals: false`. ACP/pi fingerprints distinguish ordinary and
+protected warm sessions, and every warm turn checks revocation before prompting.
+Protected pi cold starts use a new private transcript and the core's captured
+continuation instead of reopening ordinary or differently scoped native history.
+The forced shared-turn context suppresses native resources while captured host
+tool permissions control the protected tools. An actual host tool-free context
+exposes neither native nor protected tools.
+
+Muse 1.4.13 now supplies a verified mandatory MCP-only native registry gate;
+its protected adapter uses the same OS executor and preserves selected native
+account/model/approval semantics. Older Muse 1.3.0 remains refused because its
+native file reads bypass its shell sandbox and its toolsets cannot retain only
+MCP tools. Installed native production regressions cover both cases without
+live inference. The exact release and gate are described under [Muse Code](#muse-code).
 
 - Claude takes a changed mode in place through the SDK's `setPermissionMode`,
   sent before the next prompt and only when the mode moved. Claude can also move
@@ -1035,12 +1186,6 @@ answers; YOLO does not invent form values or complete a device sign-in.
   the session. `acceptEdits` adds one rule of the driver's: a file write inside
   the thread's folder that Muse neither marks `protectedWrite` nor escalated
   through its own judge is approved once without a card.
-- agy asks nothing in print mode: whatever its mode does not allow, it denies by
-  itself. So the mode is a launch flag and part of the session key.
-  `acceptEdits` and `plan` become `--mode accept-edits` and `--mode plan`,
-  `bypassPermissions` and `dontAsk` become `--dangerously-skip-permissions`,
-  and `default` sends nothing, which leaves agy's own `toolPermission` setting
-  in charge.
 - pi has no approval call anywhere in its RPC mode, so `capabilities.approvals` is
   false, the thread's permission mode never reaches the agent, and each session
   says so once in the log. A driver that waited for a permission question there
@@ -1050,10 +1195,7 @@ The composer offers four of the six and names each by what the agent may do
 without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
 The list follows the agent. Codex loses Edit freely, which is the same pair as
 its default, and its default reads "This folder", because workspace-write lets
-it edit and run commands there without a card. agy asks nothing but takes the
-mode at launch, so it keeps a chip with Auto, Edit freely and its default, read
-as "agy settings"; YOLO is the same flag as Auto there and shows as Auto. Any
-other agent whose `capabilities.approvals` is false gets no mode chip: every
+it edit and run commands there without a card. An agent whose `capabilities.approvals` is false gets no mode chip: every
 choice would describe something it does not do. No confirmation keeps the warning colour on its chip,
 since it reaches the whole computer.
 
@@ -1158,6 +1300,13 @@ progress messages the CLI sends (`thinking_tokens`, `api_retry`, `status`,
 [trace](trace.md)); `prompt_suggestion` and `rate_limit_event` stay unused by
 the timeline.
 
+Each streamed API request owns its output parts. When Claude Code reports
+`api_retry` after an interrupted response, the driver clears that attempt's
+text, thinking and unexecuted tool cards before the replacement streams.
+Completed requests and their tools remain. A `message_delta` with a stop
+reason confirms completion; `message_stop` alone does not, because the CLI
+also emits it when a stream is interrupted.
+
 ## Claude's MCP servers on demand
 
 Claude Code starts every stdio server of the user's `mcpServers` with each
@@ -1192,7 +1341,10 @@ differ from what the session was given, the session gets
 
 The CLI's end releases the registration, not the turn's: a warm or viewed
 session keeps its CLI across turns, and the servers it started with it. The
-core then closes each server's stdin and kills it after 3 seconds. A server
+core then closes each server's stdin and, after 3 seconds, stops it with what
+it started. The core reads a server's stdout as lines of at most 16 MiB
+through the drivers' shared `LineSplitter`; a longer line fails every call the
+server owed and stops it the same way. A server
 whose command, arguments or environment hold a `${...}` reference stays with
 the CLI, which expands it. Set `BOITE_LAZY_MCP=0` in the core's environment
 to give the CLI the servers as configured.
@@ -1205,12 +1357,22 @@ are bounded to 16 * 1024 * 1024 UTF-16 code units. A final line without a newlin
 is processed before EOF. Non-JSON or invalid object records produce a fixed
 protocol diagnostic without copying their raw output into diagnostic logs.
 
-Oversized stdout, failed reads/writes, closed pipes or a throwing message handler
+Oversized stdout, failed reads/writes, stdout closure or a throwing message handler
 close the transport and reject all pending requests once. The session marks
 that captured child non-reusable, gives its exit diagnostic a 500 ms grace and
 settles any active notification-driven turn even if the prompt response already
 arrived. User Stop wins over a subsequent fault or exit. Callbacks from a retired
 child cannot mutate a replacement; unrelated sessions continue running.
+
+A clean stdin close makes the captured session non-reusable and refuses new
+writes while already sent requests can still receive stdout responses, including
+the final record at EOF. Their existing cancellation and expiry remain active.
+Drainage ends at stdout EOF/close, an
+explicit failure, a read/write error or the existing 500 ms exit grace, whichever
+comes first. Stdout termination or drain expiry invokes the session fault
+callback; with a live child and stdout that never closes, requests settle after
+500 ms and session
+teardown can take a further 500 ms for its exit diagnostic.
 
 Request cancellation and explicit expiry remove the pending request, so late
 responses cannot update its result. Prompts and reported active model runs have
@@ -1304,6 +1466,34 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+- From Muse 1.4.13, read from `.muse-version` beside a `muse` executable, the
+  host starts with `MUSE_HOST_SETTINGS` (`drivers/muse/mapping.ts`). Older
+  hosts refuse `-c`, so they start as before.
+  - `run.reminder_roster={}` stops Muse's skill, goal and verify reminder
+    agents. Each one calls the thread's model again at every step, and the
+    blocking ones hold the turn open after the answer. On 2026-10-25, through
+    Douane, `muse exec --json --model muse-wonder-full-1.0-contributor
+    --reasoning-effort xhigh --workspace <empty dir> "<list this folder with a
+    tool, then answer ok>"`, alternated with and without
+    `-c 'run.reminder_roster={}'`, took 24.1 s and 25.1 s with the reminders and
+    14.8 s and 16.3 s without.
+
+Protected shared Muse sessions require native 1.4.13 and MSP fingerprint
+`sha256:7fddaf646dbc317e5fcac0785e135eb04df14fbb0db1863089dfd6da21730e5b`.
+`drivers/muse/protected.ts` writes a private native configuration with only
+`mcp__boite_protected__boite_exec` and `mcp__boite_protected__boite_commit` in
+`run.toolset`. The native registry rejects forged calls to other tools; a
+required MCP failure or unresolved name stops run preparation before inference.
+The native host reads selected auth through its private config root and retains
+its account refresh, model, transport and approval semantics. Only model tool
+commands enter the common offline OS executor. Native discovery sees an empty
+workspace and core-owned HOME/XDG roots, including foreign `CODEX_HOME` and
+Claude/plugin discovery roots. External hooks/MCP/plugins and experimental
+environment overrides are excluded. Native shell and writes are also
+disabled. Protected cold starts create a new private session and use the core's
+captured continuation; ordinary local resume is unchanged. Native 1.3.0 and
+unverified versions/fingerprints remain refused. These guarantees depend on the
+verified native registry gate, not its shell sandbox or a permission callback.
 
 ### pi
 

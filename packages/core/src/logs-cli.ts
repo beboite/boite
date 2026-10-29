@@ -31,7 +31,7 @@ export const LOGS_HELP = `boite logs: Boite's own diagnostics (the app, its shel
   logs export [--out <file>] [--since 24h] [--focus <thread-id>]
                                  the anonymized file a developer reads; prints where it is
   issue draft --title <title> --description <text>|--description-file <file> [--no-logs]
-                                 the GitHub issue for beboite/boite, printed, not sent
+                                 the GitHub issue for mtsu-dev/boite, printed, not sent
   issue submit (same flags)      owner: create it with gh when signed in, else print the
                                  prefilled link; an agent gets the link, the user submits it
 

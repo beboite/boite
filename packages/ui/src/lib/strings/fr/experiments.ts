@@ -3,8 +3,8 @@ import type { Translation } from '../../i18n.svelte';
 export const fr: Translation = {
 
   experiments: {
+    pinnedQuotas: { title: 'Quotas du modèle épinglés', hint: 'Épingler les limites du fournisseur du modèle dans un coin de la discussion ou sous la liste des conversations' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
-    openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     goal2: {
       title: 'Objectifs relus',
       hint: "Ajoute /goal2 : un autre modèle écrit la checklist de tout ce que vous avez demandé, la met à jour quand vous ajoutez ou changez quelque chose et, après chaque tour de l'agent, lui dit ce qui reste à faire. Quand l'agent annonce l'objectif atteint, une nouvelle conversation qui n'a pas vu son travail le vérifie et répond validé, partiel ou refusé. Tout ce qui n'est pas validé repart à l'agent, jusqu'à cinq relectures",
@@ -21,7 +21,6 @@ export const fr: Translation = {
       action: 'Sortir le fouet',
       drop: 'Lâcher le fouet'
     },
-    previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',
       hint: 'Un fond grainé qui passe du gris clair en haut à gauche au noir en bas à droite'
@@ -35,16 +34,8 @@ export const fr: Translation = {
       hint: 'Une horloge à côté de la jauge de contexte, qui décompte le temps pendant lequel le provider garde la conversation en cache'
     },
     residentAgents: {
-      title: 'Agents',
-      hint: 'Des agents résidents avec leur propre brain, leurs missions et leurs routines, depuis la barre latérale. Les agents déjà créés continuent de tourner quand ceci est désactivé'
-    },
-    edgeScrollbars: {
-      title: 'Barres de défilement au bord',
-      hint: 'Les barres de défilement ne prennent plus de place. Chacune apparaît quand le pointeur s’approche du bord de sa zone et reste déplaçable. Souris et stylet uniquement'
-    },
-    pressPreload: {
-      title: 'Chargement à l’appui',
-      hint: 'Une conversation ou une page commence à charger dès que vous appuyez dessus, avant de relâcher le clic ou de lever le doigt'
+      title: 'Bots',
+      hint: 'Des bots : des agents permanents avec leur propre brain, leur mémoire et leurs routines, depuis la barre latérale. Les bots déjà créés continuent de tourner quand ceci est désactivé'
     },
     contacts: {
       title: 'Contacts',

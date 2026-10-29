@@ -5,7 +5,8 @@
   "shortName": "OpenCode 2",
   "protocol": "acp",
   "experimental": true,
-  "roots": ["{home}/.local/share/opencode", "{home}/.config/opencode", "{home}/.local/state/opencode", "{isolationDir}"],
+  "roots": ["{home}/.local/share/opencode-v2", "{home}/.config/opencode-v2", "{home}/.local/state/opencode-v2", "{home}/.cache/opencode-v2", "{isolationDir}"],
+  "env": { "XDG_DATA_HOME": "{home}/.local/share/opencode-v2", "XDG_CONFIG_HOME": "{home}/.config/opencode-v2", "XDG_STATE_HOME": "{home}/.local/state/opencode-v2", "XDG_CACHE_HOME": "{home}/.cache/opencode-v2", "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
   "profiles": {
     "windows": {
       "detect": {},
@@ -19,15 +20,14 @@
       ],
       "install": {
         "arch": "x64",
-        "version": "2.1.1",
+        "version": "2.2.0",
         "format": "tgz",
-        "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.1.1.tgz",
-        "sha256": "3343e8140dde91e45bee24ee6dbabc16aa0cae5b1e1a0184b580b1c8b0530e12",
-        "archiveBytes": 101966282,
-        "files": [{ "path": "package/bin/opencode.exe", "bytes": 218766376 }]
+        "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.2.0.tgz",
+        "sha256": "e5b387b4d2af88ffbd689ac84d35b71462072651f7529ab0f36721e35ba859bf",
+        "archiveBytes": 118650212,
+        "files": [{ "path": "package/bin/opencode.exe", "bytes": 253303688 }]
       },
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe"] }
     },
@@ -42,7 +42,6 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe", "opencode2"] }
     },
@@ -57,7 +56,6 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
-      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe", "opencode2"] }
     }

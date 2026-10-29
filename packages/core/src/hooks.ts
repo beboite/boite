@@ -9,6 +9,7 @@ import type {
   HookSourceState,
   HooksStatus,
   Protocol,
+  OsProfile,
   ProviderDescriptor,
   ProviderHooks,
   ProviderHookSource,
@@ -105,7 +106,7 @@ export class HookLedger {
         name: provider.name,
         runsHooks,
         reports: runsHooks && REPORTING.has(provider.protocol),
-        sources: runsHooks ? (provider.hookSources ?? []).map(readSource) : [],
+        sources: runsHooks ? (provider.hookSources ?? []).map(source => readSource(source, profileFor(provider))) : [],
         accounts: runsHooks
           ? accounts.filter((account) => account.providerId === provider.id && account.isolationDir !== null)
             .map((account): HookShareState => ({ accountId: account.id, label: account.label, problems: this.problemsOf(account, provider) }))
@@ -139,14 +140,14 @@ export class HookLedger {
 }
 
 /** The path a source names, on this machine. Null when its variable has no known default. */
-export function sourcePath(source: ProviderHookSource): string | null {
+export function sourcePath(source: ProviderHookSource, profile?: Pick<OsProfile, 'env'>): string | null {
   if (source.variable === undefined) return join(homePath(), ...source.path.slice(2).split('/'));
-  const base = variableHome(source.variable);
+  const base = variableHome(source.variable, profile);
   return base === null ? null : join(base, ...source.path.split('/'));
 }
 
-export function readSource(source: ProviderHookSource): HookSourceState {
-  const path = sourcePath(source);
+export function readSource(source: ProviderHookSource, profile?: Pick<OsProfile, 'env'>): HookSourceState {
+  const path = sourcePath(source, profile);
   if (path === null) {
     return { path: source.path, format: source.format, count: null, error: `Boite does not know where ${source.variable ?? ''} points` };
   }

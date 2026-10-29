@@ -302,7 +302,7 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   h.core.coordination.configure(threadId, { mode: 'brief', resources: '', remote: false, paused: false });
   await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
   const prompt = runs.get(threadId)!.ctx.prompt;
-  for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
+  for (const command of ['boite threads', 'boite threads send', 'boite threads reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
   expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>] [--context light|neutral] [--worktree]:');
   // 2600 before the line that names `boite view`, about 220 bytes, then 80 for `[--speed <tier>]` and its default,
   // then about 100 for the `boite settings` line.
@@ -317,7 +317,14 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // Then 81 for `[--worktree]` and what it gives: a child on a branch of its own (3869 measured 2026-10-15).
   // Then 75 for `boite pr watch`: a watched PR wakes the agent, so it stops polling CI (3941 measured with both lines, 2026-10-15).
   // Then 7 for `stop|resume`: the parent continues what a stop or a restart cut (3958 measured 2026-10-17, 3951 before).
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(3960);
+  // Then 52 for batching browser steps with `&&` or `boite browser run -`: each separate command costs a turn (4010 measured 2026-10-20).
+  // Then 30 for `|create` and "or creates the bot the user asked for": a thread the user asked for a bot creates it (4040 measured 2026-10-24).
+  // Then 75 for the line sending a schema to a mermaid fence and a formula to `$$`, which chat draws (4115 measured 2026-10-25).
+  // Then 142 for the `boite secret` line: an agent that asks for a key in chat puts it in the provider's transcript (4257 measured 2026-10-25).
+  // Then 129 for `boite window help`, emulators going to `boite device` and what a picture costs to read: an agent that
+  // captures a window with no `--max` or `--crop` spends thousands of tokens on every look (4401 measured with all three lines, 2026-10-25).
+  // Then 78 for naming the Mermaid headers chat draws, so a chart or a schema needs no `boite view help` (8 KB) before it (4479 measured 2026-10-26).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4480);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
@@ -499,7 +506,8 @@ test('the parent writing to its subagent lifts the coordination pause the core l
   const childId = child.thread.id;
   await waitFor(() => runs.has(childId));
   h.core.coordination.configure(childId, { mode: 'brief', resources: '', remote: false, paused: false });
-  runs.get(childId)!.finish('', 'error');
+  // A stopped turn pauses coordination; a failed one no longer does.
+  runs.get(childId)!.finish('', 'stopped');
   await waitFor(() => h.core.coordination.get(childId).config.paused);
   await owner.call('delegation.send', { threadId, toThreadId: childId, text: 'Carry on with the port', requestId: 'carry-on' });
   await waitFor(() => runs.get(childId)!.ctx.prompt.includes('Carry on with the port'), 5000);
@@ -652,9 +660,18 @@ test('a child that ends its turn on background work waits, wakes on it, then fin
   // The task ends and wakes it: waiting, then running, then done.
   first.ctx.backgroundFinished!('bg-1', 'completed');
   expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  // An idle maintenance turn must not erase the grace period for the pending wake.
+  const compacted = owner.next('turn.finished', turn => turn.threadId === childId && turn.execution?.operation === 'compact');
+  await owner.call('threads.compact', { threadId: childId });
+  const maintenance = runs.get(childId)!;
+  maintenance.finish('');
+  await compacted;
+  expect(agentOf(h, threadId, childId).thread.backgroundWait).toMatchObject({ state: 'waiting', for: 'test_emotes' });
+  expect(agentOf(h, threadId, childId).settlement).toBeUndefined();
+  expect(lettersFrom(h, threadId, childId)).toHaveLength(1);
   const waited = owner.call('delegation.wait', { threadId, agentId: childId, timeoutMs: 5000 });
   first.ctx.wake!('test_emotes finished: 12 passed.');
-  await waitFor(() => runs.get(childId) !== first, 5000);
+  await waitFor(() => runs.get(childId) !== maintenance, 5000);
   expect(h.core.threads.require(childId).status).toBe('running');
   expect(agentOf(h, threadId, childId).thread.backgroundWait ?? null).toBeNull();
   expect(await cli(['delegate', 'list'])).toContain(`${childId} running `);

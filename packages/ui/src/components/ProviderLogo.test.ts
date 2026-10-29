@@ -28,7 +28,7 @@ function pathsOf(providerId: string) {
 }
 
 test('every agent Boite ships has a mark, and only those', () => {
-  expect(Object.keys(providerLogos).sort()).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'grok', 'muse', 'opencode', 'pi']);
+  expect(Object.keys(providerLogos).sort()).toEqual(['antigravity', 'claude', 'codex', 'grok', 'muse', 'opencode', 'pi']);
 });
 
 test('a gateway name for a shipped agent draws that agent, not an initial', () => {

@@ -23,11 +23,12 @@ const SNIPPET = 200;
 /**
  * One cheap GraphQL query (one point of GitHub's budget) whose answer moves
  * when anything a watch reports may have moved. `status` follows the state,
- * the draft flag, the mergeability, the head and the checks; `remarks` follows comments,
+ * the draft flag, the mergeability, the merge state, the head, the checks and
+ * the place in the merge queue; `remarks` follows comments,
  * reviews, their edits and the pull request's own update time.
  */
 export const FINGERPRINT_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-state isDraft mergeable headRefOid updatedAt
+state isDraft mergeable mergeStateStatus headRefOid updatedAt mergeQueueEntry{position}
 comments(first:50,orderBy:{field:UPDATED_AT,direction:DESC}){totalCount nodes{lastEditedAt}}
 reviews(last:50){totalCount nodes{lastEditedAt}}
 reviewThreads{totalCount}
@@ -36,7 +37,7 @@ commits(last:1){nodes{commit{statusCheckRollup{state contexts{checkRunCountsBySt
 
 /** The detailed read, made only when the fingerprint moved: the checks one by one, with whether the base branch requires each. */
 export const DETAIL_QUERY = `query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){
-url state isDraft mergeable headRefOid baseRefName
+url state isDraft mergeable mergeStateStatus headRefOid headRefName headRepository{nameWithOwner} baseRefName mergeQueueEntry{position}
 commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){totalCount nodes{__typename
 ... on CheckRun{name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{workflowRun{workflow{name}}}}
 ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}
@@ -95,7 +96,7 @@ export function parseFingerprint(raw: string): Fingerprint {
   const comments = row(pr.comments), reviews = row(pr.reviews);
   return {
     state: prState(pr.state),
-    status: [pr.state, pr.isDraft, pr.mergeable, pr.headRefOid, counts(contexts.checkRunCountsByState), counts(contexts.statusContextCountsByState)].map(String).join(' '),
+    status: [pr.state, pr.isDraft, pr.mergeable, pr.mergeStateStatus, pr.headRefOid, queuePosition(pr), counts(contexts.checkRunCountsByState), counts(contexts.statusContextCountsByState)].map(String).join(' '),
     remarks: [comments.totalCount, newestEdit(comments), reviews.totalCount, newestEdit(reviews), row(pr.reviewThreads).totalCount, pr.updatedAt].map(String).join(' '),
   };
 }
@@ -113,13 +114,27 @@ export interface WatchCheck {
 export interface WatchDetail {
   state: Fingerprint['state'];
   head: string;
+  /** The head branch and its repository (`owner/name`): empty when GitHub does not say. */
+  branch?: string;
+  headRepository?: string;
   base: string;
   /** A draft cannot merge: a required context it never reports does not hold its verdict. */
   draft: boolean;
   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
+  /** Behind its base where the base requires branches up to date before merging (GitHub's BEHIND); null while GitHub computes. */
+  behind: boolean | null;
+  /** Its place in the merge queue, 1 next to merge; null out of it. Its checks run on the queue's merge group, not on the head. */
+  queue: number | null;
   checks: WatchCheck[];
   /** The account `gh` signs in as: what it writes is the agent's own. */
   viewer: string;
+}
+
+function queuePosition(pr: Row): number | null {
+  const entry = pr.mergeQueueEntry;
+  if (!entry || typeof entry !== 'object') return null;
+  const position = Number(row(entry).position);
+  return Number.isInteger(position) && position > 0 ? position : 1;
 }
 
 const FAILED = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR']);
@@ -163,12 +178,17 @@ export function parseDetail(raw: string): WatchDetail {
     else if (check.required) held.check.required = true;
   }
   const mergeable = String(pr.mergeable);
+  const mergeState = typeof pr.mergeStateStatus === 'string' ? pr.mergeStateStatus : 'UNKNOWN';
   return {
     state: prState(pr.state),
     head: text(pr.headRefOid, 64) || text(commit.oid, 64),
+    branch: text(pr.headRefName, 255),
+    headRepository: text(row(pr.headRepository).nameWithOwner, 200),
     base: text(pr.baseRefName, 255),
     draft: pr.isDraft === true,
     mergeable: mergeable === 'MERGEABLE' || mergeable === 'CONFLICTING' ? mergeable : 'UNKNOWN',
+    behind: mergeState === 'UNKNOWN' ? null : mergeState === 'BEHIND',
+    queue: queuePosition(pr),
     checks: [...runs.values()].map(entry => entry.check),
     viewer: text(row(data.viewer).login, 100),
   };
@@ -234,6 +254,10 @@ export interface WatchMemory {
   /** The checks that made "passed" when it was told; empty until it is, and again once one of them fails. */
   passed: string[];
   conflicting: boolean;
+  /** Behind its base at the last clean answer. Absent from watches saved before it. */
+  behind?: boolean;
+  /** In the merge queue at the last read. Absent from watches saved before it. */
+  queued?: boolean;
   remarksThrough: string;
   remarkIds: string[];
   /** `id#hash` of the newest body read for each remark, told or not, newest last. Absent from watches saved before it. */
@@ -245,6 +269,10 @@ export type WatchChange =
   | { kind: 'passed'; head: string; count: number; required: boolean }
   | { kind: 'remarks'; remarks: Pick<Remark, 'id' | 'author' | 'body' | 'url' | 'path' | 'state'>[] }
   | { kind: 'conflict'; base: string }
+  /** The base requires the branch up to date and it fell behind: it cannot merge until it is updated. */
+  | { kind: 'behind'; base: string }
+  /** It left the merge queue still open: a check of its merge group failed, a conflict, or someone took it out. */
+  | { kind: 'dequeued'; base: string }
   | { kind: 'closed'; state: 'MERGED' | 'CLOSED'; by: string };
 
 export function initialMemory(since: number): WatchMemory {
@@ -368,10 +396,16 @@ export function evaluate(memory: WatchMemory, detail: WatchDetail, remarks: Rema
   if (detail.mergeable === 'CONFLICTING' && !memory.conflicting) changes.push({ kind: 'conflict', base: detail.base });
   // UNKNOWN is GitHub still computing after a push; only a clean answer clears a conflict.
   const conflicting = detail.mergeable === 'UNKNOWN' ? memory.conflicting : detail.mergeable === 'CONFLICTING';
+  // A merge ends the watch before this read; out of the queue and still open, it will not merge by itself.
+  const queued = detail.queue !== null;
+  if (memory.queued && !queued) changes.push({ kind: 'dequeued', base: detail.base });
+  // The queue updates a queued branch itself; behind is told once, until a clean answer clears it.
+  if (detail.behind === true && !memory.behind && !queued) changes.push({ kind: 'behind', base: detail.base });
+  const behind = detail.behind === null ? memory.behind === true : detail.behind;
   return {
     changes,
     next: {
-      head: detail.head, failed, passed, conflicting,
+      head: detail.head, failed, passed, conflicting, behind, queued,
       remarksThrough: latest === through ? memory.remarksThrough : new Date(latest).toISOString(),
       remarkIds: latest === through ? [...memory.remarkIds, ...atLatest] : atLatest,
       bodies: [...bodies.values()].slice(-BODIES),
@@ -399,9 +433,15 @@ export function mergeChanges(held: WatchChange[], next: WatchChange[]): WatchCha
       }
     } else Object.assign(same, change);
   }
-  // Checks that failed on an older head than the one that passed are no news.
+  // Checks that failed on an older head than the one that passed are no news, nor leaving the queue or falling behind once it merged.
   const passed = out.find(change => change.kind === 'passed');
-  return out.filter(change => !(change.kind === 'failed' && passed && change.head !== passed.head));
+  const closed = out.some(change => change.kind === 'closed');
+  return out.filter(change => !(change.kind === 'failed' && passed && change.head !== passed.head) && !((change.kind === 'dequeued' || change.kind === 'behind') && closed));
+}
+
+/** Held changes a later read made untrue: falling behind, once the branch was updated or entered the merge queue. */
+export function stillTrue(held: WatchChange[], memory: WatchMemory): WatchChange[] {
+  return memory.behind && !memory.queued ? held : held.filter(change => change.kind !== 'behind');
 }
 
 function snippet(body: string): string {
@@ -428,12 +468,16 @@ function changeLines(change: WatchChange): string[] {
       })];
     case 'conflict':
       return [`- The branch now conflicts with ${change.base}.`];
+    case 'behind':
+      return [`- The branch is behind ${change.base}, which requires it up to date before merging: merge ${change.base} into it if your task asks for the merge.`];
+    case 'dequeued':
+      return [`- It left the merge queue of ${change.base} without merging: read why on the pull request, fix it and queue it again if your task asks for the merge.`];
     case 'closed':
       return [`- ${change.by || 'Someone'} ${change.state === 'MERGED' ? 'merged' : 'closed'} the pull request; its watch ended.`];
   }
 }
 
-const SUMMARY: Record<WatchChange['kind'], string> = { failed: 'checks failed', passed: 'checks passed', remarks: 'new comments', conflict: 'merge conflict', closed: 'closed' };
+const SUMMARY: Record<WatchChange['kind'], string> = { failed: 'checks failed', passed: 'checks passed', remarks: 'new comments', conflict: 'merge conflict', behind: 'behind base', dequeued: 'left the merge queue', closed: 'closed' };
 
 /** The message that wakes the agent, and the short line the conversation shows for it. */
 export function wakeMessage(updates: { number: number; url: string; changes: WatchChange[] }[]): { text: string; label: string } {

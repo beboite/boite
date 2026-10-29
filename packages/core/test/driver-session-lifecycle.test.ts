@@ -5,6 +5,9 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import type { SpawnedChild } from '../src/procs.ts';
 import { PiPeer } from '../src/drivers/pi/rpc.ts';
+import { CodexRpc } from '../src/drivers/codex/rpc.ts';
+import { MuseRpc } from '../src/drivers/muse/rpc.ts';
+import { EXIT_GRACE_MS } from '../src/drivers/codex/protocol.ts';
 import { setPiReadDeadlineForTests } from '../src/drivers/pi/session.ts';
 import { shutdownDrivers } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -39,6 +42,24 @@ async function providerThread(client: CoreClient, protocol: 'codex-appserver' | 
 
 function pending(peer: PiPeer): number {
   return (peer as unknown as { transport: { pending: Map<unknown, unknown> } }).transport.pending.size;
+}
+
+function observePrompt(settled: (status: 'resolved' | 'rejected') => void): () => void {
+  const observe = <T>(method: string, result: Promise<T>): Promise<T> => {
+    if (method === 'turn/start' || method === 'prompt') void result.then(() => settled('resolved'), () => settled('rejected'));
+    return result;
+  };
+  const codexRequest = CodexRpc.prototype.request, museRequest = MuseRpc.prototype.request, piCommand = PiPeer.prototype.command;
+  const codex = spyOn(CodexRpc.prototype, 'request').mockImplementation(function <T>(this: CodexRpc, ...args: Parameters<typeof codexRequest<T>>) {
+    return observe(args[0], (codexRequest<T>).apply(this, args));
+  });
+  const muse = spyOn(MuseRpc.prototype, 'request').mockImplementation(function <T>(this: MuseRpc, ...args: Parameters<typeof museRequest<T>>) {
+    return observe(args[0], (museRequest<T>).apply(this, args));
+  });
+  const pi = spyOn(PiPeer.prototype, 'command').mockImplementation(function (this: PiPeer, ...args) {
+    return observe(args[0], piCommand.apply(this, args));
+  });
+  return () => { codex.mockRestore(); muse.mockRestore(); pi.mockRestore(); };
 }
 
 for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
@@ -99,7 +120,9 @@ for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
       const threadId = await providerThread(client, protocol, fileURLToPath(new URL(`./fixtures/${fixture}.ts`, import.meta.url)));
       const spawn = harness.core.procs.spawnChild.bind(harness.core.procs);
       let child: SpawnedChild | undefined, inject: ((record: unknown) => void) | undefined;
-      let promptId: unknown, nativeTurnId: unknown, buffered = '';
+      let promptId: unknown, promptReply: unknown, nativeTurnId: unknown, buffered = '';
+      let promptStatus: string = 'pending';
+      const restorePrompt = observePrompt(status => { promptStatus = status; });
       const intercepted = spyOn(harness.core.procs, 'spawnChild').mockImplementation((...args) => {
         const spawned = spawn(...args);
         if (args[0] !== threadId || child) return spawned;
@@ -121,7 +144,8 @@ for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
             if (!line) return false;
             const record = JSON.parse(line) as { id?: unknown; method?: string; params?: { turnId?: unknown; turn?: { id?: unknown } } };
             if (record.method === 'turn/started') nativeTurnId = record.params?.turn?.id ?? record.params?.turnId;
-            return boundary !== 'refusal-after-stop' || record.id !== promptId;
+            if (promptId !== undefined && record.id === promptId) { promptReply = record; return false; }
+            return true;
           });
           return kept.length ? emit(name, `${kept.join('\n')}\n`) : true;
         };
@@ -140,8 +164,14 @@ for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
             ? { type: 'response', id: promptId, command: 'prompt', success: false, error: 'the stopped prompt was refused' }
             : { id: promptId, error: { code: -32603, message: 'the stopped prompt was refused' } });
         } else {
-          // Input is closed while the already accepted turn's terminal output is still draining.
+          await waitFor(() => promptReply !== undefined);
+          // The prompt acknowledgement itself is still in flight when input closes.
           child!.stdin.emit('close');
+          await Bun.sleep(30);
+          expect(promptStatus).toBe('pending');
+          inject!(promptReply);
+          await waitFor(() => promptStatus !== 'pending');
+          expect(promptStatus).toBe('resolved');
           inject!(protocol === 'pi' ? { type: 'agent_settled' }
             : protocol === 'muse' ? { method: 'turn/completed', params: { turnId: nativeTurnId, terminal: 'completed' } }
             : { method: 'turn/completed', params: { turn: { id: nativeTurnId, status: 'completed' } } });
@@ -152,15 +182,55 @@ for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
         const saved = await client.call('threads.get', { threadId });
         expect(saved.messages.flatMap(message => message.parts).filter(part => part.type === 'error')).toEqual([]);
         expect(saved.messages.some(message => message.role === 'assistant' && message.state === 'complete')).toBe(true);
-        await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
         expect(outcomes).toEqual([result.status]);
+        // A next prompt must not reuse the input pipe that just closed.
         const next = client.next('turn.finished', turn => turn.threadId === threadId);
         await client.call('turns.start', { threadId, prompt: 'explicit replacement' });
         expect((await next).status).toBe('done');
         expect(outcomes).toEqual([result.status, 'done']);
-      } finally { intercepted.mockRestore(); }
+      } finally { restorePrompt(); intercepted.mockRestore(); }
     }, 10000);
   }
+
+  test(`${protocol}: stdin close with a living child and open stdout has bounded session teardown`, async () => {
+    harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
+    const client = await harness.connect();
+    const fixture = protocol === 'codex-appserver' ? 'codex-server' : protocol === 'muse' ? 'muse-server' : 'pi-agent';
+    const threadId = await providerThread(client, protocol, fileURLToPath(new URL(`./fixtures/${fixture}.ts`, import.meta.url)));
+    const spawn = harness.core.procs.spawnChild.bind(harness.core.procs);
+    let child: SpawnedChild | undefined, blockOutput = false;
+    const intercepted = spyOn(harness.core.procs, 'spawnChild').mockImplementation((...args) => {
+      const spawned = spawn(...args);
+      if (args[0] !== threadId || child) return spawned;
+      child = spawned;
+      const emit = spawned.stdout.emit.bind(spawned.stdout);
+      spawned.stdout.emit = (name: string | symbol, ...values: unknown[]) =>
+        blockOutput && name === 'data' ? true : emit(name, ...values);
+      return spawned;
+    });
+    try {
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, 2500);
+      await client.call('turns.start', { threadId, prompt: '[slow] bounded drain fixture' });
+      await waitFor(() => harness!.core.journal.listMessages(threadId).some(message => message.role === 'assistant'));
+      await Bun.sleep(30);
+      blockOutput = true;
+      const at = performance.now();
+      child!.stdin.emit('close');
+      await Bun.sleep(EXIT_GRACE_MS + 50);
+      expect(child!.exitCode).toBeNull();
+      expect(child!.stdout.destroyed).toBe(false);
+      expect(harness.core.procs.liveCount(threadId)).toBe(1);
+      expect(await finished).toMatchObject({ status: 'error', error: expect.stringContaining('stdout drain timed out') });
+      await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+      const elapsed = performance.now() - at;
+      expect(elapsed).toBeGreaterThanOrEqual(2 * EXIT_GRACE_MS - 30);
+      expect(elapsed).toBeLessThan(2 * EXIT_GRACE_MS + 750);
+      console.info(`${protocol}: session closed after ${Math.round(elapsed)} ms (drain grace plus session exit grace)`);
+      const replacement = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: 'replacement after bounded drain' });
+      expect((await replacement).status).toBe('done');
+    } finally { intercepted.mockRestore(); }
+  }, 10000);
 
   test(`${protocol}: notification-only transport failure settles the owner and leaves echo and replacement work usable`, async () => {
     harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
@@ -268,9 +338,10 @@ test('pi: an accepted extension command without state or settled ends with a bou
   harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
   const client = await harness.connect();
   const threadId = await providerThread(client, 'pi', stateFixture('no-settled'));
-  const result = client.next('turn.finished', turn => turn.threadId === threadId, 1000);
+  // The bound is the read deadline, named in the error; a wall-clock wait would also time the fixture's launch.
+  const result = client.next('turn.finished', turn => turn.threadId === threadId);
   await client.call('turns.start', { threadId, prompt: '/report' });
-  expect(await result).toMatchObject({ status: 'error' });
+  expect(await result).toMatchObject({ status: 'error', error: expect.stringContaining('within 0.05 s') });
   await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
   const next = client.next('turn.finished', turn => turn.threadId === threadId);
   await client.call('turns.start', { threadId, prompt: 'ordinary prompt' });
@@ -309,6 +380,8 @@ test('pi: a statistics timeout removes the request and ignores its late response
 
 for (const order of ['before-query', 'during-query'] as const) {
   test(`pi: agent_settled ${order} finishes without a state response or retained request`, async () => {
+    // Past the test timeout: a turn that waits for the unanswered state read never finishes in time.
+    setPiReadDeadlineForTests(60_000);
     harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
     const client = await harness.connect();
     const threadId = await providerThread(client, 'pi', stateFixture(order));
@@ -322,7 +395,7 @@ for (const order of ['before-query', 'during-query'] as const) {
     });
     try {
       for (const prompt of ['first settled turn', 'warm settled turn']) {
-        const result = client.next('turn.finished', turn => turn.threadId === threadId, 1000).catch(() => null);
+        const result = client.next('turn.finished', turn => turn.threadId === threadId).catch(() => null);
         await client.call('turns.start', { threadId, prompt });
         expect(await result).toMatchObject({ status: 'done' });
         expect(pending(peer!)).toBe(0);

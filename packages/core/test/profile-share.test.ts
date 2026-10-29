@@ -68,6 +68,17 @@ describe('profile sharing', () => {
     expect(existsSync(join(account, 'AGENTS.md'))).toBe(false);
   });
 
+  test('a provider with its own home shares its own plugins instead of another version\'s', () => {
+    const versionHome = join(root, 'v2');
+    mkdirSync(join(versionHome, 'plugins'), { recursive: true });
+    writeFileSync(join(versionHome, 'plugins', 'native.ts'), 'v2 plugin');
+    mkdirSync(join(source, 'plugins'));
+    writeFileSync(join(source, 'plugins', 'legacy.ts'), 'v1 plugin');
+    expect(shareProfile(account, { ...profile, env: { CODEX_HOME: versionHome } }, [{ variable: 'CODEX_HOME', paths: ['plugins'] }])).toEqual([]);
+    expect(readFileSync(join(account, 'plugins', 'native.ts'), 'utf8')).toBe('v2 plugin');
+    expect(existsSync(join(account, 'plugins', 'legacy.ts'))).toBe(false);
+  });
+
   test('sets the account\'s own file aside once, then keeps the copy in step with the source', () => {
     writeFileSync(join(account, 'hooks.json'), 'the account\'s own');
     mkdirSync(join(account, 'skills'));

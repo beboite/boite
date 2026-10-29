@@ -6,12 +6,17 @@
  * that is an `authenticate` call rather than a CLI.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { Settings } from '@boite/contracts';
+import type { Attachment, Settings, ThreadId } from '@boite/contracts';
+import { readAntigravityQuota, type Fetch } from '../src/antigravity-quota.ts';
 import type { CoreClient } from '../src/client.ts';
 import { probeTimeoutMs } from '../src/drivers/acp/probe.ts';
+import { antigravityCertificates, antigravitySubagentBatch } from '../src/drivers/antigravity.ts';
+import { shareProfile, variableHome } from '../src/profile-share.ts';
+import { profileFor } from '../src/providers/resolve.ts';
 import { LAUNCH_TEMP_DIR } from '../src/drivers/launch-temp.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -114,6 +119,25 @@ async function agyAccount(client: CoreClient): Promise<{ id: string; isolationDi
   });
   expect(account.isolationDir).not.toBeNull();
   return { id: account.id, isolationDir: account.isolationDir ?? '' };
+}
+
+/** A signed-in account and a thread on it, subscribed. */
+async function agyThread(client: CoreClient): Promise<{ accountId: string; threadId: ThreadId }> {
+  const account = await agyAccount(client);
+  writeFileSync(join(account.isolationDir, 'antigravity-acp', 'acp_token.json'), JSON.stringify({ access_token: 'fake', expiry: 0 }), 'utf8');
+  expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  const projectDir = join(harness!.dataDir, 'project');
+  mkdirSync(projectDir, { recursive: true });
+  const project = await client.call('projects.add', { path: projectDir, name: 'agy' });
+  const thread = await client.call('threads.create', { projectId: project.id, providerId: 'agy-fake', accountId: account.id, cwd: projectDir, title: 'agy' });
+  await client.call('threads.subscribe', { threadId: thread.id });
+  return { accountId: account.id, threadId: thread.id };
+}
+
+async function runTurn(client: CoreClient, threadId: ThreadId, prompt: string, attachments: Attachment[] = []): Promise<void> {
+  const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20_000);
+  await client.call('turns.start', { threadId, prompt, attachments });
+  expect((await finished).error).toBeNull();
 }
 
 describe('antigravity', () => {
@@ -304,5 +328,134 @@ describe('antigravity', () => {
     // The real one took 45 to 54 s before its server read a line on an 8 GB laptop.
     expect(probeTimeoutMs(unpacking)).toBeGreaterThanOrEqual(90_000);
     expect(probeTimeoutMs({ ...unpacking, quirks: [] })).toBe(20_000);
+  });
+  test('a start_subagent or invoke_subagent launch lists its batch, unknown once the turn ended since its children report nothing; a failed launch keeps its error', async () => {
+    const client = await startCore();
+    const { threadId } = await agyThread(client);
+    await runTurn(client, threadId, 'review with readers scenario:subagents');
+    const agents = (await client.call('delegation.get', { threadId })).nativeAgents.filter((agent) => agent.source !== 'process');
+    // The launch said only what it launched: once the turn ended, nobody knows
+    // how its children fared. The MCP tool of the same title is no launch.
+    expect(agents.map(({ id, status, task, result }) => ({ id: id.slice(id.lastIndexOf(':') + 1), status, task, result }))).toEqual([
+      { id: '2', status: 'unknown', task: 'Launch readers', result: undefined },
+      { id: '3', status: 'error', task: undefined, result: 'Subagent exceeded its limit.' },
+      { id: '5', status: 'unknown', task: 'Launch reviewers', result: undefined },
+    ]);
+    // While the turn runs, a launch that returned stays running: its output is no child's answer.
+    expect(antigravitySubagentBatch('t:2', 'done', 'Launch readers')).toEqual({ id: 't:2', status: 'running', task: 'Launch readers' });
+  }, 30000);
+
+  test('a command that outlived its turn is background work that keeps the process, and Stop ends both', async () => {
+    // No warm process: only the running command keeps it.
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const { threadId } = await agyThread(client);
+    const background = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length > 0, 20_000);
+    await runTurn(client, threadId, 'build it scenario:command');
+    const [command] = (await background).tasks;
+    expect(command).toMatchObject({ kind: 'shell', description: 'sleep 600' });
+    expect(fakeLog().split('\n').filter((line) => line === 'initialize')).toHaveLength(1);
+
+    // Another turn of the thread, never focused, runs on the same process: the command goes on.
+    await runTurn(client, threadId, 'meanwhile');
+    expect(fakeLog().split('\n').filter((line) => line === 'initialize')).toHaveLength(1);
+    const history = (await client.call('threads.get', { threadId })).backgroundHistory ?? [];
+    expect(history.find((task) => task.id === command!.id)?.state).toBe('running');
+
+    const cleared = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length === 0, 20_000);
+    expect((await client.call('turns.stop', { threadId })).stopped).toBe(true);
+    await cleared;
+    // The process went with the command: the next turn starts another one.
+    await runTurn(client, threadId, 'again');
+    expect(fakeLog().split('\n').filter((line) => line === 'initialize').length).toBeGreaterThan(1);
+  }, 40000);
+
+  test('a command that ends after its turn leaves the background list on its own', async () => {
+    const client = await startCore();
+    const { threadId } = await agyThread(client);
+    const background = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length > 0, 20_000);
+    const cleared = client.next('thread.background', (event) => event.threadId === threadId && event.tasks.length === 0, 20_000);
+    await runTurn(client, threadId, 'build it scenario:short-command');
+    await background;
+    await cleared;
+    const history = (await client.call('threads.get', { threadId })).backgroundHistory ?? [];
+    expect(history.map((task) => task.state)).toEqual(['completed']);
+  }, 30000);
+
+  test('a GIF, which the server takes no block of, goes as a saved file beside the native PNG', async () => {
+    const client = await startCore();
+    const { threadId } = await agyThread(client);
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const gif = 'R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+    await runTurn(client, threadId, 'look', [
+      { kind: 'image', mimeType: 'image/png', data: png, name: 'shot.png' },
+      { kind: 'image', mimeType: 'image/gif', data: gif, name: 'clip.gif' },
+    ]);
+    const lines = fakeLog().split('\n');
+    expect(lines.filter((line) => line.startsWith('block:'))).toEqual(['block:image:image/png']);
+    expect(lines).toContain('prompt names a saved file');
+  }, 30000);
+
+  test('the quota merges both endpoints, so Gemini limits show when one endpoint leaves them out', async () => {
+    await startCore();
+    const home = join(harness!.dataDir, 'agy-home');
+    mkdirSync(join(home, 'antigravity-acp'), { recursive: true });
+    writeFileSync(join(home, 'antigravity-acp', 'acp_token.json'), JSON.stringify({ client_id: 'c', client_secret: 's', refresh_token: 'merge-refresh' }), 'utf8');
+    const bucket = (bucketId: string, remainingFraction: number) => ({ bucketId, window: 'weekly', remainingFraction });
+    const fakeFetch: Fetch = async (url) => {
+      if (url === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'merge-access', expires_in: 3600 });
+      if (!url.endsWith(':retrieveUserQuotaSummary')) return new Response('', { status: 404 });
+      // The daily endpoint answers with the Claude and GPT group alone.
+      return url.startsWith('https://daily-')
+        ? Response.json({ groups: [{ displayName: 'Claude and GPT', buckets: [bucket('3p-weekly', 0.4)] }] })
+        : Response.json({ groups: [{ displayName: 'Gemini', buckets: [bucket('gemini-weekly', 0.75)] }, { displayName: 'Claude and GPT', buckets: [bucket('3p-weekly', 0.9)] }] });
+    };
+    const windows = await readAntigravityQuota(home, fakeFetch);
+    expect(windows.map((row) => [row.label, Math.round(row.usedPercent)])).toEqual([['Claude and GPT · Weekly', 60], ['Gemini · Weekly', 25]]);
+  });
+
+  test('on Linux the server is named a CA bundle that exists, unless the user names one', async () => {
+    const exists = (path: string): boolean => path === '/etc/ssl/certs/ca-certificates.crt' || path === '/nix/store/ca.crt';
+    expect(antigravityCertificates('linux', {}, exists)).toEqual({ SSL_CERT_FILE: '/etc/ssl/certs/ca-certificates.crt' });
+    expect(antigravityCertificates('linux', { NIX_SSL_CERT_FILE: '/nix/store/ca.crt' }, exists)).toEqual({ SSL_CERT_FILE: '/nix/store/ca.crt' });
+    expect(antigravityCertificates('linux', { NIX_SSL_CERT_FILE: 'relative.crt' }, exists)).toEqual({ SSL_CERT_FILE: '/etc/ssl/certs/ca-certificates.crt' });
+    expect(antigravityCertificates('linux', { SSL_CERT_FILE: '/mine.pem' }, exists)).toEqual({});
+    expect(antigravityCertificates('linux', { SSL_CERT_DIR: '/certs' }, exists)).toEqual({});
+    expect(antigravityCertificates('windows', {}, exists)).toEqual({});
+    expect(antigravityCertificates('linux', {}, () => false)).toEqual({});
+    // The agent itself gets what this machine has.
+    const client = await startCore();
+    const { threadId } = await agyThread(client);
+    await runTurn(client, threadId, 'ping');
+    const os = process.platform === 'linux' ? 'linux' : 'other';
+    expect(loggedEnv('SSL_CERT_FILE')).toBe(process.env['SSL_CERT_FILE'] ?? antigravityCertificates(os, process.env, existsSync)['SSL_CERT_FILE'] ?? '');
+  }, 30000);
+  test('the user\'s own skills under ~/.gemini reach every account, whose GEMINI_HOME is its own', async () => {
+    await startCore();
+    const shipped = harness!.core.providers.require('antigravity');
+    const profile = profileFor(shipped);
+    expect(profile).toBeDefined();
+    const before = process.env['GEMINI_HOME'];
+    delete process.env['GEMINI_HOME'];
+    // Unset, the variable means the agent's own default.
+    expect(variableHome('GEMINI_HOME')).toBe(join(homedir(), '.gemini'));
+    const own = join(harness!.dataDir, 'own-gemini');
+    const account = join(harness!.dataDir, 'accounts', 'acc_agy');
+    mkdirSync(join(own, 'config', 'skills', 'review'), { recursive: true });
+    mkdirSync(join(own, 'antigravity-cli', 'skills', 'deploy'), { recursive: true });
+    writeFileSync(join(own, 'config', 'skills', 'review', 'SKILL.md'), 'review');
+    writeFileSync(join(own, 'antigravity-cli', 'skills', 'deploy', 'SKILL.md'), 'deploy');
+    // Neither the user's MCP servers nor anything else of that home is shared.
+    writeFileSync(join(own, 'mcp_config.json'), '{}');
+    mkdirSync(account, { recursive: true });
+    process.env['GEMINI_HOME'] = own;
+    try {
+      expect(shareProfile(account, profile!, shipped.shared ?? [])).toEqual([]);
+    } finally {
+      if (before === undefined) delete process.env['GEMINI_HOME'];
+      else process.env['GEMINI_HOME'] = before;
+    }
+    expect(readFileSync(join(account, 'config', 'skills', 'review', 'SKILL.md'), 'utf8')).toBe('review');
+    expect(readFileSync(join(account, 'antigravity-cli', 'skills', 'deploy', 'SKILL.md'), 'utf8')).toBe('deploy');
+    expect(existsSync(join(account, 'mcp_config.json'))).toBe(false);
   });
 });

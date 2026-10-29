@@ -14,12 +14,20 @@ import { fstatSync } from 'node:fs';
 import { TextSocket, UpgradeError } from '../ws-client.ts';
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
-interface Waiting { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; method: string }
+interface Waiting { resolve(value: Record<string, unknown>): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout>; method: string; sessionId?: string }
 
 /** What a command may take before the page is called stuck. */
 const COMMAND_TIMEOUT_MS = 30_000;
 
 export class CdpError extends Error {}
+
+/** The connection is live, but the session awaiting this command has detached. */
+export class CdpSessionDetachedError extends CdpError {
+  constructor(readonly method: string, readonly sessionId: string) {
+    super(`${method}: DevTools session ${sessionId} detached before answering`);
+    this.name = 'CdpSessionDetachedError';
+  }
+}
 
 export class Cdp {
   #write: (text: string) => void;
@@ -124,7 +132,7 @@ export class Cdp {
         this.#waiting.delete(id);
         reject(new CdpError(`the browser did not answer ${method} within ${Math.round(timeoutMs / 1000)} seconds`));
       }, timeoutMs);
-      this.#waiting.set(id, { resolve: resolve as (value: Record<string, unknown>) => void, reject, timer, method });
+      this.#waiting.set(id, { resolve: resolve as (value: Record<string, unknown>) => void, reject, timer, method, sessionId });
       this.#write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   }
@@ -154,6 +162,14 @@ export class Cdp {
       return;
     }
     if (!message.method) return;
+    if (message.method === 'Target.detachedFromTarget' && typeof message.params?.sessionId === 'string') {
+      const sessionId = message.params.sessionId;
+      for (const [id, waiting] of this.#waiting) {
+        if (waiting.sessionId !== sessionId) continue;
+        this.#waiting.delete(id); clearTimeout(waiting.timer);
+        waiting.reject(new CdpSessionDetachedError(waiting.method, sessionId));
+      }
+    }
     for (const listener of this.#listeners.get(message.method) ?? []) {
       try { listener(message.params ?? {}, message.sessionId); } catch { /* a listener's fault stays its own */ }
     }

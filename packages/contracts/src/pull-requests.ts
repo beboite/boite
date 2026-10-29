@@ -51,12 +51,14 @@ export interface PullRequestWatch {
   paused: { reason: 'rate-limit' | 'unreachable'; until: number; message: string } | null;
 }
 /**
- * A watch its agent still waits on: GitHub not read yet, or checks still
- * running. Once they settle the agent has its answer, and the turn it ended on
- * is finished work even though the watch stays to catch a review or a conflict.
+ * A watch its agent still waits on: GitHub not read yet, checks still
+ * running, or the pull request in the merge queue, whose checks run on its
+ * own merge group. Once they settle the agent has its answer, and the turn it
+ * ended on is finished work even though the watch stays to catch a review or
+ * a conflict.
  */
 export function pullRequestWatchWaits(watch: PullRequestWatch): boolean {
-  return watch.seen === null || watch.seen.checks.running > 0;
+  return watch.seen === null || watch.seen.checks.running > 0 || Boolean(watch.seen.queue);
 }
 export interface PullRequestWatchSeen {
   checkedAt: number;
@@ -65,6 +67,13 @@ export interface PullRequestWatchSeen {
   base: string;
   checks: { total: number; running: number; failed: number };
   conflicting: boolean;
+  /** Behind a base that requires branches up to date; absent from what a core older than it saw. */
+  behind?: boolean;
+  /**
+   * Its entry in the base branch's merge queue: 1 is next to merge. Null out
+   * of the queue; absent from what a core older than it saw.
+   */
+  queue?: { position: number } | null;
 }
 export interface PullRequestComment { author: string; body: string; url: string; at: string; path?: string; line?: number; state?: string }
 export interface PullRequestCheck { name: string; state: string; url: string }

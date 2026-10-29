@@ -18,19 +18,21 @@ import { TRAIL_ONLY, UNWRITTEN, pruneOldEvents, pruneTrail, rewindTrailCursor, t
 import { analyze, staleStatistics } from './journal/statistics.ts';
 import { hydrate, hydratePart } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
+import { openAsyncQuestions, projectQuestion } from './journal/questions.ts';
 import { PROCESS_COLUMNS, PROCESS_FROM, ProcessRows } from './journal/processes.ts';
-import { runWrite } from './journal/statements.ts';
+import { cachePages, runWrite } from './journal/statements.ts';
 import { WAL_LIMIT_BYTES, WalCheckpoints, type WalCheckpointOptions } from './journal/wal-checkpoints.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
-import { threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
-import { oneTurn, sumSessionUsage, writeTurn } from './journal/turn-rows.ts';
+import { restoreDeletedRows, threadsWhere, VISIBLE_THREADS, writeThread } from './journal/thread-rows.ts';
+import { oneTurn, sumSessionUsage, writeTurn, type SessionUsage } from './journal/turn-rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { copyStoredParts, foldStreamingParts, messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { requestSince } from './journal/request-since.ts';
-import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
+import { usageByBucket, usageByThread, usageOfTree, type UsageGroupRow, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
 import { threadSessions, type NativeSession } from './threads/native-sessions.ts';
+import { deleteComposerInput } from './journal/composer-assets.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
@@ -75,6 +77,7 @@ export interface SessionRow {
  */
 export class Journal {
   readonly db: Database;
+  collectComposerAssets?: (assetIds: string[]) => void;
   /** The streaming write path: deltas and the parts of messages still streaming. */
   private readonly stream: StreamBuffer;
   private readonly processes: ProcessRows;
@@ -89,10 +92,11 @@ export class Journal {
 
   constructor(file: string, options: JournalOptions = {}) {
     this.onError = options.onError ?? ((message) => console.error(message));
-    this.db = new Database(file, { create: true });
+    this.db = cachePages(new Database(file, { create: true }));
     this.stream = new StreamBuffer(this.db, this, this.onError);
     this.processes = new ProcessRows(this.db);
     try {
+      if ((this.db.query('PRAGMA page_count').get() as { page_count: number }).page_count === 0) this.db.exec('PRAGMA auto_vacuum = INCREMENTAL'); // Only a new file takes it: no `journal/vacuum.ts` ever.
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
       this.db.exec('PRAGMA busy_timeout = 5000');
@@ -199,12 +203,12 @@ export class Journal {
       .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0, project.worktreeDefault === true ? 1 : 0);
   }
 
-  /** How many of a project's own threads are archived, sub-threads left out, per project id. */
-  /** Per project, its archived top-level threads and how many of them are done (`done_at` set). */
+  /** Archived project threads, including work delegated by a bot, and how many are done. */
   archivedThreadCounts(): Map<string, { archived: number; done: number }> {
     const rows = this.db
-      .query('SELECT project_id, COUNT(*) AS count, COUNT(done_at) AS done FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id')
-      .all() as { project_id: string; count: number; done: number }[];
+      .query(`SELECT project_id, COUNT(*) AS count, COUNT(done_at) AS done FROM threads WHERE archived = 1
+        AND (parent_thread_id IS NULL OR EXISTS (SELECT 1 FROM threads parent WHERE parent.id = threads.parent_thread_id AND parent.agent_session_id IS NOT NULL))
+        AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id`).all() as { project_id: string; count: number; done: number }[];
     return new Map(rows.map((row) => [row.project_id, { archived: row.count, done: row.done }]));
   }
 
@@ -257,7 +261,14 @@ export class Journal {
 
   // -- threads --------------------------------------------------------------
 
-  putThread(thread: ThreadSummary): void { writeThread(this.db, thread); }
+  /**
+   * Every thread row written, created, moved, restored or set running passes
+   * here first. The core refuses a row that would work in a checkout a
+   * removal holds (`checkouts.ts`); a throw rolls back the write around it.
+   */
+  admitThread: (thread: ThreadSummary) => void = () => {};
+
+  putThread(thread: ThreadSummary): void { this.admitThread(thread); writeThread(this.db, thread); }
 
   getThread(threadId: string): ThreadSummary | null {
     const row = this.db.query(`${VISIBLE_THREADS} AND id = ?`).get(threadId) as ThreadRow | null;
@@ -313,16 +324,7 @@ export class Journal {
     return rows.map(row => ({ ...toThread(row), deletedAt: row.deleted_at }));
   }
 
-  /** Restore the family atomically, retaining IDs, message cursors and prior archive flags. */
-  restoreDeletedThreads(rootId: string): string[] {
-    return this.db.transaction(() => {
-      const rows = this.db.query('SELECT thread_id, archived FROM thread_deletions WHERE root_id = ?').all(rootId) as { thread_id: string; archived: number }[];
-      // A thread that was live before its deletion loses the archive time the deletion gave it.
-      for (const row of rows) this.db.query('UPDATE threads SET archived = ?1, archived_at = CASE WHEN ?1 = 0 THEN NULL ELSE archived_at END WHERE id = ?2').run(row.archived, row.thread_id);
-      this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
-      return rows.map(row => row.thread_id);
-    })();
-  }
+  restoreDeletedThreads(rootId: string): string[] { return restoreDeletedRows(this.db, rootId, this.admitThread); }
 
   /**
    * Incognito conversations and the sub-threads they started. Their native
@@ -358,11 +360,9 @@ export class Journal {
   /** Erase conversation history and its dependent records in one transaction, before client notifications. */
   deleteThreads(threadIds: string[]): void {
     if (threadIds.length === 0) return;
-    // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
-    // table keyed by thread is cleared here, events included, so a removed
-    // project's prompts and tool output leave the disk.
+    // Foreign keys are off: clear dependent records, including unsent composer input.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'streaming_parts', 'media_previews', 'media_displays', 'processes', 'command_lines', 'coordination_letters', 'coordination_wakes', 'events', 'pending_questions']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -375,7 +375,8 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:']) this.deleteSetting(`${prefix}${id}`);
+        deleteComposerInput(this.db, id, this.collectComposerAssets);
+        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'pr-watches:', 'activity:', 'activity-input:', 'activity-choice:', 'move-note:', 'compaction-tail:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'delegation-worktree:', 'spawn-origin:', 'spawns:', 'worktree-removed:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }
@@ -384,7 +385,6 @@ export class Journal {
   }
 
   // -- sessions -------------------------------------------------------------
-
   putSession(row: SessionRow): void {
     this.db
       .query(
@@ -450,12 +450,12 @@ export class Journal {
 
   /** One turn read without the thread's history (`journal/turn-rows.ts`). */
   runningTurn(threadId: string): Turn | null { return oneTurn(this.db, 'running', threadId); }
-  lastTurn(threadId: string): Turn | null { return oneTurn(this.db, 'last', threadId); }
+  lastTurn(threadId: string, conversation = false): Turn | null { return oneTurn(this.db, conversation ? 'conversation' : 'last', threadId); }
   /** The newest turn that is neither queued nor running. */
   lastEndedTurn(threadId: string): Turn | null { return oneTurn(this.db, 'ended', threadId); }
   /** The oldest queued turn that runs `operation`. */
   queuedTurn(threadId: string, operation: string): Turn | null { return oneTurn(this.db, 'queued', threadId, operation); }
-  sessionUsage(threadId: string, generation: number, exceptTurnId: string): { costUsd: number; tokens: number } { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
+  sessionUsage(threadId: string, generation: number, exceptTurnId: string): SessionUsage { return sumSessionUsage(this.db, threadId, generation, exceptTurnId); }
 
   /** A coordination contact needs one completion timestamp, without loading its turn history. */
   lastCompletedAt(threadId: string): number | null {
@@ -491,24 +491,9 @@ export class Journal {
     return requestSince(this.db, threadId);
   }
 
-  /**
-   * The asynchronous questions asked and never answered or skipped, oldest
-   * first. The one place events are read back: a pending card has no
-   * projection, and the trail keeps it for as long as events are kept.
-   */
+  /** The asynchronous questions asked and never answered or skipped, oldest first (`journal/questions.ts`). */
   openAsyncQuestions(): QuestionRequest[] {
-    const rows = this.db
-      .query(
-        `SELECT asked.payload FROM events asked
-          WHERE asked.type = 'question.asked' AND json_extract(asked.payload, '$.async') = 1
-            AND NOT EXISTS (
-              SELECT 1 FROM events done
-               WHERE done.thread_id = asked.thread_id AND done.id > asked.id AND done.type = 'question.answered'
-                 AND json_extract(done.payload, '$.questionId') = json_extract(asked.payload, '$.id'))
-          ORDER BY asked.id`,
-      )
-      .all() as { payload: string }[];
-    return rows.map((row) => JSON.parse(row.payload) as QuestionRequest);
+    return openAsyncQuestions(this.db);
   }
 
   unfinishedTurns(): Turn[] {
@@ -524,6 +509,11 @@ export class Journal {
   /** The same sums per thread and provider over `[from, to)`. */
   usageByThread(from: number, to: number): UsageThreadRow[] {
     return usageByThread(this.db, from, to);
+  }
+
+  /** The same sums per provider and model over a thread and its descendants since `since` (a bot's spend). */
+  usageOfTree(rootId: string, since: number): UsageGroupRow[] {
+    return usageOfTree(this.db, rootId, since);
   }
 
   // -- messages -------------------------------------------------------------
@@ -895,5 +885,6 @@ export class Journal {
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')
       .run(event.threadId, event.ts ?? Date.now(), event.type, event.version, JSON.stringify(payload ?? null));
+    projectQuestion(this.db, event.type, event.threadId, event.payload);
   }
 }

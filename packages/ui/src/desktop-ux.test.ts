@@ -58,40 +58,52 @@ test('a maximized panel stays with its thread: the Contacts page beside the list
   }
 });
 
-test('contacts stand in their own column on the right: the thread list keeps the projects, a row opens the page between them, the bar folds the column', async () => {
+test('contacts stand in their own column on the right, folded until the bar unfolds it: the title opens the Contacts page, a row a contact\'s, between the lists', async () => {
   writeExperiments(['contacts']);
   await mountOnFake();
   try {
-    await waitFor(() => document.querySelector('[data-testid=rail-contact]') !== null);
+    // A first start finds the column folded: the bar's button alone says Chris asks something.
+    await waitFor(() => document.querySelector('[data-testid=contacts-toggle-waiting]') !== null);
     const rail = query('[data-testid=contacts-rail]');
+    expect(rail.classList.contains('collapsed')).toBe(true);
+    expect(query('[data-testid=contacts-toggle]').getAttribute('aria-expanded')).toBe('false');
     expect(query('main').compareDocumentPosition(rail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[data-testid=sidebar] [data-testid=sidebar-contacts]')).toBeNull();
 
+    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
+    flushSync();
+    expect(rail.classList.contains('collapsed')).toBe(false);
+    expect(window.localStorage.getItem('boite.contacts-rail-folded')).toBe('0');
+    await waitFor(() => document.querySelector('[data-testid=rail-contact]') !== null);
+
+    // The title is the way home: requests, adding a contact and Tailscale.
+    query<HTMLButtonElement>('[data-testid=contacts-rail-home]').click();
+    await waitFor(() => document.querySelector('[data-testid=home-add]') !== null);
+    expect([store.page, store.contact]).toEqual(['home', null]);
+    flushSync();
+    expect(query('[data-testid=contacts-rail-home]').getAttribute('aria-current')).toBe('page');
+
     query<HTMLButtonElement>('[data-testid=rail-contact]').click();
-    await waitFor(() => document.querySelector('[data-testid=home-page]') !== null);
+    await waitFor(() => document.querySelector('[data-testid=contact-remove]') !== null);
     expect([store.page, store.contact]).toEqual(['home', 'core-chris']);
     expect(document.querySelector('[data-testid=sidebar]')).not.toBeNull();
     flushSync();
     expect(query('[data-testid=rail-contact]').getAttribute('aria-current')).toBe('page');
+    expect(query('[data-testid=contacts-rail-home]').getAttribute('aria-current')).toBeNull();
 
-    // Folded, the bar's button alone says Chris asks something, and the next start finds it folded.
+    // Folded again, the next start finds it folded.
     query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
     flushSync();
     expect(rail.classList.contains('collapsed')).toBe(true);
-    expect(query('[data-testid=contacts-toggle]').getAttribute('aria-expanded')).toBe('false');
-    expect(document.querySelector('[data-testid=contacts-toggle-waiting]')).not.toBeNull();
     expect(window.localStorage.getItem('boite.contacts-rail-folded')).toBe('1');
-    query<HTMLButtonElement>('[data-testid=contacts-toggle]').click();
-    flushSync();
-    expect(rail.classList.contains('collapsed')).toBe(false);
   } finally {
-    if (contactsRail.folded) contactsRail.toggle();
+    if (!contactsRail.folded) contactsRail.toggle();
   }
 });
 
 test('a panel widened while the contacts column was folded gives the chat its room back when the column unfolds', async () => {
   writeExperiments(['contacts']);
-  contactsRail.toggle();
+  expect(contactsRail.folded).toBe(true);
   const stored = rightPanel.width;
   rightPanel.width = 700;
   await mountOnFake();
@@ -110,7 +122,7 @@ test('a panel widened while the contacts column was folded gives the chat its ro
     // The width asked for stays, for the day the room comes back.
     expect(rightPanel.width).toBe(700);
   } finally {
-    if (contactsRail.folded) contactsRail.toggle();
+    if (!contactsRail.folded) contactsRail.toggle();
     rightPanel.width = stored;
   }
 });
@@ -326,7 +338,7 @@ test('the scheduler saves a valid value by itself, never sends an out-of-range o
 
 test('the LAN switch saves when it flips, like every other switch in Settings', async () => {
   await mountOnFake();
-  store.showSettings('machines');
+  store.showSettings('advanced', 'phone');
   await waitFor(() => document.querySelector('[data-testid=setting-listen-on-lan]') !== null);
   const before = store.settings?.listenOnLan ?? false;
   query<HTMLInputElement>('[data-testid=setting-listen-on-lan]').click();
@@ -581,4 +593,32 @@ test('a retry whose resend fails leaves its prompt in the box', async () => {
   await waitFor(() => sending.mock.calls.length === 1 && box.value === before.at(-1));
   expect(userTexts()).toEqual(before.slice(0, -1));
   expect(document.querySelector('[data-testid=composer-editing]')).toBeNull();
+});
+
+test('the settings bar picks the machine a page changes without moving the window, Plugins opening on this PC', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2 && workspace.machines.every((machine) => machine.store.connection === 'ready'));
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  store.localCore = true;
+  store.core = { ...store.core!, hostname: 'DESK-PC' };
+  await workspace.select(remote.store);
+  const thread = remote.store.openThread;
+  // Plugins run where they were installed: the page opens on this PC, not on the machine the chat is on.
+  remote.store.showSettings('plugins');
+  await waitFor(() => document.querySelector('[data-testid=settings-machine]') !== null && document.querySelector('[data-testid=plugins-page]') !== null);
+  expect(query('[data-testid=settings-machine]').textContent).toContain('DESK-PC (you)');
+  // Every other page opens on the window's machine.
+  remote.store.showSettings('resources');
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(remote.label) === true);
+  await remote.store.client!.call('settings.set', { muteAgents: true });
+  await store.client!.call('settings.set', { muteAgents: true });
+  query<HTMLButtonElement>('[data-testid=settings-machine]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-machine-menu]') !== null);
+  query<HTMLElement>(`[data-testid=settings-machine-menu] [data-value="${workspace.machines[0]!.id}"]`).click();
+  await waitFor(() => query('[data-testid=settings-machine]').textContent?.includes(strings.machines.youTag) === true);
+  query<HTMLInputElement>('[data-testid=setting-mute-agents]').click();
+  await waitFor(() => store.settings?.muteAgents === false);
+  expect(remote.store.settings?.muteAgents).toBe(true);
+  // The window never moved: same machine, same conversation, still on the page it showed.
+  expect([workspace.active, remote.store.openThread, remote.store.settingsTab]).toEqual([remote.store, thread, 'resources']);
 });

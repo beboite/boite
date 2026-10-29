@@ -5,7 +5,7 @@
  * output git produces for a rename and a binary file.
  */
 
-import { mkdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { DIFF_MAX_BYTES, RpcErrorCode } from '@boite/contracts';
@@ -273,6 +273,17 @@ describe('git.diff', () => {
       expect(first).toMatchObject({ status: 'renamed', oldText: 'keep\n', newText: 'keep\n' });
       const second = await client.call('git.diff', { threadId, path: 'a.txt' });
       expect(second.oldText).toBe('one\ntwo\nthree\n');
+      expect((await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: 'missing-ref', oldPath: null }))).reason)
+        .toMatchObject({ rpc: { message: expect.stringContaining('missing-ref'), data: expect.objectContaining({ field: 'ref' }) } });
+      expect(await client.call('git.diff', { threadId, path: 'new.txt', oldPath: null })).toMatchObject({ status: 'added', oldText: null });
+      // A folder at the ref, a file in the tree: that file is new, as the batch says.
+      mkdirSync(join(path, 'dir'));
+      writeFileSync(join(path, 'dir', 'file'), 'inside\n');
+      git(path, 'add', 'dir');
+      git(path, 'commit', '-q', '-m', 'dir');
+      rmSync(join(path, 'dir'), { recursive: true });
+      writeFileSync(join(path, 'dir'), 'replacement\n');
+      expect(await client.call('git.diff', { threadId, path: 'dir', oldPath: null })).toMatchObject({ status: 'added', oldText: null, newText: 'replacement\n' });
     } finally {
       spy.mockRestore();
     }
@@ -300,6 +311,41 @@ describe('git.diff', () => {
       expect(await thrown(client.call('git.diff', { threadId, path: 'a.txt', ...params })))
         .toThrow(`the working directory of thread ${threadId} is not inside a git repository`);
     }
+  });
+
+  test('an unknown ref, an unreadable file and a lost object are refused, never shown as a side that does not exist', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    expect((await rejection(client.call('git.diff', { threadId, path: 'a.txt', ref: 'missing-ref', oldPath: null }))).reason)
+      .toMatchObject({ rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('missing-ref'), data: expect.objectContaining({ field: 'ref' }) } });
+    // A ref that exists and a file it does not have: that side is absent, as before.
+    expect(await client.call('git.diff', { threadId, path: 'new.txt', ref: 'HEAD', oldPath: null })).toMatchObject({ status: 'added', oldText: null, newText: 'brand new\n' });
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+      chmodSync(join(path, 'a.txt'), 0o000);
+      try {
+        expect(await thrown(client.call('git.diff', { threadId, path: 'a.txt', oldPath: null }))).toThrow('git.diff cannot read a.txt');
+      } finally { chmodSync(join(path, 'a.txt'), 0o644); }
+    }
+    // The blob the commit names is gone from the object store.
+    const blob = git(path, 'rev-parse', 'HEAD:gone.txt').trim();
+    rmSync(join(path, '.git', 'objects', blob.slice(0, 2), blob.slice(2)));
+    expect(await thrown(client.call('git.diff', { threadId, path: 'gone.txt', oldPath: null }))).toThrow(`git.diff cannot read HEAD:./gone.txt: it names ${blob}, which the repository does not hold`);
+    // Before the first commit HEAD names nothing, and a file is simply new.
+    const unborn = join(harness.dataDir, 'unborn');
+    mkdirSync(unborn, { recursive: true });
+    git(unborn, 'init', '-q');
+    writeFileSync(join(unborn, 'first.txt'), 'first\n');
+    const fresh = await threadIn(unborn, 'unborn');
+    expect(await client.call('git.diff', { threadId: fresh, path: 'first.txt', oldPath: null })).toMatchObject({ status: 'added', newText: 'first\n' });
+  });
+
+  test('a git failure inside a repository is reported in its own words, not as a folder outside one', async () => {
+    const path = await fixture();
+    const threadId = await threadIn(path, 'repo');
+    writeFileSync(join(path, '.git', 'index'), 'not an index');
+    const failure = (await rejection(client.call('git.status', { threadId }))).reason as Error;
+    expect(failure.message).not.toContain('not inside a git repository');
+    expect(failure.message).toContain('index');
   });
 
   test('malformed refs are refused while an empty ref defaults to HEAD', async () => {

@@ -63,20 +63,24 @@ afterAll(async () => {
 test('the Tailscale switch serves the core, the links follow it, and 443 held by another target is replaced only when confirmed', async () => {
   await desk.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await desk.click(id('nav-settings'));
-  await desk.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
-  await desk.click(id('settings-tab-machines'));
+  // The switch is on Advanced, with the rest of how a phone reaches this machine.
+  await desk.waitFor(`document.querySelector('${id('settings-tab-advanced')}')`);
+  await desk.click(id('settings-tab-advanced'));
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="off"]')`);
   await scrollTo(desk, id('tailscale-access'));
   await capture(desk, 'tailscale-off-desktop.png');
 
+  // Turned on, it opens Machines on the group card, the new address's link and code drawn.
   await desk.click(id('tailscale-enable'));
-  await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="on"]')`);
+  await desk.waitFor(`document.querySelector('${id('machines-page')}') && document.querySelector('${id('group-card')}')`);
   await desk.waitFor(`(${LINK}).startsWith('https://${DNS}/?grant=')`);
   await desk.waitFor(`!!document.querySelector('${id('add-device-qr')} svg')`);
   expect(await desk.text(id('add-device'))).toContain('Scan with your phone');
   expect(readFileSync(`${statePath}.log`, 'utf8')).toContain(`serve --bg --https=443 http://127.0.0.1:${core.port}`);
   await scrollTo(desk, id('add-device'));
   await capture(desk, 'add-device-desktop.png');
+  await desk.click(id('settings-tab-advanced'));
+  await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="on"]')`);
   await scrollTo(desk, id('tailscale-access'));
   await capture(desk, 'tailscale-on-desktop.png');
 
@@ -86,8 +90,12 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
   await desk.click(id('confirm-ok'));
   await desk.waitFor(`document.querySelector('${id('tailscale-access')}[data-state="off"]')`);
   expect(readFileSync(`${statePath}.log`, 'utf8')).toContain('serve --https=443 off');
+  await desk.click(id('settings-tab-machines'));
+  await desk.waitFor(`document.querySelector('${id('group-add-device')}')`);
   await desk.click(id('group-add-device'));
   await desk.waitFor(`(${LINK}).startsWith(${JSON.stringify(`${core.url}/?grant=`)})`);
+  await desk.click(id('settings-tab-advanced'));
+  await desk.waitFor(`document.querySelector('${id('tailscale-refresh')}')`);
 
   // Something else on 443: named, and replaced only after the dialog.
   writeState({ TCP: { 443: { HTTPS: true } }, Web: { [`${DNS}:443`]: { Handlers: { '/': { Proxy: 'http://127.0.0.1:17338' } } } } });
@@ -110,6 +118,8 @@ test('the Tailscale switch serves the core, the links follow it, and 443 held by
 
 test('a loopback link draws no code, and a public address draws one', async () => {
   // This core listens on loopback: its link reaches nothing but this computer, so no QR code and no title asking to scan one.
+  await desk.click(id('settings-tab-machines'));
+  await desk.waitFor(`document.querySelector('${id('group-card')}')`);
   await scrollTo(desk, id('group-card'));
   // The previous test leaves a link on show: close it, so what follows is the new link's.
   await desk.evaluate(`document.querySelector('${id('add-device-close')}')?.click()`);

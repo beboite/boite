@@ -12,13 +12,21 @@ import { boundedBody } from '../coordination-wire.ts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from '../errors.ts';
 import { openResponse, pack, seal, SEALED, sealResponse, unpack, type Sealing } from '../group/seal.ts';
-import { checkCard, decodeInvite, tokenHash, type ContactCard, type Invitation } from './invite.ts';
+import { checkCard, checkTailnetName, decodeInvite, tokenHash, type ContactCard, type Invitation } from './invite.ts';
 import type { ContactStore } from './store.ts';
 
 export const CONTACT_JOIN_ROUTE = '/contacts/join';
 export const JOIN_INPUT = 'boite-contact-join\n';
 const JOINED_INPUT = 'boite-contact-joined\n';
 const JOIN_BODY_MAX = 16_384;
+/** How long a guest waits before joining again a host whose Funnel name public DNS does not know yet. */
+export const JOIN_RETRY_MS = 30_000;
+
+/** A name DNS does not know, as Bun's fetch and Node's report it. */
+function notFound(error: unknown): boolean {
+  const code = (value: unknown) => (value as { code?: unknown } | null)?.code;
+  return code(error) === 'ENOTFOUND' || code((error as { cause?: unknown } | null)?.cause) === 'ENOTFOUND';
+}
 
 /** The guest's side: spends the link's token on its host, then keeps the host as a contact and dials it. */
 export async function joinContact(store: ContactStore, core: Core, link: string): Promise<Contact> {
@@ -42,6 +50,7 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       core.log('warn', `contacts: the Tailscale share of ${invite.machine} was not accepted: ${messageOf(error)}`, { source: 'contacts' });
     }
   }
+  await checkTailnetName(invite.url, 'link.url');
   const nonce = randomUUID();
   const body = JSON.stringify({ nonce, at: Date.now(), token: invite.token, card: self });
   const signature = core.coordination.signature(Buffer.from(`${JOIN_INPUT}${body}`)).toString('base64');
@@ -54,8 +63,15 @@ async function spendInvite(store: ContactStore, core: Core, invite: Invitation, 
       headers: { 'content-type': 'application/json', 'x-boite-peer': self.coreId, 'x-boite-signature': SEALED },
       body: sealed.body,
     });
-  } catch {
-    throw unavailable(`could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, then join again`);
+  } catch (error) {
+    // An https origin is the inviter's Funnel: no share to accept, the inviter's side is down,
+    // or Tailscale has not put its name in public DNS yet. The token is unspent: the same join works later.
+    if (invite.url.startsWith('https:') && notFound(error)) {
+      throw unavailable(`could not find ${invite.machine} at ${invite.url}: Tailscale has not published its address on the internet yet, which takes a few minutes; join again shortly`, { retryAfterMs: JOIN_RETRY_MS });
+    }
+    throw unavailable(invite.url.startsWith('https:')
+      ? `could not reach ${invite.machine} at ${invite.url}: its Boite or its Tailscale Funnel is off; ask the inviter to check, then join again`
+      : `could not reach ${invite.machine} at ${invite.url}: accept its Tailscale share, or ask for an invitation for another network, then join again`);
   }
   const raw = await boundedBody(response.body, JOIN_BODY_MAX).catch(() => '');
   if (response.headers.get('x-boite-signature') !== SEALED) throw refused(`${invite.machine} refused the join (${response.status}: ${raw.slice(0, 200)})`);
@@ -110,11 +126,11 @@ export async function joinRequest(store: ContactStore, core: Core, request: Requ
     if (card.coreId !== guest) throw invalidParams('card.coreId: expected the core named by x-boite-peer');
     // A live invitation first: a caller without one leaves no nonce behind.
     const hash = typeof body.token === 'string' && /^[0-9a-f]{64}$/.test(body.token) ? tokenHash(body.token) : '';
-    if (!store.liveInvites().some(([live]) => live === hash)) throw refused('token: this invitation was already used or expired; ask for a new one');
+    if (!store.liveInvites().some(([live]) => live === hash)) throw refused('token: this invitation was already used, cancelled or expired; ask for a new one');
     if (!verify(null, Buffer.from(`${JOIN_INPUT}${raw}`), card.publicKey, Buffer.from(signature, 'base64'))) throw invalidParams('signature: expected the card\'s key to sign the join');
     store.fresh(guest, nonce, body.at);
     // Spent before anything else changes: a second join with the same link finds nothing.
-    if (!store.spendInvite(hash)) throw refused('token: this invitation was already used or expired; ask for a new one');
+    if (!store.spendInvite(hash)) throw refused('token: this invitation was already used, cancelled or expired; ask for a new one');
     if (card.coreId === core.coordination.card().coreId) throw refused('card: this is the inviting core itself');
     const existing = store.find(card.coreId);
     if (existing?.role === 'host') throw refused('card: already a contact of this core');

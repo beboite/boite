@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AnswerAttachment, Attachment, FileAttachment, ImageAttachment, MessagePart, QuestionAnswer } from '@boite/contracts';
+import type { AnswerAttachment, Attachment, FileAttachment, ImageAttachment, MessagePart, ProviderDescriptor, QuestionAnswer } from '@boite/contracts';
 
 /**
  * Copies this process wrote, or found equal to their upload, with the stats
@@ -38,7 +38,11 @@ function storeFile(dataDir: string, file: FileAttachment | Extract<MessagePart, 
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     // Agents can edit files. Preserve their edits, but never present changed bytes as a new upload.
-    const unchanged = untouched(path) || (lstatSync(path).isFile() && readFileSync(path).equals(body));
+    let unchanged = untouched(path);
+    if (!unchanged) {
+      const stat = lstatSync(path);
+      unchanged = stat.isFile() && stat.size === body.length && readFileSync(path).equals(body);
+    }
     if (!unchanged) {
       path = join(directory, `${randomUUID()}-${name}`);
       writeFileSync(path, body, { flag: 'wx', mode: 0o600 });
@@ -106,11 +110,30 @@ export function answerText(answer: QuestionAnswer): string {
   return [answer.text ?? '', answerNotes.get(answer) ?? ''].filter(part => part.length > 0).join('\n\n');
 }
 
-/** All drivers read files through their existing local tools; images retain native payloads. */
-export function prepareAttachments(dataDir: string, input: { prompt: string; attachments: Attachment[] }): { prompt: string; attachments: ImageAttachment[] } {
-  const files = input.attachments.filter(file => file.kind === 'file');
+/** What a question asks, as Codex and Muse send it: its header before its body when the two differ. */
+export function questionTextOf(entry: { header?: string; question?: string }): string {
+  const header = typeof entry.header === 'string' ? entry.header.trim() : '';
+  const body = typeof entry.question === 'string' ? entry.question.trim() : '';
+  if (header.length > 0 && body.length > 0 && header !== body) return `${header}: ${body}`;
+  return body.length > 0 ? body : header;
+}
+
+/** The image formats Antigravity's server takes in a prompt: no GIF. */
+const ANTIGRAVITY_IMAGES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
+/** An image this provider's agent takes as a prompt block; any other is handed over as a file. */
+function nativeImage(provider: ProviderDescriptor | undefined, file: Attachment): file is ImageAttachment {
+  return file.kind === 'image' && (provider?.quirks?.includes('antigravity') !== true || ANTIGRAVITY_IMAGES.has(file.mimeType));
+}
+
+/**
+ * All drivers read files through their existing local tools; images retain
+ * native payloads, unless the provider's agent takes none of that format.
+ */
+export function prepareAttachments(dataDir: string, input: { prompt: string; attachments: Attachment[] }, provider?: ProviderDescriptor): { prompt: string; attachments: ImageAttachment[] } {
+  const files = input.attachments.filter(file => !nativeImage(provider, file));
   return {
-    prompt: input.prompt + (files.length ? `\n\n${FILES_NOTE}\n${files.map(file => fileReference(dataDir, file)).join('\n')}` : ''),
-    attachments: input.attachments.filter(file => file.kind === 'image'),
+    prompt: input.prompt + (files.length ? `\n\n${FILES_NOTE}\n${files.map(file => fileReference(dataDir, { ...file, kind: 'file' })).join('\n')}` : ''),
+    attachments: input.attachments.filter(file => nativeImage(provider, file)),
   };
 }

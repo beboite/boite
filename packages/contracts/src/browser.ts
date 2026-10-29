@@ -9,6 +9,12 @@ export type BrowserAction =
   | { kind: 'status' }
   | { kind: 'profiles' }
   /**
+   * Adds a profile kept like the default one, with its own cookies, to this
+   * machine's list: a second account signed in beside the first. A name the
+   * list already holds, in any case, answers that profile instead.
+   */
+  | { kind: 'profile-add'; name: string }
+  /**
    * `profile` is a profile's name or id, `default` or `private`; absent opens the default profile.
    * `reuse` navigates the active tab when there is one, as agent-browser's `open` does.
    */
@@ -35,6 +41,24 @@ export type BrowserAction =
   /** A finished download's bytes, in chunks of `BROWSER_DOWNLOAD_CHUNK_BYTES` at most. */
   | { kind: 'download-read'; downloadId: string; offset: number; maxBytes?: number }
   | { kind: 'download-discard'; downloadId: string }
+  /**
+   * The tab's API calls since capture began: see `BrowserNetworkCall`. The
+   * first one starts capturing, so it lists nothing the page sent before.
+   * `filter` keeps the calls whose method, address or type contain it.
+   */
+  | { kind: 'network'; filter?: string }
+  /** One captured call with its headers and bodies: see `BrowserNetworkDetail`. */
+  | { kind: 'network-detail'; callId: string }
+  /** Stops capturing and forgets the calls; Chromium keeps no body again. */
+  | { kind: 'network-stop' }
+  /** This machine's recipes, without their scripts: see `BrowserRecipe`. */
+  | { kind: 'recipes' }
+  | { kind: 'recipe-get'; name: string }
+  /** Kept only after its script ran once without failing; `sites` are the hosts that run reached. */
+  | { kind: 'recipe-save'; name: string; about: string; usage?: string; source: string; sites: string[] }
+  | { kind: 'recipe-delete'; name: string }
+  /** How a run of the recipe ended: `error` names the step and why it failed. */
+  | { kind: 'recipe-result'; name: string; ok: boolean; error?: string }
   /**
    * `selector` is an `@eN` ref from the last snapshot, a CSS selector matching
    * one element, or `text=...`. `count: 2` double-clicks.
@@ -158,6 +182,43 @@ export interface BrowserRecording { id: string; mime: BrowserRecordingMime; byte
 export interface BrowserDiagnostic { at: number; kind: 'console' | 'exception' | 'network'; level: string; text: string; url?: string }
 export interface BrowserHistoryEntry { at: number; action: string; ok: boolean; durationMs: number; error?: string }
 export interface BrowserDiagnostics { entries: BrowserDiagnostic[]; dropped: number; history: BrowserHistoryEntry[] }
+/**
+ * A call a tab's page made while network capture ran: what `fetch`, XHR, a
+ * document or an event stream sent. Scripts, stylesheets, images, fonts and
+ * media are left out. `id` is the capture's own: `n1`, `n2` and on.
+ */
+export interface BrowserNetworkCall { id: string; at: number; method: string; url: string; type: string; status?: number; mimeType?: string; bytes?: number; durationMs?: number; failed?: string }
+/**
+ * One call in full. A header that carries a credential (a cookie, an
+ * authorization, a token, a key, a session) shows its length instead of its
+ * value, and so does such a field of a JSON or form body. Bodies are text, cut
+ * at `BROWSER_NETWORK_BODY_MAX` characters; `notes` say why one is missing or
+ * cut. `fetch` is the `page.fetch` call a script makes to repeat it.
+ */
+export interface BrowserNetworkDetail extends BrowserNetworkCall {
+  requestHeaders: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseBody?: string;
+  notes: string[];
+  fetch: string;
+}
+export const BROWSER_NETWORK_CALLS_MAX = 300;
+export const BROWSER_NETWORK_BODY_MAX = 50_000;
+/**
+ * A `boite browser run` script kept on this machine under a name, so the next
+ * agent doing the same web task runs it instead of driving the pages again.
+ * It is kept only after a run that did not fail. `sites` are the hosts that
+ * run reached; `lastRun` says whether it still works.
+ */
+export interface BrowserRecipe { name: string; about: string; usage?: string; sites: string[]; savedAt: number; runs: number; lastRun?: { at: number; ok: boolean; error?: string } }
+export const BROWSER_RECIPE_SOURCE_MAX = 64 * 1024;
+export const BROWSER_RECIPES_MAX = 200;
+const RECIPE_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+/** What a recipe's name must be: it names its file too. */
+export function browserRecipeNameError(name: unknown): string | null {
+  return typeof name === 'string' && RECIPE_NAME.test(name) ? null : 'a recipe name is 1 to 48 lowercase letters, digits and `-`, starting with a letter or digit';
+}
 export const BROWSER_PRESETS = {
   'iphone-se': { label: 'iPhone SE', width: 375, height: 667 },
   'iphone-15-pro': { label: 'iPhone 15 Pro', width: 393, height: 852 },
@@ -341,7 +402,24 @@ function checkWait(action: BrowserAction & { kind: 'wait' }): string | null {
   return [action.selector, action.text, action.url].every(value => value === undefined || text(value, 4000)) ? null : 'browser wait condition must contain 1 to 4000 characters';
 }
 
+function checkRecipeSave(action: BrowserAction & { kind: 'recipe-save' }): string | null {
+  const nameError = browserRecipeNameError(action.name);
+  if (nameError) return nameError;
+  if (!text(action.about, 300) || !action.about.trim() || /[\u0000-\u001f]/.test(action.about)) return 'a recipe needs --about, one line of 1 to 300 characters saying what it does';
+  if (action.usage !== undefined && (typeof action.usage !== 'string' || action.usage.length > 200 || /[\u0000-\u001f]/.test(action.usage))) return 'recipe --usage is one line of at most 200 characters';
+  if (!text(action.source, BROWSER_RECIPE_SOURCE_MAX)) return `a recipe script holds 1 to ${BROWSER_RECIPE_SOURCE_MAX} characters`;
+  return Array.isArray(action.sites) && action.sites.length <= 20 && action.sites.every(site => text(site, 253) && /^([\w.-]+|\[[\da-f:.]+\])$/i.test(site)) ? null : 'recipe sites must be at most 20 host names';
+}
+
 const ACTION_CHECKS: BrowserActionChecks = {
+  'network': action => action.filter === undefined || text(action.filter, 200) ? null : 'network --filter must contain 1 to 200 characters',
+  'network-detail': action => typeof action.callId === 'string' && /^n\d{1,7}$/.test(action.callId) ? null : 'a network call id comes from browser network, like n3',
+  'network-stop': checkNoInput,
+  'recipes': checkNoInput,
+  'recipe-get': action => browserRecipeNameError(action.name),
+  'recipe-delete': action => browserRecipeNameError(action.name),
+  'recipe-save': checkRecipeSave,
+  'recipe-result': action => browserRecipeNameError(action.name) ?? (typeof action.ok === 'boolean' && (action.error === undefined || (typeof action.error === 'string' && action.error.length <= 2000)) ? null : 'a recipe result is ok true or false, with an error of at most 2000 characters'),
   'diagnostics': action => action.clear === undefined || typeof action.clear === 'boolean' ? null : 'diagnostics clear must be a boolean',
   'preset': action => Object.hasOwn(BROWSER_PRESETS, action.preset) && (action.orientation === undefined || ['portrait', 'landscape'].includes(action.orientation)) ? null : 'unknown browser preset or orientation',
   'appearance': action => ['light', 'dark', 'system'].includes(action.colorScheme) ? null : 'appearance must be light, dark or system',
@@ -355,6 +433,7 @@ const ACTION_CHECKS: BrowserActionChecks = {
   'download-discard': checkDownload,
   'status': checkNoInput,
   'profiles': checkNoInput,
+  'profile-add': action => browserProfileNameError(action.name),
   'screenshot': checkNoInput,
   'close': checkNoInput,
   'reset-viewport': checkNoInput,
@@ -411,12 +490,31 @@ export const DEFAULT_BROWSER_PROFILE = 'default';
 export const PRIVATE_BROWSER_PROFILE = 'private';
 export const BROWSER_PROFILES_MAX = 32;
 export const BROWSER_PROFILE_NAME_MAX = 40;
-export interface BrowserProfile { id: string; name: string }
+export interface BrowserUserAgent { mode: 'suffix' | 'replace'; value: string }
+export interface BrowserProfile { id: string; name: string; userAgent?: BrowserUserAgent }
+
+/** User-Agent is one printable ASCII HTTP field value, never an injected header. */
+export function browserUserAgentError(value: unknown): string | null {
+  if (value === undefined) return null;
+  const setting = value as Partial<BrowserUserAgent> | null;
+  return !setting || !['suffix', 'replace'].includes(setting.mode as string)
+    || typeof setting.value !== 'string' || setting.value.length > 8192 || /[^\x20-\x7e]/.test(setting.value)
+    ? 'User-Agent needs suffix or replace mode and at most 8192 printable ASCII characters' : null;
+}
 
 /** The shell checks the same rule before it opens a profile folder. */
 export function browserProfileIdError(id: unknown): string | null {
   if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return 'a browser profile id is 1 to 40 lowercase letters, digits and `-`, starting with a letter or digit';
   return id === DEFAULT_BROWSER_PROFILE || id === PRIVATE_BROWSER_PROFILE ? `${id} is a built-in browser profile` : null;
+}
+
+/** What a profile's name must be: it is found by name, so `default` and `private` stay keywords. */
+export function browserProfileNameError(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (!trimmed || trimmed.length > BROWSER_PROFILE_NAME_MAX || /[\u0000-\u001f]/.test(trimmed) || [DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE].includes(trimmed.toLowerCase())) {
+    return `a browser profile name is 1 to ${BROWSER_PROFILE_NAME_MAX} characters other than default or private`;
+  }
+  return null;
 }
 
 /** The profiles a settings snapshot names, and the one a tab opens in when nobody chooses. */

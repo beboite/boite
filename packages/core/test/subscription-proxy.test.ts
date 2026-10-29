@@ -27,6 +27,81 @@ test('proxy URLs reject credential channels and retain the dashboard route', () 
   expect(checkSettingsPatch({ subscriptionProxy: config('http://gateway.lan:8787') }).ok).toBe(true);
 });
 
+test('Muse uses only an observed native Meta subscription and restores its own login otherwise', async () => {
+  let meta = false;
+  let routes: 'missing' | 'html' | 'error' | 'catalog-only' | 'native' = 'missing';
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === '/muse-code/models') {
+      if (routes === 'missing') return new Response('Missing', { status: 404 });
+      if (routes === 'html') return new Response('<html>Dashboard</html>');
+      if (routes === 'error') return new Response('Temporary failure', { status: 503 });
+      return Response.json({ data: [{ id: 'muse-spark-1.3', metadata: { 'muse-code': { name: 'Muse Spark 1.3' } } }] });
+    }
+    if (path === '/muse-code/responses') return new Response(null, { status: routes === 'native' ? 405 : 404, headers: routes === 'native' ? { Allow: 'POST' } : {} });
+    return Response.json({ providers: [{ provider: meta ? 'meta' : 'opencode_go', name: 'Muse', entries: [
+      { id: 'seat', label: 'Subscription', accounts: 1, status: 'ready', windows: [], credits: [] },
+    ] }] });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const account = await owner.call('accounts.add', { providerId: 'muse', label: 'Native Muse' });
+  const provider = harness.core.providers.require('muse');
+  const nativeEnv = harness.core.accounts.accountEnv(account, provider);
+  expect(account.status).toBe('unauthenticated');
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  meta = true;
+  for (const mode of ['missing', 'html', 'error', 'catalog-only'] as const) {
+    routes = mode;
+    await owner.call('subscriptionProxy.quotas', { refresh: true });
+    expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+    expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  }
+  routes = 'native';
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  const env = harness.core.accounts.accountEnv(account, provider);
+  expect(env.META_API_KEY).toBe('boite-subscription-proxy');
+  expect(env.XDG_CONFIG_HOME).not.toBe(nativeEnv.XDG_CONFIG_HOME);
+  const settings = JSON.parse(await Bun.file(join(env.XDG_CONFIG_HOME!, 'muse', 'settings.json')).text());
+  expect(settings).toEqual({ schema_version: 1, endpoint_transport: { base_url: `http://127.0.0.1:${gateway.port}/muse-code`, auth: 'bearer' } });
+  expect(JSON.stringify(settings)).not.toContain(env.META_API_KEY!);
+  expect(agentEnv(provider, env).META_API_KEY).toBe(env.META_API_KEY);
+  expect(existsSync(join(account.isolationDir!, 'muse', 'auth.json'))).toBe(false);
+  expect(await readSubscriptionProxyModels(harness.core, provider)).toBeNull();
+  meta = false;
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+  expect(harness.core.accounts.accountEnv(account, provider)).toEqual(nativeEnv);
+  meta = true;
+  await owner.call('subscriptionProxy.quotas', { refresh: true });
+  await owner.call('subscriptionProxy.setEnabled', { enabled: false });
+  expect(harness.core.accounts.accountEnv(account, provider)).toEqual(nativeEnv);
+});
+
+test('the first Muse probe discovers Meta before capturing its account revision', async () => {
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (new URL(request.url).pathname === '/muse-code/models') return Response.json({ data: [{ id: 'muse-spark-1.3', metadata: { 'muse-code': { name: 'Muse Spark 1.3' } } }] });
+    if (new URL(request.url).pathname === '/muse-code/responses') return new Response(null, { status: 405, headers: { Allow: 'POST' } });
+    return Response.json({ providers: [{ provider: 'meta', entries: [
+      { id: 'native', label: 'Native subscription', status: 'ready', windows: [], credits: [] },
+    ] }] });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const provider = harness.core.providers.require('muse');
+  for (const profile of Object.values(provider.profiles)) {
+    profile.executable = [{ kind: 'file', value: process.execPath }];
+    profile.launch = { args: [join(import.meta.dir, 'fixtures', 'muse-server.ts')] };
+  }
+  const account = await owner.call('accounts.add', { providerId: 'muse', label: 'Gateway Muse' });
+  expect(account.status).toBe('unauthenticated');
+  const { models } = await owner.call('providers.probe', { providerId: 'muse', accountId: account.id });
+  expect(models.some(model => model.id === 'muse-spark-1.3')).toBe(true);
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
+});
+
 test('configuration and private key roll back together without leaking to events, snapshots, errors or logs', async () => {
   const previous = config('http://gateway.lan:8787');
   const next = config('https://gateway.test');
@@ -86,6 +161,8 @@ test('real RPC discovers gateway models, separates the key and restores native a
   } });
   harness = await startTestCore();
   const owner = await harness.connect();
+  // A switch with nothing behind it would route agents to an empty address.
+  expect(await thrown(owner.call('subscriptionProxy.setEnabled', { enabled: true }))).toThrow('no subscription proxy is configured');
   const claude = await owner.call('accounts.add', { providerId: 'claude', label: 'Proxy Claude' });
   const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Proxy Codex' });
   // Native login detection differs by platform; disabling restores the original status.
@@ -126,12 +203,17 @@ test('real RPC discovers gateway models, separates the key and restores native a
     expect(await thrown(phone.call('subscriptionProxy.key', { key: null }))).toThrow('owner');
     expect(await thrown(phone.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: null }))).toThrow('owner');
     expect((await phone.call('providers.probe', { providerId: 'codex', accountId: codex.id })).models).toEqual(b.models);
+    // The phone switches the owner's gateway off, and only that: the address and key stay.
+    expect(await thrown(phone.call('subscriptionProxy.setEnabled', { enabled: 'no' as unknown as boolean }))).toThrow('boolean');
+    expect((await phone.call('subscriptionProxy.setEnabled', { enabled: false })).subscriptionProxy).toEqual({ ...proxy, enabled: false });
   } finally { phone.close(); }
-  await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('codex'))).toEqual({});
   expect(probedModelsOf('codex-appserver', 'codex', codex.id)).toBeNull();
   expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
   expect((await owner.call('quotas.list', {})).some(row => row.accountId === claude.id)).toBe(true);
+  // Back on with the key the owner saved.
+  await owner.call('subscriptionProxy.setEnabled', { enabled: true });
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('claude')).ANTHROPIC_AUTH_TOKEN).toBe(key);
 });
 
 test('a gateway that translates every model keeps proprietary models in their own harness', async () => {
@@ -228,6 +310,25 @@ for (const providerId of ['opencode', 'opencode-v2'] as const) test(`${providerI
   });
   // The account's whole environment carries it, over the descriptor's own inline configuration.
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']).toBe(env['OPENCODE_CONFIG_CONTENT']);
+  // The background compaction experiment turns on OpenCode 2's own, beside the gateway; version 1 has none.
+  await owner.call('settings.set', { backgroundCompaction: true });
+  expect(JSON.parse(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']!)).toEqual(providerId === 'opencode'
+    ? JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)
+    : { ...JSON.parse(env['OPENCODE_CONFIG_CONTENT']!), experimental: { background_compaction: true } });
+  await owner.call('settings.set', { compactionByType: {
+    subagent: { autoCompact: null, backgroundCompaction: false },
+    bot: { autoCompact: null, backgroundCompaction: true },
+  } });
+  const accounts = harness.core.accounts;
+  const accountEnv = (thread: { parentThreadId?: string; agentSessionId?: string }) =>
+    JSON.parse(accounts.accountEnv(accounts.require(account.id), provider, thread)['OPENCODE_CONFIG_CONTENT']!);
+  expect(accountEnv({ parentThreadId: 'parent' })).toEqual(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!));
+  expect(accountEnv({ agentSessionId: 'bot' })).toEqual(providerId === 'opencode'
+    ? JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)
+    : { ...JSON.parse(env['OPENCODE_CONFIG_CONTENT']!), experimental: { background_compaction: true } });
+  // A bot's delegated child uses the child policy even if both markers are present.
+  expect(accountEnv({ agentSessionId: 'bot', parentThreadId: 'parent' })).toEqual(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!));
+  await owner.call('settings.set', { backgroundCompaction: false, compactionByType: {} });
 
   // Off, the descriptor's configuration is all that is left, and the account answers for itself again.
   await owner.call('settings.set', { subscriptionProxy: { ...config(url), enabled: false } });

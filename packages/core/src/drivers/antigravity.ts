@@ -1,7 +1,6 @@
 /**
  * Antigravity's dialect of ACP, ported from T3 Code's `AntigravityProtocol.ts`
- * and cut to what the Boite contract can draw. Two things need fixing and no
- * more:
+ * and cut to what the Boite contract can draw. Three things need fixing:
  *
  * - A tool call's payload. The agent spells a shell call's command, its working
  *   directory and its combined output half a dozen ways, and pads `_meta` and
@@ -13,8 +12,16 @@
  *   than the protocol's allow and reject kinds. The contract has no part for a
  *   free-form question, so the driver draws the permission card it arrived as
  *   and picks the agent's first choice on allow.
+ * - A subagent launch. `invoke_subagent` (`start_subagent` before 1.4.1) is an
+ *   ordinary tool call; its card carries the batch it launched, which the
+ *   Subagents panel lists.
+ *
+ * Its launch environment also names a CA bundle on Linux distributions where
+ * the server's own Python finds none.
  */
+import { isAbsolute } from 'node:path';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
+import type { NativeAgentUpdate, ToolStatus } from '@boite/contracts';
 
 /** A tool's text is bounded at this, the tail kept: the end of a log is the part that matters. */
 const TEXT_LIMIT = 8_000;
@@ -150,10 +157,55 @@ export function normalizeAntigravityTool(
 }
 
 /**
+ * The titles Antigravity gives its subagent launcher, running and asking leave
+ * to run: 1.4.1 renamed the tool `invoke_subagent`, earlier agents call it `start_subagent`.
+ */
+const SUBAGENT_TITLES = new Set(['Running invoke_subagent', 'Run invoke_subagent?', 'Running start_subagent', 'Run start_subagent?']);
+
+/**
+ * What one tool update says about a subagent launch: `subagent` for
+ * Antigravity's `invoke_subagent`, `mcp` for an MCP tool that happens to share
+ * its title, null when the update does not say (a later update carries no
+ * title). The launcher is an ordinary tool: no child ids, names or models.
+ */
+export function antigravitySubagentKind(update: { title?: unknown; kind?: unknown; _meta?: unknown }): 'subagent' | 'mcp' | null {
+  if ((update.kind !== undefined && update.kind !== null && update.kind !== 'other') || typeof update.title !== 'string' || !SUBAGENT_TITLES.has(update.title)) return null;
+  return isPlainObject(update._meta) && update._meta['is_mcp_tool_call'] === true ? 'mcp' : 'subagent';
+}
+
+/**
+ * The batch an `invoke_subagent` call launched, as the Subagents panel draws it.
+ * The call returns once the batch is launched and its output is the launch's
+ * description, not a child's answer: the batch stays running for as long as
+ * the turn does, and once the turn ends its children's state is unknown. Only
+ * a failed launch is final, with its error as the result.
+ */
+export function antigravitySubagentBatch(toolCallId: string, status: ToolStatus, output: string | null): NativeAgentUpdate {
+  const text = output?.trim() ? output.trim().slice(0, 4000) : undefined;
+  if (status === 'error') return { id: toolCallId, status: 'error', ...(text === undefined ? {} : { result: text }) };
+  return { id: toolCallId, status: 'running', ...(text === undefined ? {} : { task: text }) };
+}
+
+/**
  * True when this permission request is really a question the agent is asking.
  * The id is the discriminator Antigravity uses; a request with no options at
  * all is never one, because there would be nothing to answer with.
  */
 export function isAntigravityQuestion(request: RequestPermissionRequest): boolean {
   return request.toolCall.toolCallId.startsWith(QUESTION_PREFIX) && request.options.length > 0;
+}
+
+/** Where Linux distributions keep their CA bundle, NixOS's own variable first. */
+const CA_BUNDLES = ['/etc/ssl/certs/ca-bundle.crt', '/etc/ssl/certs/ca-certificates.crt', '/etc/pki/tls/certs/ca-bundle.crt', '/etc/ssl/cert.pem'];
+
+/**
+ * `SSL_CERT_FILE` for the server's bundled Python on Linux, which looks for
+ * certificates where NixOS keeps none and so cannot reach Google. The first
+ * bundle that exists, by absolute path since the agent runs in the project's
+ * folder. Nothing when the user already names one, or off Linux.
+ */
+export function antigravityCertificates(os: string, env: Record<string, string | undefined>, exists: (path: string) => boolean): Record<string, string> {
+  if (os !== 'linux' || env['SSL_CERT_FILE'] !== undefined || env['SSL_CERT_DIR'] !== undefined) return {};
+  const found = [env['NIX_SSL_CERT_FILE'], ...CA_BUNDLES].find((path) => path !== undefined && isAbsolute(path) && exists(path));
+  return found === undefined ? {} : { SSL_CERT_FILE: found };
 }

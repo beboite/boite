@@ -4,6 +4,9 @@ import type { ProjectId, Timestamp } from './ids';
 // Projects and threads.
 // ---------------------------------------------------------------------------
 
+/** Maximum UTF-16 code units in a renamed display name, keeping journal entries and broadcasts bounded. */
+export const PROJECT_NAME_MAX = 1024;
+
 export interface Project {
   id: ProjectId;
   name: string;
@@ -96,6 +99,8 @@ export interface ProjectsRpcMethods {
 
   'projects.list': { params: Record<string, never>; result: Project[] };
   'projects.add': { params: { path: string; name?: string }; result: Project };
+  /** Change a project's display name without moving its folder. Trimmed names hold 1 to PROJECT_NAME_MAX code units. Paired devices may rename too. Refused for the system drafts project. */
+  'projects.rename': { params: { projectId: ProjectId; name: string }; result: Project };
   /** Owner-only folder navigation on the machine running this core. */
   'projects.browse': {
     params: { path?: string };
@@ -149,6 +154,6 @@ export interface ProjectsRpcEvents {
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
-  /** A project archived or restored, one whose count of archived threads moved, or one whose icon changed. */
+  /** A project renamed, archived or restored, one whose count of archived threads moved, or one whose icon changed. */
   'project.updated': Project;
 }

@@ -3,6 +3,8 @@
 *.ico binary
 *.icns binary
 *.woff2 binary
+*.jar binary
+*.h264 binary
 docker/boite-server text eol=lf
 
 # Keep language statistics focused on TypeScript, Svelte and Rust.

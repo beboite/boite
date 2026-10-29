@@ -2,6 +2,7 @@ import type { ProjectId, RequestId, ThreadId, Timestamp } from './ids';
 import type { PermissionRequest } from './permissions';
 import type { QuestionRequest } from './questions';
 import type { ThreadStatus, ThreadSummary } from './threads';
+import type { ContactCapabilities, SharedProjectRef, SharedThreadRef } from './shared-projects';
 
 export type CoordinationMode = 'off' | 'brief' | 'team';
 export interface CoordinationConfig {
@@ -37,6 +38,8 @@ export interface AgentContact extends AgentAddress {
   projectArchived?: boolean;
   /** Automatic delivery is paused, even when the thread remains discoverable. Missing on older cores. */
   paused?: boolean;
+  /** Only for an explicitly associated project, attested by its owning contact link. */
+  sharedThread?: SharedThreadRef;
 }
 /** A contact whose title, project, branch, model, resources or chat matched a search. */
 export interface AgentMatch extends AgentContact {
@@ -71,8 +74,11 @@ export interface AgentLetter {
    * and tells its parent; it is withdrawn when the card closes before delivery.
    * `contact` is a contact's answer to a request this thread made
    * (`collaboration.ask`), written by this core.
+   * `contact-human` is an authenticated human on the contact's core, attested
+   * by it and checked by the receiver. It is never this owner's instruction
+   * or a tool approval. Requires negotiated humanLetters support.
    */
-  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question' | 'contact';
+  origin?: 'user' | 'agent' | 'result' | 'resident' | 'question' | 'contact' | 'contact-human';
   /**
    * A `result` written when a delegated agent ended its turn to wait on its
    * own background work: what it said so far, not its final result, which
@@ -103,6 +109,8 @@ export interface AgentLetter {
    * the sender's word. Missing on letters between one owner's machines.
    */
   contact?: { coreId: string; name: string };
+  /** Association scope for external shared work, checked by the receiving core. Never owner approval. */
+  sharedProjectId?: string;
   /**
    * How the other end relates to the thread whose view lists this letter.
    * The core sets it when it reads the letter out, never stores it; missing on
@@ -129,6 +137,8 @@ export interface ProjectThreadRow {
   project: string | null;
   status: ThreadStatus;
   archived: boolean;
+  /** Archived as done: it sits in the Done list. */
+  done?: true;
   branch: string | null;
   /** Unanswered questions and permission requests. */
   questions: number;
@@ -136,6 +146,11 @@ export interface ProjectThreadRow {
   pullRequest: ThreadSummary['pullRequest'] | null;
   updatedAt: Timestamp;
   lastCompletedAt: Timestamp | null;
+  /**
+   * The machine of the group the thread is on, as `--machine` names it, when
+   * it is not this one: a bot reaches it as `<machine>/<id>`.
+   */
+  machine?: string;
 }
 export interface ProjectThreadDetail {
   thread: ProjectThreadRow;
@@ -148,12 +163,17 @@ export interface ProjectThreadDetail {
  * What a persistent agent does to a thread of a project entrusted to it.
  * Deleting threads and deciding tool permissions stay the owner's.
  */
-export type ResidentThreadAction = 'archive' | 'unarchive' | 'stop' | 'rename' | 'move';
-/** The calling agent and the projects the owner entrusted to it. Empty when this thread is not such an agent's. */
+export type ResidentThreadAction = 'archive' | 'done' | 'unarchive' | 'stop' | 'rename' | 'move';
+/**
+ * The calling agent and the projects the owner entrusted to it. Empty when
+ * this thread is not such an agent's. A project of another machine of the
+ * group has `machine` set, an id of `<core-id>/<project-id>`, a name of
+ * `<machine>/<name>` and no path.
+ */
 export interface ResidentView {
   agentId: string | null;
   name: string | null;
-  projects: { id: ProjectId; name: string; path: string }[];
+  projects: { id: ProjectId; name: string; path: string; machine?: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
 export interface CoordinationPeer {
@@ -175,15 +195,28 @@ export interface CoordinationBridgeResponse { status: number; body: string; sign
  * read as 2. `modelTier` in the core decides from the provider and model id.
  */
 export type ModelTier = 1 | 2 | 3;
-/** A project this core opened to a contact: the contact's agents reach its threads. */
+/**
+ * A project this core opened to a contact: the contact's agents reach its
+ * threads. The project may live on another machine of this core's group,
+ * which this core answers for: the contact never sees that machine.
+ */
 export interface ContactGrant {
   projectId: ProjectId;
   /** Agents of the contact may read this project's conversations, text and tool names. Off by default. */
   readThreads: boolean;
   grantedAt: Timestamp;
+  /** The core id of the group member that holds the project. Missing: this core's own project. */
+  machine?: string;
+  /** The project's name on that member when it was opened: this core cannot read the member's projects. Set with `machine`. */
+  name?: string;
 }
 /** A project the contact opened to this core, as the contact's core announced it. */
-export interface ContactOffer { projectId: ProjectId; name: string }
+export interface ContactOffer {
+  projectId: ProjectId;
+  name: string;
+  /** Selected endpoint identity for shared-project version 1; absence cannot be guessed from a bare ID. */
+  sharedProject?: SharedProjectRef;
+}
 /**
  * Another owner's Boite, linked for agent work on the projects each side opens
  * to the other. A contact never sees this core's other projects, its group or
@@ -213,14 +246,26 @@ export interface Contact {
   link: 'connected' | 'connecting' | 'offline';
   lastSeenAt: Timestamp | null;
   addedAt: Timestamp;
+  /** Negotiated on the sealed contact sync, never inferred from a version string. Missing: legacy contact traffic only. */
+  capabilities?: ContactCapabilities;
 }
 /** An invitation a contact joins with. One use; whoever holds it can join, so it travels like a password. */
 export interface ContactInvite {
   /** `boite://contact#...`: this core's identity, its tailnet URL and the Tailscale share link. */
   link: string;
   expiresAt: Timestamp;
-  /** The Tailscale share of this machine, made through the owner's API key, or the reason it was not. */
-  share: { status: 'created'; url: string } | { status: 'manual'; reason: string };
+  /**
+   * The Tailscale share of this machine, made through the owner's API key, or
+   * the reason it was not. `none`: the invitee already reaches this machine on
+   * Tailscale (same tailnet, or shared before), so nothing was shared.
+   */
+  share: { status: 'created'; url: string } | { status: 'manual'; reason: string } | { status: 'none' };
+  /**
+   * How the invitee reaches this machine: `tailnet` by its tailnet name, or
+   * `internet` by its contact routes on Tailscale Funnel. Absent from older
+   * cores, which only make `tailnet` links.
+   */
+  via?: 'tailnet' | 'internet';
 }
 /**
  * A contact asks for an agent on a project of this core ("a project like X"),
@@ -265,6 +310,23 @@ export interface ContactTailscale {
   /** The policy lines to add when it is `open`, ready to paste. */
   policyFix?: string;
 }
+/**
+ * Where the internet stands with the contact routes on Tailscale Funnel:
+ * `checking` before the first answer, `ready` once a request from the
+ * internet reached this core, `unpublished` while public DNS does not know
+ * the name yet, `unreachable` when the name resolves but the request does not
+ * arrive, `unknown` when no public resolver answered.
+ */
+export type ContactFunnelStatus = 'checking' | 'ready' | 'unpublished' | 'unreachable' | 'unknown';
+/** The contact routes on Tailscale Funnel, checked from the internet while they are up. */
+export interface ContactFunnelState {
+  /** Their public origin, `https://<machine>.<tailnet>.ts.net:<port>`. */
+  url: string;
+  status: ContactFunnelStatus;
+  checkedAt: Timestamp | null;
+  /** Still unpublished long after it was turned on, Funnel was turned off and on again: Tailscale publishes the name then. */
+  repaired: boolean;
+}
 export interface ContactsState {
   self: { coreId: string; machine: string };
   contacts: Contact[];
@@ -272,6 +334,16 @@ export interface ContactsState {
   requests: ContactRequest[];
   settings: ContactSettings;
   tailscale: ContactTailscale;
+  /** Invitations neither used nor expired. Absent from older cores. */
+  invitations?: number;
+  /**
+   * This core makes invitations for another network (`contacts.invite` with
+   * `internet`). Absent from older cores, which read only `share` and would
+   * share the machine instead.
+   */
+  internet?: boolean;
+  /** The contact routes on Tailscale Funnel while they are up, null otherwise. Absent from older cores. */
+  funnel?: ContactFunnelState | null;
 }
 export interface CoordinationView {
   self: AgentAddress;
@@ -303,20 +375,30 @@ export interface CoordinationRpcMethods {
    * The calling persistent agent and the projects entrusted to it. The
    * `resident.*` methods name the agent's own direct conversation as
    * `threadId`; the core holds them to the projects of its profile.
+   * `machine` names another machine of the group (name or core id prefix):
+   * the call goes there over the group's sealed link, and that machine
+   * answers only while its own `groupBots` setting is on. One that does not
+   * answer fails as unavailable, never as an empty list.
    */
   'resident.view': { params: { threadId: ThreadId }; result: ResidentView };
   /** The threads of its projects, the most recently active first. `project` narrows to one (id, name or folder). */
-  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: ProjectThreadRow[] };
+  'resident.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean; machine?: string }; result: ProjectThreadRow[] };
   /** One thread of its projects, with its pending questions, permissions and last answer. */
-  'resident.thread': { params: { threadId: ThreadId; target: ThreadId }; result: ProjectThreadDetail };
+  'resident.thread': { params: { threadId: ThreadId; target: ThreadId; machine?: string }; result: ProjectThreadDetail };
   /**
    * Act on a thread of its projects: `rename` takes `title`, `move` takes
    * `project` (another project entrusted to it). Every action leaves a system
    * line in the target's timeline naming the agent.
    */
-  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string }; result: { thread: ProjectThreadRow } };
+  'resident.act': { params: { threadId: ThreadId; target: ThreadId; action: ResidentThreadAction; title?: string; project?: string; machine?: string }; result: { thread: ProjectThreadRow } };
   /** Answer or skip a pending question of a thread of its projects, marked as the agent's in that timeline. */
-  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
+  'resident.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean; machine?: string }; result: { ok: true } };
+  /**
+   * A message to a thread of its projects on another machine of the group,
+   * marked there as the bot's, never as the user's. A thread here takes
+   * `collaboration.send`. `requestId` makes a retry deliver it once.
+   */
+  'resident.send': { params: { threadId: ThreadId; machine: string; target: ThreadId; text: string; requestId: string }; result: { id: string; status: 'received' } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
@@ -330,16 +412,36 @@ export interface CoordinationRpcMethods {
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
   /** Contacts, requests, settings and the Tailscale state. Owner only. */
   'contacts.get': { params: Record<string, never>; result: ContactsState };
-  /** A one-time invitation, valid 24 hours. Creates the Tailscale share when an API key is stored. Owner only. */
-  'contacts.invite': { params: Record<string, never>; result: ContactInvite };
-  /** Joins with an invitation: this core dials the host, checks its key and keeps the link open. Owner only. */
+  /**
+   * A one-time invitation, valid 24 hours. Creates the Tailscale share when an
+   * API key is stored, unless `share` is false: the invitee already reaches
+   * this machine on Tailscale. `internet`: the invitee is on another network
+   * (Headscale, none), so the link names Boite's contact routes on Tailscale
+   * Funnel and shares nothing. Owner only.
+   */
+  'contacts.invite': { params: { share?: boolean; internet?: boolean }; result: ContactInvite };
+  /**
+   * Spends every open invitation unused: a link already sent, or one that
+   * leaked, joins nothing any more. Contacts already joined stay. Owner only.
+   */
+  'contacts.cancelInvites': { params: Record<string, never>; result: { cancelled: number } };
+  /**
+   * Joins with an invitation: this core dials the host, checks its key and
+   * keeps the link open. A host on Tailscale Funnel whose name public DNS
+   * does not know yet is refused with `data.retryAfterMs`: the invitation is
+   * unspent and the same call may be made again then. Owner only.
+   */
   'contacts.join': { params: { link: string }; result: Contact };
   /** Rename a contact or mark it trusted. Owner only. */
   'contacts.update': { params: { coreId: string; name?: string; trusted?: boolean }; result: Contact };
-  /** Open a project to a contact, or change its read grant. Owner only. */
-  'contacts.grant': { params: { coreId: string; projectId: ProjectId; readThreads?: boolean }; result: Contact };
-  /** Close a project to a contact: its pending letters to that project are rejected. Owner only. */
-  'contacts.revoke': { params: { coreId: string; projectId: ProjectId }; result: Contact };
+  /**
+   * Open a project to a contact, or change its read grant. `machine`: the core
+   * id of the group member that holds the project, asked for its name; missing
+   * or this core's own id for a project of this core. Owner only.
+   */
+  'contacts.grant': { params: { coreId: string; projectId: ProjectId; readThreads?: boolean; machine?: string }; result: Contact };
+  /** Close a project to a contact: its pending letters to that project are rejected. `machine` as for `contacts.grant`. Owner only. */
+  'contacts.revoke': { params: { coreId: string; projectId: ProjectId; machine?: string }; result: Contact };
   /** Forget a contact: every grant ends, pending letters are rejected and the link closes. Owner only. */
   'contacts.remove': { params: { coreId: string }; result: { ok: true } };
   /** Accept a request by opening `projectId`, or refuse it with a reason sent back to the asking agent. Owner only. */

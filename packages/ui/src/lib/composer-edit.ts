@@ -1,4 +1,4 @@
-import type { Attachment, Message, PreviewReference } from '@boite/contracts';
+import { attachmentError, previewReferencesError, type Attachment, type Message, type PreviewReference } from '@boite/contracts';
 import { emptyBox, returnPrompt, sentPrompt, type ComposerState } from './composer-queue';
 import type { Store } from './store.svelte';
 import { strings } from './strings';
@@ -16,6 +16,12 @@ export async function rewindComposerEdit(
   const editing = state.editing;
   if (!editing) return { local: null };
   if (state.queued.length) { store.error = strings.composer.editingQueued; return false; }
+  const thread = store.openThread;
+  if (thread?.id !== key) return false;
+  const provider = store.providerOf(thread.providerId);
+  if (!provider) { store.reportError(strings.composer.editUnavailable); return false; }
+  const invalid = attachmentError(attachments, provider)?.message ?? previewReferencesError(previewReferences, prompt);
+  if (invalid) { store.reportError(invalid); return false; }
   const local = store.stageSend(key, prompt, attachments, previewReferences);
   emptyBox(state);
   state.editing = null;
@@ -35,7 +41,8 @@ export async function rewindComposerEdit(
 /**
  * The last turn again from its own prompt: the answer leaves the screen and
  * the prompt shows as sent at once, then the core rewinds and the prompt goes
- * out. A send that fails after the rewind leaves the prompt in the box.
+ * out. A send that fails after the rewind leaves the prompt in the box, or,
+ * behind words typed meanwhile, held at the head of the queue.
  */
 export async function retryTurn(store: Store, threadId: string, prompt: Message): Promise<void> {
   const again = sentPrompt(prompt);
@@ -44,5 +51,8 @@ export async function retryTurn(store: Store, threadId: string, prompt: Message)
   const sent = rewound ? await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences) : false;
   if (sent) return;
   if (local) store.unstageSend(local);
-  if (rewound) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
+  if (!rewound) return;
+  const state = store.composerStates[threadId];
+  if (state?.text || state?.attachments.length || state?.previewReferences?.length) returnPrompt(state, rewound.prompt, rewound.attachments, rewound.previewReferences);
+  else store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
 }

@@ -1,6 +1,7 @@
 import type { Message, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
+import { isAgentHeld } from '../agents/runtime.ts';
 import type { ThreadStore } from '../threads.ts';
 import { MemoryNotices } from './memory-notices.ts';
 import { newId } from '../ids.ts';
@@ -27,6 +28,8 @@ export class DeferredInput {
   readonly consumed = new Map<ThreadId, string>();
   /** A driver asked for a background turn while the thread's last turn was still closing. */
   readonly pendingWakes = new Map<ThreadId, string>();
+  /** What background work wrote while a persistent agent was held (paused, out of budget): one turn once it may run. */
+  private readonly heldWakes = new Map<ThreadId, string[]>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     this.memory = new MemoryNotices(core, threads);
@@ -38,7 +41,6 @@ export class DeferredInput {
    * sent as a prompt of its own when the thread is idle.
    */
   deliverAnswer(threadId: ThreadId, text: string): void {
-    if (this.enqueueResident(threadId, text)) return;
     this.defer(threadId, text);
     const handle = this.threads.runner.handles.get(threadId);
     if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
@@ -111,7 +113,7 @@ export class DeferredInput {
     const held = this.deferredAnswers.get(threadId);
     const thread = this.core.journal.getThread(threadId);
     if (held === undefined || thread === null || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
+    if (this.threads.isBusy(threadId) || this.threads.runner.steering.has(threadId)) return;
     this.deferredAnswers.delete(threadId);
     try {
       this.threads.startTurn(threadId, held.join('\n\n'));
@@ -164,30 +166,24 @@ export class DeferredInput {
   wake(threadId: ThreadId, text: string): void {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null || thread.archived) return;
-    if (this.enqueueResident(threadId, text)) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId)) {
+    if (this.threads.isBusy(threadId)) {
       // The turn that ended is still being saved: open this one right after it.
       this.pendingWakes.set(threadId, text);
       return;
     }
     try {
-      this.threads.startTurn(threadId, text, [], undefined, 'background');
+      this.threads.startTurn(threadId, text, { kind: 'background' });
     } catch (error) {
+      if (isAgentHeld(error)) {
+        this.heldWakes.set(threadId, [...this.heldWakes.get(threadId) ?? [], text]);
+        this.core.agentRuntime.whenAdmitted(threadId, 'background', () => {
+          const held = this.heldWakes.get(threadId) ?? [];
+          this.heldWakes.delete(threadId);
+          if (held.length) this.wake(threadId, held.join('\n\n'));
+        });
+        return;
+      }
       this.core.log('warn', `thread ${threadId}: the agent resumed on its own but no turn could open: ${messageOf(error)}`);
     }
-  }
-
-  private enqueueResident(threadId: ThreadId, text: string): boolean {
-    const thread = this.core.journal.getThread(threadId);
-    if (!thread?.agentSessionId || thread.archived) return false;
-    // A resident thread never falls back to a direct turn: a refused session only logs.
-    try {
-      const session = this.core.workforce.session(threadId);
-      this.core.workforce.resident.enqueue(session.agentId, text, session.scope);
-      this.core.workforce.changed();
-    } catch (error) {
-      this.core.log('warn', `thread ${threadId}: resident work was not queued: ${messageOf(error)}`);
-    }
-    return true;
   }
 }

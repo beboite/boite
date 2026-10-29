@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { workspace } from '../lib/workspace.svelte';
   import { untrack } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
+  import { subscriptionProxyName, type AccountQuota, type QuotaAlertPeriod } from '@boite/contracts';
+  import { errorText } from '../lib/errors';
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
@@ -10,9 +12,13 @@
   import { gatewayReader, namedQuotas, quotaProviderOff, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { desktopSettings } from '../lib/settings-tabs';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
   import GatewayOpenButton from './GatewayOpenButton.svelte';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
+  import GatewaySwitch from './GatewaySwitch.svelte';
+  import QuotaPin from './QuotaPin.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -22,10 +28,15 @@
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
   const uid = $props.id();
+  /** Providers is a desktop settings page and the owner's: a phone is offered no way to it. */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && desktopSettings(phoneWidth.current));
   let native = $state(false);
   const proxy = $derived(store.settings?.subscriptionProxy);
   const proxyEnabled = $derived(proxy?.enabled === true);
   const proxyName = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
+  /** Who answers for the limits: the gateway's kind, or this machine's own logins. */
+  const route = $derived(proxyEnabled ? proxy!.kind : 'native');
 
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here', store.core));
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
@@ -58,6 +69,8 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
+    // The switch above can hand the limits to the gateway or back: read again then too.
+    void route;
     if (!client || store.connection !== 'ready' || dashboard) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
@@ -85,6 +98,13 @@
     if (!ok) input.checked = store.settings?.autoResumeLimitedThreads === true;
   }
 
+  /** A device may set alerts too: they decide when a window it already reads notifies. */
+  async function alert(accountId: string, period: QuotaAlertPeriod, thresholds: number[]) {
+    if (!store.client) return;
+    try { await reader.alert(store.client, accountId, period, thresholds); }
+    catch (error) { store.error = fill(strings.quotas.alertFailed, { error: errorText(error) }); }
+  }
+
   async function monitor(accountId: string, enabled: boolean) {
     if (!store.client) return;
     try { await reader.configure(store.client, accountId, enabled); }
@@ -98,12 +118,14 @@
   {:else}
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
+    <QuotaPin />
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />
       </button>
     {/if}
   </header>
+  <GatewaySwitch {store} />
   {#if proxyEnabled}<div class="actions proxy-switch">
     {#if !gatewayNative}<button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button>{/if}
     <GatewayOpenButton {store} />
@@ -125,7 +147,7 @@
     {#each gatewayGroups as group (group.providerId)}
       <section class="gateway-group" data-testid="gateway-quotas" data-provider={group.providerId}>
         <h2 class="group-head"><ProviderLogo providerId={group.providerId} size={16} /><span class="ui-label">{group.name}</span><small class="ui-label">{fill(strings.subscriptionProxy.via, { name: proxyName })}</small></h2>
-        <UsageLimits rows={group.rows} {store} loading={reader.busy} completed={reader.landed} />
+        <UsageLimits rows={group.rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />
       </section>
     {/each}
     {#if gateway.state?.status === 'ready' && gatewayGroups.length === 0 && shown !== null}
@@ -144,14 +166,14 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      {#if store.owner}<button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
+      {#if providersReachable}<button type="button" onclick={() => workspace.active.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>{/if}
     </div>{/if}
   {:else}
-    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} />{/if}
+    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} onalert={alert} />{/if}
     {#if store.owner}<section class="card tracked" data-testid="limits-tracked">
       <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
-        {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
+        {@const account = row.label}
         {@const entry = store.accounts?.find((entry) => entry.id === row.accountId)}
         <div class="tracked-account" data-testid="tracked-account" data-account-id={row.accountId}>
           <label class="track-row">
