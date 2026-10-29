@@ -186,6 +186,7 @@ export interface DelegationView {
   /** Provider children and traced CLI agents, including earlier message pages and process history. */
   nativeAgents: NativeAgent[];
   messages: AgentLetter[];
+  /** Turns admitted for the team on the parent's machine; remote turns are accounted on their own machine. */
   turnsUsed: number;
   usage: Usage;
 }

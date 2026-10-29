@@ -51,9 +51,10 @@ export const USAGE = `usage: boite <command> [args] [--json]
                                  id or folder) when this turn ends
   thread new <project> <brief>   start a thread in a project; its first answer
                                  comes back to you (--worktree, --title <title>,
-                                 --machine <name>: on another machine of the
-                                 group, in a project there, once its owner
-                                 lets the group start threads there; --model
+                                 --machine <name> from an agent thread: on
+                                 another machine of the group, in a project
+                                 there, once its owner allows it. From a
+                                 terminal use --core <url>; --model
                                  <provider/model>, --effort <level>, --speed
                                  <tier> from boite delegate models, with the
                                  same --machine for that machine's; refused

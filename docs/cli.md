@@ -384,7 +384,10 @@ archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
 and `thread new` need no `--thread` from a terminal. There they use the owner
 methods: `thread send` is the owner's own prompt, queued behind a running turn,
 and `thread new` copies the agent of `--thread`, else of the project's most
-recent thread (`--model` replaces the model). Inside the thread of
+recent thread (`--model` replaces the model, while `--effort` and `--speed`
+set its reasoning level and service tier). From a terminal, use `--core`
+to reach another machine; `--machine` is for an agent inside a thread.
+Inside the thread of
 a [bot](bots.md#projects-entrusted-to-a-bot) the same words
 reach the threads of the projects the owner entrusted to it and the threads
 it started in any project, through `resident.*`, and its messages reach them as that bot's letters, never as the

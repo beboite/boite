@@ -476,7 +476,8 @@ export async function ownerThreadNew(client: CoreClient, parsed: Parsed, rest: s
   const model = parsed.model ?? base.model ?? undefined;
   const created = await client.call('threads.create', {
     projectId: project.id, providerId: base.providerId, accountId: base.accountId, title: parsed.title ?? prompt.trim().split('\n')[0]!.slice(0, 80),
-    ...(model === undefined ? {} : { model }), effort: parsed.model === undefined ? base.effort : null, permissionMode: base.permissionMode,
+    ...(model === undefined ? {} : { model }), effort: parsed.effort ?? (parsed.model === undefined ? base.effort : null), permissionMode: base.permissionMode,
+    ...(parsed.speed === undefined ? {} : { speed: parsed.speed }),
     ...(parsed.worktree ? { worktree: {} } : {}), ...(context === undefined ? {} : { context: context as RpcParams<'threads.create'>['context'] }),
   });
   const turn = await client.call('turns.start', { threadId: created.id, prompt, clientRequestId: parsed.requestId ?? crypto.randomUUID() });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV } from '@boite/contracts';
 import { runCli, splitLine } from '../src/cli.ts';
@@ -89,6 +89,36 @@ test('server checks need no thread as owner and remain forbidden to thread agent
   expect(JSON.parse(out).currentVersion).toBe(harness.core.version);
   const agent = await boite(['server', 'update']);
   expect(agent.code).toBe(1); expect(agent.err).toContain('core.updateStatus');
+});
+
+test('owner thread new forwards explicit effort and speed, and refuses unavailable tiers', async () => {
+  const provider = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8'));
+  provider.id = 'cli-echo';
+  mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(harness.dataDir, 'providers', 'cli-echo.json'), JSON.stringify(provider));
+  const owner = await harness.connect();
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  harness.core.providers.get('cli-echo')!.models[0]!.speeds = [{ id: 'fast', label: 'Fast' }];
+  harness.core.accounts.ensureDefaults();
+  const account = harness.core.accounts.list().find(row => row.providerId === 'cli-echo')!;
+  const source = await owner.call('threads.create', { projectId: harness.core.threads.require(threadId).projectId!, providerId: 'cli-echo', accountId: account.id });
+  const terminal = async (flags: string[]) => {
+    let out = '', err = '';
+    const code = await runCli(['thread', 'new', 'test', 'Plan the release', '--core', harness.url, '--thread', source.id, '--json', ...flags], {
+      out: text => { out += text; }, err: text => { err += text; }, env: { BOITE_TOKEN: harness.token }, cwd,
+    });
+    return { code, out, err };
+  };
+  const created = await terminal(['--effort', 'low', '--speed', 'fast']);
+  expect([created.code, created.err]).toEqual([0, '']);
+  expect(JSON.parse(created.out).thread).toMatchObject({ effort: 'low', speed: 'fast' });
+  const before = harness.core.journal.listThreads().length;
+  const invalid = await terminal(['--speed', 'missing']);
+  expect(invalid.code).toBe(1);
+  expect(invalid.err).toContain('the model does not offer this speed');
+  expect(harness.core.journal.listThreads()).toHaveLength(before);
+  const remote = await terminal(['--machine', 'another']);
+  expect(remote.err).toContain('from a terminal, reach that machine with --core');
 });
 
 test('threads commands discover, send and reply using the calling thread identity, and the old agents spelling still answers', async () => {

@@ -87,9 +87,14 @@ async function twinProvider(h: TestCore, owner: CoreClient): Promise<void> {
 
 test('a subagent on another machine runs on the parent\'s model there, or on the one named from that machine\'s list, in the project named like the parent\'s', async () => {
   const { prompts } = answering();
-  const { desk, pc, pcOwner, threadId, notes, notesPath, machine, cli, spawn, childrenOnPc } = await setup();
+  const { desk, pc, owner, pcOwner, threadId, notes, notesPath, machine, cli, spawn, childrenOnPc } = await setup();
   await twinProvider(pc, pcOwner);
   const parent = desk.core.threads.require(threadId);
+  const config = desk.core.delegation.config(threadId);
+  await owner.call('delegation.configure', { threadId, config: { ...config, anyModel: false } });
+  expect((await owner.call('delegation.models', { threadId, machine })).anyModel).toBe(false);
+  await owner.call('delegation.configure', { threadId, config });
+  expect((await owner.call('delegation.models', { threadId, machine })).anyModel).toBe(true);
 
   // Without --project it takes the project of that machine named like the parent's; the PC has none.
   const unnamed = await cli(['delegate', 'spawn', 'Read the notes', '--machine', machine, '--request-id', 'model-0']);
@@ -562,6 +567,7 @@ test('a restart of the child\'s machine keeps the child at work for its parent u
   // Before, the parent read that cut as the child's final stop, with a result to collect.
   expect(seen(child.thread.id).state?.restarting).toBe(true);
   expect(desk.core.delegation.remote.busy(threadId)).toBe(true);
+  expect((await owner.call('delegation.get', { threadId })).settlement).toBe('waiting_for_children');
   expect((await agent(child.thread.id)).resultRef).toBeUndefined();
   expect(await owner.call('delegation.wait', { threadId, agentId: child.thread.id, timeoutMs: 0 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
   expect(await owner.call('delegation.wait', { threadId, timeoutMs: 0 })).toMatchObject({ state: 'waiting_for_children', timedOut: true });
@@ -583,4 +589,5 @@ test('a restart of the child\'s machine keeps the child at work for its parent u
     expect((await agent(id)).resultRef?.turnId).toBe(cut);
   }
   expect(desk.core.delegation.remote.busy(threadId)).toBe(false);
+  expect((await owner.call('delegation.get', { threadId })).settlement).toBe('settled');
 });

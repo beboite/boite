@@ -231,7 +231,7 @@ export class Delegation {
     const letters = (threadId === root.id
       ? this.#core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.#core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
-    return { rootThreadId: root.id, settlement: agents.some(agent => (agent.lastTurn && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting') ? 'waiting_for_children' : 'settled', config: this.config(root.id), agents, nativeAgents: nativeAgents(this.#core.journal, threadId, this.#core.threads.agentState.background.get(threadId), this.#core.procs.liveOf(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.#used(root.id), usage };
+    return { rootThreadId: root.id, settlement: this.remote.busy(root.id) || agents.some(agent => (agent.lastTurn && ['queued', 'running'].includes(agent.lastTurn.status)) || agent.thread.backgroundWait?.state === 'waiting') ? 'waiting_for_children' : 'settled', config: this.config(root.id), agents, nativeAgents: nativeAgents(this.#core.journal, threadId, this.#core.threads.agentState.background.get(threadId), this.#core.procs.liveOf(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.#used(root.id), usage };
   }
   resultPage(params: RpcParams<'delegation.result'>) { return delegatedResultPage(this.#core, params); }
   wait(params: RpcParams<'delegation.wait'>, connection?: Connection) { return this.waits.wait(params, connection); }
@@ -348,7 +348,7 @@ export class Delegation {
    */
   async models(threadId: string, probe: ProviderProbe, machine?: string): Promise<DelegationModels> {
     const parent = this.#root(threadId);
-    if (machine !== undefined) return memberModels(this.#core, parent, memberNamed(this.#core, text(machine, 'delegation.models.machine', 128).trim(), 'delegation.models'));
+    if (machine !== undefined) return { ...await memberModels(this.#core, parent, memberNamed(this.#core, text(machine, 'delegation.models.machine', 128).trim(), 'delegation.models')), anyModel: anyModel(this.config(parent.id)) };
     const failures = await discover(this.#core, probe, parent);
     const { choices, unavailable } = catalog(this.#core, parent);
     const failed = new Set(failures.map(f => f.providerId));
