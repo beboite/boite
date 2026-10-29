@@ -1,5 +1,5 @@
 import { RELEASE_VERSION } from '../release';
-import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
+import { parseGroupRelayUrl, RpcErrorCode, type CoreInfo, type ListCursor, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { deviceLabel, noteThisComputer } from '../device';
@@ -15,6 +15,7 @@ import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
 import { SETTINGS_TABS, type SettingsTab } from '../settings-tabs';
 import { retainRows } from './snapshot-reads';
+import { applyThreadChanges, readThreadList } from './thread-list';
 
 /**
  * The version a paired device reports in `hello` and Settings lists beside it.
@@ -79,6 +80,16 @@ export class Connection {
   /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
   reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
   #readEpoch = 0;
+  /**
+   * Where the last thread list applied here left this client: the next load
+   * on the same client, a reconnect, reads only what changed since. A new
+   * client or `detach` (a new generation) reads whole again, and so does the
+   * load after a list that left rows to newer reads: those may give them up,
+   * and are rare enough that a whole list costs less than following them.
+   */
+  #threadList: { client: Client; generation: number; cursor: ListCursor } | null = null;
+  /** Moves each time a list keeps no cursor, so a list asked before then keeps none either. */
+  #listDrops = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
   /** Moves on every stop, so an ask still out from an earlier loss never reschedules. */
   #recoveryGeneration = 0;
@@ -604,12 +615,14 @@ export class Connection {
     const revisions = { ...this.ctx.metadataRevision };
     const projectRead = this.ctx.projectReads.begin();
     const threadRead = this.ctx.threadReads.begin();
+    const lastList = this.#threadList;
+    const listDrops = this.#listDrops;
     const accountRead = this.ctx.accountReads.begin();
     // The global reads also serve the reopen, avoiding duplicate per-thread reads.
     const permissionRead = requests.permissionRead(client, 'all');
     const questionRead = requests.questionRead(client, 'all');
     const open = s.openThread;
-    const reopened = open && s.visible ? s.open(open.id, false, { requests: false }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
+    const reopened = open && s.visible ? s.open(open.id, false, { requests: false, listed: true }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
     const secretRead = requests.secretRead(client, 'all', async () => {
       await reopened;
       const visible = requests.secretParts(s.openThread);
@@ -628,8 +641,13 @@ export class Connection {
         this.ctx.projects.bootListAt = Date.now();
         void this.ctx.projects.sendPendingArchives(rows);
       }, () => projectRead.cancel()),
-      slice(client.call('threads.list', {}), rows => {
-        s.threads = reconcileRows(s.threads, threadRead.apply(rows, s.threads));
+      slice(readThreadList(client, this.core, lastList?.client === client && lastList.generation === generation ? lastList.cursor : null), answer => {
+        const fresh = answer.kind === 'full' ? answer.threads : applyThreadChanges(s.threads, answer.threads, answer.removed);
+        const applied = threadRead.active;
+        s.threads = reconcileRows(s.threads, threadRead.apply(fresh, s.threads));
+        const kept = applied && answer.cursor && !threadRead.deferred && listDrops === this.#listDrops;
+        this.#threadList = kept ? { client, generation, cursor: answer.cursor! } : null;
+        if (!kept) this.#listDrops += 1;
         const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
         if (read) read.unread = false;
         const listed = new Set(s.threads.map(t => s.threadKey(t.id)));

@@ -54,6 +54,8 @@ export interface CoreInfo {
     contactHumanLetters?: 1;
     /** `group.settingsHome` and `Group.settingsHome`: one member's settings, chosen for the whole group, that the others follow. */
     settingsHome?: boolean;
+    /** `threads.listChanges`: a reconnect reads only the threads that changed while it was away. */
+    listChanges?: boolean;
   };
   /** The fingerprint of this core's identity key: the id its group knows it by, and the one a device signs its hello for. */
   coreId?: string;

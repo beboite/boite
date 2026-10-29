@@ -614,6 +614,27 @@ when the core advertises `chunkedAnswers`.
   only the fields that changed are written, so the sidebar redraws the rows that
   moved and no others. A `thread.load` sample patches the row's `load` alone,
   about 4x fewer bytes than the whole row an older client still gets.
+- A reconnect to the same running core reads only the sidebar rows that changed
+  while the socket was down (`threads.listChanges`, `features.listChanges`).
+  The core counts every committed `thread.created`, `thread.updated` and
+  `thread.removed` in a log of the last 4096 thread ids
+  (`LIST_CHANGES_IDS`, `packages/contracts/src/list-changes.ts`), under a run id
+  minted at each start. The client keeps the cursor of its last applied list and
+  sends it back; the answer holds the unarchived threads changed since, every
+  thread with live processes, with its load, and the ids deleted or archived
+  since. A held row left out keeps its fields and loses its load. The first
+  connection, a core restart (another run), a cursor older than the log, a new
+  client and an older core without the method all read the whole list as
+  before, an older core with no error shown. The delta is what a client that
+  stayed connected heard: a summary the core changed without its event is not
+  repaired by a reconnect. 2000 idle rows plus one pinned while away, UI test
+  `store-reconnect-list.test.ts` (2026-10-28): 1,088,237 bytes of list before,
+  1,320 bytes after. The core test `thread-list-changes.test.ts` measures the
+  same over the real journal with 2001 threads: 1,627,666 bytes whole, 869
+  after.
+  The other boot reads stay whole: the projects list is about 15 rows and is
+  recomputed from git and archived counts that no event announces, and the
+  pending cards, secrets and settings are small.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
