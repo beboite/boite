@@ -60,27 +60,34 @@ test('a configured shared reviewer records a reasoned legitimate verdict lazily'
   expect(calls()).toBe(1);
 }, 30000);
 
-test('one watched directory read finishes its review without triggering another directory read', async () => {
+test.each([0, 300])('one watched directory read finishes its review without triggering another directory read (notification delay %i ms)', async delay => {
   const {a,b,id,configure}=await fixture();
+  const subscriptions=b.h.core.sharedProjects.subscriptions;
+  const changed=subscriptions.changed.bind(subscriptions);
+  // A slow configuration notification must not be mistaken for review feedback.
+  subscriptions.changed=(...args)=>{if(args[1].includes('threads')) setTimeout(()=>changed(...args),delay);else changed(...args);};
   const calls=reviewer('{"verdict":"legitimate","reason":"Allowed scoped read."}');
   const scope={threadId:a.threadId,sharedProjectId:id};
   await a.client.call('sharedProjects.subscribe',{...scope,enabled:true});
-  await configure();
-  await new Promise(resolve=>setTimeout(resolve,200));
-  let reads=0,watching=true;
+  let reads=0,watching=false,configured=false,reviewed=false;
   const off=a.client.on('sharedProjects.changed',change=>{
-    if(watching && change.sharedProjectId===id && (!change.kinds||change.kinds.includes('threads'))) {
-      reads++;
-      void a.client.call('sharedProjects.threads',scope).catch(()=>undefined);
+    if(change.sharedProjectId!==id) return;
+    if(!change.kinds||change.kinds.includes('threads')) {
+      if(!watching) configured=true;
+      else {reads++;void a.client.call('sharedProjects.threads',scope).catch(()=>undefined);}
     }
+    if(watching && change.kinds?.includes('access') && !b.h.core.sharedReview.busy && b.h.core.sharedAccess.get({threadId:b.threadId,sharedProjectId:id}).verdicts.length>0) reviewed=true;
   });
   try {
+    await configure();
+    await waitFor(()=>configured);
+    subscriptions.changed=changed;
+    watching=true;
     await a.client.call('sharedProjects.threads',scope);
-    await waitFor(()=>calls()>0&&!b.h.core.sharedReview.busy);
-    await new Promise(resolve=>setTimeout(resolve,250));
+    await waitFor(()=>reviewed);
     expect(calls()).toBe(1);
     expect(reads).toBe(0);
-  } finally {watching=false;off();}
+  } finally {watching=false;subscriptions.changed=changed;off();}
 },30000);
 
 test('review configuration stays host-owner only and never widens the peer grant', async () => {
