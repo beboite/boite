@@ -12,11 +12,21 @@
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "@opencode/cli" },
       "executable": [
+        { "kind": "file", "value": "{agentsDir}/package/bin/opencode.exe" },
         { "kind": "file", "value": "{npmRoot}/@opencode/cli/bin/opencode.exe" },
         { "kind": "path", "value": "opencode2" },
         { "kind": "path", "value": "opencode", "major": 2 },
         { "kind": "file", "value": "{home}/.opencode/bin/opencode.exe", "major": 2 }
       ],
+      "install": {
+        "arch": "x64",
+        "version": "2.2.0",
+        "format": "tgz",
+        "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.2.0.tgz",
+        "sha256": "e5b387b4d2af88ffbd689ac84d35b71462072651f7529ab0f36721e35ba859bf",
+        "archiveBytes": 118650212,
+        "files": [{ "path": "package/bin/opencode.exe", "bytes": 253303688 }]
+      },
       "launch": { "args": ["acp"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe"] }

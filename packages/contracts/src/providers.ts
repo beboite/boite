@@ -44,8 +44,11 @@ export interface ExecutableCandidate {
 export interface ProviderInstall {
   /** A version string shown to the user and written beside the files. */
   version: string;
-  /** Omitted for zip archives; binary downloads contain exactly one file. */
-  format?: 'zip' | 'binary';
+  /**
+   * Omitted for zip archives; binary downloads contain exactly one file; `tgz`
+   * is a gzipped tar, the shape of an npm package tarball.
+   */
+  format?: 'zip' | 'binary' | 'tgz';
   /** The archive or executable download. */
   url: string;
   sha256: string;
