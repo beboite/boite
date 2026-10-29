@@ -147,6 +147,8 @@ ${CONTROL_HELP}
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
+  goal track                     a reviewed goal and checklist on the user's
+                                 last prompt (the Automatic goals experiment)
   threads find <words>           locate threads by words of their chat, title,
                                  project, branch or model
   threads read <thread>          its conversation (--last <n>, --before <ms>)
@@ -781,6 +783,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const todo = await client.call('todos.update', { threadId, todoId: want(1, 'a todo id'), status: 'claimed' });
         print([todoRow(todo)], todo);
       } else throw new Usage(`todo: unknown action ${action}`);
+    },
+    goal: async () => {
+      const action = want(0, 'track');
+      if (action !== 'track') throw new Usage(`goal: unknown action ${action}`);
+      const activity = await client.call('threads.goal.track', { threadId });
+      // This turn is the goal's first: its claim counts, so the agent learns the marker here.
+      print([`goal: reviewed, tracking the user's last prompt (${activity.goal?.objective.length ?? 0} characters)`, 'when it is done and verified, end this turn with [BOITE_GOAL_COMPLETE] alone on its last line; a reviewer then checks it'], activity);
     },
   };
   const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;

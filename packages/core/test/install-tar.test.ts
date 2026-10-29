@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from 'fflate';
 import type { ProviderInstall } from '@boite/contracts';
 import { checkSizes, extractRelease } from '../src/providers/install-unpack.ts';
 import { tarball } from './fixtures/tarball.ts';
+import { thrown } from './settle.ts';
 
 let root: string;
 let release: string;
@@ -38,7 +39,7 @@ test('tgz refuses a planted ancestor link before creating a directory outside th
   const outside = join(root, 'outside');
   mkdirSync(outside);
   symlinkSync(outside, join(release, 'package'), process.platform === 'win32' ? 'junction' : 'dir');
-  await expect(unpack(tarball([{ name: file, bytes }]))).rejects.toThrow('symlink');
+  expect(await thrown(unpack(tarball([{ name: file, bytes }])))).toThrow('symlink');
   expect(existsSync(join(outside, 'bin'))).toBe(false);
 });
 
@@ -57,23 +58,23 @@ test('tgz refuses a non-octal member size even when its header checksum is valid
   const tar = gunzipSync(tarball([{ name: file, bytes }]));
   tar.set(new TextEncoder().encode(`${bytes.length.toString(8).padStart(10, '0')}z\0`), 124);
   checksum(tar);
-  await expect(unpack(gzipSync(tar))).rejects.toThrow('number');
+  expect(await thrown(unpack(gzipSync(tar)))).toThrow('number');
 });
 
 test('tgz refuses missing member padding', async () => {
   const tar = gunzipSync(tarball([{ name: file, bytes }]));
-  await expect(unpack(gzipSync(tar.subarray(0, 512 + bytes.length)))).rejects.toThrow('middle of an entry');
+  expect(await thrown(unpack(gzipSync(tar.subarray(0, 512 + bytes.length))))).toThrow('middle of an entry');
 });
 
 test('tgz refuses oversized name metadata before buffering it', async () => {
   const tar = gunzipSync(tarball([{ name: 'LongLink', type: 'L' }]));
   tar.set(new TextEncoder().encode('00010000001\0'), 124);
   checksum(tar);
-  await expect(unpack(gzipSync(tar.subarray(0, 512)))).rejects.toThrow('metadata');
+  expect(await thrown(unpack(gzipSync(tar.subarray(0, 512))))).toThrow('metadata');
 });
 
 test('tgz checks GNU long names before opening the following member', async () => {
-  await expect(unpack(tarball([{ name: 'LongLink', type: 'L', bytes: new TextEncoder().encode('../escape\0') },
-    { name: file, bytes }]))).rejects.toThrow('escape');
+  expect(await thrown(unpack(tarball([{ name: 'LongLink', type: 'L', bytes: new TextEncoder().encode('../escape\0') },
+    { name: file, bytes }])))).toThrow('escape');
   expect(existsSync(join(root, 'escape'))).toBe(false);
 });

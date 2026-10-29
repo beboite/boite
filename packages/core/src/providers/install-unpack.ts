@@ -181,22 +181,27 @@ async function feedArchive(
 ): Promise<void> {
   const reader = Bun.file(part).stream().getReader();
   let lastYield = performance.now();
-  for (;;) {
-    if (signal.aborted) throw signal.reason;
-    const { done, value } = await reader.read();
-    if (done) break;
-    for (let offset = 0; offset < value.byteLength; offset += EXTRACT_SLICE_BYTES) {
-      push(value.subarray(offset, offset + EXTRACT_SLICE_BYTES), false);
-      const failed = failure();
-      if (failed !== null) throw failed;
-      if (performance.now() - lastYield >= EXTRACT_YIELD_MS) {
-        await new Promise<void>((done) => setImmediate(done));
-        lastYield = performance.now();
-        if (signal.aborted) throw signal.reason;
+  try {
+    for (;;) {
+      if (signal.aborted) throw signal.reason;
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (let offset = 0; offset < value.byteLength; offset += EXTRACT_SLICE_BYTES) {
+        push(value.subarray(offset, offset + EXTRACT_SLICE_BYTES), false);
+        const failed = failure();
+        if (failed !== null) throw failed;
+        if (performance.now() - lastYield >= EXTRACT_YIELD_MS) {
+          await new Promise<void>((done) => setImmediate(done));
+          lastYield = performance.now();
+          if (signal.aborted) throw signal.reason;
+        }
       }
     }
+    push(new Uint8Array(0), true);
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
   }
-  push(new Uint8Array(0), true);
 }
 
 const TAR_BLOCK = 512;

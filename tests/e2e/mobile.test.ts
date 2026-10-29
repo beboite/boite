@@ -402,7 +402,7 @@ test('a phone pins and archives a thread without a right-click, from the header 
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
   // Subagents shows only on a thread that has some; the desktop's other rows stay there.
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['panel', 'pin', 'rename', 'find', 'archive', 'delete']);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['panel', 'board', 'pin', 'rename', 'find', 'archive', 'delete']);
   await capture('mobile-thread-menu.png');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=panel]');
   await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);

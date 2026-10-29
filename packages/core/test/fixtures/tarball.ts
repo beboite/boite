@@ -44,4 +44,3 @@ export function tarball(entries: { name: string; bytes?: Uint8Array; type?: stri
   blocks.push(new Uint8Array(1024));
   return gzipSync(Buffer.concat(blocks));
 }
-
