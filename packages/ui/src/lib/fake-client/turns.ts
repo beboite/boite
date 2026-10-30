@@ -372,7 +372,8 @@ function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Messa
   turn.finishedAt = ctx.now();
   if (turn.status === 'done' && turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') {
     for (const task of thread.backgroundHistory ?? []) {
-      if (task.state === 'running') task.checkpointTurnId = turn.id;
+      if (task.state === 'running' && task.providerId === thread.providerId
+        && task.sessionGeneration === (thread.sessionGeneration ?? 0)) task.checkpointTurnId = turn.id;
     }
   }
   turn.usage = usage;
