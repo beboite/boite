@@ -633,8 +633,14 @@ card. Code: `agents/create.ts`, shared checks in
 ## Routines
 
 Routines (`agents/routines.ts`) belong to one identity and wake it on its own
-thread. Choose a single date, an interval in minutes, or a daily local time
-with an IANA timezone, optionally on chosen weekdays read in that timezone.
+thread. Choose a single date, an interval in minutes, a daily local time
+(optionally on chosen weekdays), a day of each month, or a month and day of
+each year. Recurring calendar schedules use an IANA timezone. Months without
+the requested day are skipped, as are non-leap years for February 29.
+Nonexistent local times at a clock change are skipped. The form previews the
+same next instant as the core, including for routines saved in another timezone.
+The owner can assign these in the schedule editor, or ask the bot in its
+conversation; it saves the reminder through `boite bot schedule` before confirming.
 The core wakes them without an idle model loop. A due routine starts a
 `routine` turn; while the previous occurrence is still queued or running the
 next one is skipped and `nextAt` still advances, and a failed, stopped or quiet
