@@ -12,8 +12,8 @@ function pending(ctx: FakeContext, id: ThreadId, scheduled: Set<ThreadId>, expli
   if (ctx.heldAnswers.get(id)?.length) return 'a message is still waiting to be delivered';
   // Done stops a paused run, as archiving does; only the expiry pass keeps it for its resume.
   if (explicit ? ctx.workflows.atWork(id) : ctx.workflows.active(id)) return 'a workflow is still running';
-  // Done is the user's own ask: only input a client named stops it, never a client that names none.
-  if (ctx.bus.protectedThreadIds.has(id)) return 'unsent input is still open on a device';
+  // Unsent input protects automatic expiry, never the user's own Done action.
+  if (!explicit && ctx.bus.protectedThreadIds.has(id)) return 'unsent input is still open on a device';
   if (hasActiveSideQuestion(ctx, id)) return 'a side question is still open';
   if ([...ctx.pendingPermissions.values(), ...ctx.pendingQuestions.values()].some(card => card.request.threadId === id)) return 'a permission or question is still waiting for an answer';
   return null;

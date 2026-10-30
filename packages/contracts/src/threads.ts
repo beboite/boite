@@ -781,6 +781,7 @@ export interface ThreadsRpcMethods {
    * stops its turn and its sub-threads' turns at once and answers; their
    * processes end once those turns have settled. Restoring restarts nothing.
    * `onlyIfIdle: true` marks done, recording its expiry date after refusing active work in the family.
+   * Unsent drafts do not block this explicit action.
    */
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean; onlyIfIdle?: boolean }; result: ThreadSummary };
   /**

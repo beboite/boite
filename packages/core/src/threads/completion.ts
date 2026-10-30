@@ -4,9 +4,9 @@ import { refused } from '../errors.ts';
 
 /**
  * Who asks for the family to be put away. The user marking one conversation
- * done is `explicit`: only input a client reported on that family stops it.
- * Automatic passes (retention) also respect a client that could not say which
- * threads hold input, since they would discard it with nobody watching.
+ * done is `explicit`: unsent input does not block the user's action.
+ * Automatic passes (retention) respect reported input and clients that could
+ * not say which threads hold input, since nobody is watching the removal.
  */
 export type CompletionRequest = 'explicit' | 'automatic';
 
@@ -19,7 +19,7 @@ function pending(core: Core, id: ThreadId, scheduled: Set<ThreadId>, request: Co
   if (threads.deferred.deferredAnswers.get(id)?.length || threads.deferred.pendingWakes.has(id)) return 'a message is still waiting to be delivered';
   // Done stops a paused run, as archiving does; only an automatic pass keeps it for its resume.
   if (request === 'explicit' ? core.workflows.atWork(id) : core.workflows.active(id)) return 'a workflow is still running';
-  if (request === 'explicit' ? threads.focus.hasReportedInput(id) : threads.focus.hasProtectedInput(id)) return 'unsent input is still open on a device';
+  if (request === 'automatic' && threads.focus.hasProtectedInput(id)) return 'unsent input is still open on a device';
   if (threads.sideQuestions.active(id)) return 'a side question is still open';
   if (threads.cards.listPermissions(id).length
     || [...threads.cards.questions.values()].some(card => card.request.threadId === id)

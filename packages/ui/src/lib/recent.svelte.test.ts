@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'vitest';
 import type { ThreadSummary } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
-import { groupWorkingThread, RecentPreferences, RECENT_STORAGE_KEY } from './recent.svelte';
+import { canMarkDone, groupWorkingThread, markDone, RecentPreferences, RECENT_STORAGE_KEY } from './recent.svelte';
 
 let client: FakeClient;
 let store: Store;
@@ -19,6 +19,22 @@ test('working grouping retains attention for pins, drafts, questions and failure
   for (const status of ['waiting', 'error', 'idle'] as ThreadSummary['status'][]) expect(groupWorkingThread(store, { ...base, status })).toBe(false);
   store.composerStates[base.id] = { text: 'Follow up', attachments: [], queued: [], sending: false, paused: false };
   expect(groupWorkingThread(store, working)).toBe(false);
+});
+
+test('Mark done accepts a draft synchronized from another device', async () => {
+  client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  const peer = client.composerPeer({ delayMs: 0 });
+  try {
+    await peer.connect();
+    await peer.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0,
+      value: { input: { text: 'Draft from my phone', attachments: [], queued: [], paused: true } } });
+    await expect.poll(() => store.composerStates[thread.id]?.text).toBe('Draft from my phone');
+    expect(canMarkDone(store, thread)).toBe(true);
+    expect(await markDone(store, thread)).toBe(true);
+    expect((await client.call('threads.get', { threadId: thread.id })).archived).toBe(true);
+    expect(store.error).toBeNull();
+  } finally { peer.close(); }
 });
 
 test('grouping preferences retain each other, migrate the working choice and ignore invalid storage', () => {
