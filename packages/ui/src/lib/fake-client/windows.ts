@@ -1,13 +1,16 @@
 import {
-  WINDOW_CAPTURE_EXCLUDED, WINDOW_CLIP_LIMITS, WINDOW_CONSENT_ANSWERS, WINDOW_CONSENT_TIMEOUT_MS, WINDOW_SHOT_MAX, WINDOW_THUMBNAIL_MAX,
+  WINDOW_CAPTURE_EXCLUDED, WINDOW_CLIP_LIMITS, WINDOW_CONSENT_ANSWERS, WINDOW_CONSENT_TIMEOUT_MS, WINDOW_POINT_LABEL_MAX, WINDOW_POINT_SECONDS,
+  WINDOW_READ_LIMIT, WINDOW_SHOT_MAX, WINDOW_THUMBNAIL_MAX,
   windowCropError, windowIdError, windowTargetError,
-  type AllowedWindowApp, type DesktopWindow, type Message, type MessagePart, type Thread, type WindowCaptureKind, type WindowConsentAnswer, type WindowTarget, type WindowWatch
+  type AllowedWindowApp, type DesktopWindow, type Message, type MessagePart, type Thread, type WindowConsentAnswer, type WindowConsentKind,
+  type WindowControl, type WindowPointer, type WindowTarget, type WindowWatch
 } from '@boite/contracts';
 import { fakeWindowPicture } from './window-screen';
 import { DATA_DIR, refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'windows.list' | 'windows.screenshot' | 'windows.clip' | 'windows.watch' | 'windows.frame' | 'windows.close' | 'windows.consent' | 'windows.allowlist' | 'windows.revoke';
+type Methods = 'windows.list' | 'windows.screenshot' | 'windows.clip' | 'windows.watch' | 'windows.frame' | 'windows.close' | 'windows.consent' | 'windows.allowlist' | 'windows.revoke'
+  | 'windows.read' | 'windows.point' | 'windows.waitClick' | 'windows.unpoint';
 
 /** A fake desktop window and what only the core knows about it: its executable's path and the hue its picture draws. */
 interface FakeWindow {
@@ -28,6 +31,21 @@ const WINDOWS: FakeWindow[] = [
   { id: '204188', process: 'Notepad.exe', pid: 9120, path: 'C:\\Windows\\System32\\Notepad.exe', width: 1100, height: 700, minimized: true, title: 'notes.txt - Notepad', hue: 0 },
   { id: '220514', process: 'KeePassXC.exe', pid: 7716, path: 'C:\\Program Files\\KeePassXC\\KeePassXC.exe', width: 1200, height: 800, minimized: false, title: 'Passwords.kdbx - KeePassXC', hue: 130 }
 ];
+
+/** What `windows.read` finds in each fake window: Unity's menu bar and toolbar, Blender's header. */
+const CONTROLS: Record<string, Omit<WindowControl, 'id'>[]> = {
+  '132456': [
+    ...['File', 'Edit', 'Assets', 'GameObject', 'Component', 'Window', 'Help'].map((name, index) => ({ type: 'MenuItem', name, x: 8 + index * 72, y: 30, width: 68, height: 22 })),
+    { type: 'Button', name: 'Play', automationId: 'PlayButton', x: 912, y: 58, width: 32, height: 24 },
+    { type: 'Button', name: 'Pause', automationId: 'PauseButton', x: 946, y: 58, width: 32, height: 24 },
+    { type: 'TabItem', name: 'Scene', x: 4, y: 92, width: 70, height: 22 },
+    { type: 'TabItem', name: 'Game', x: 76, y: 92, width: 70, height: 22 }
+  ],
+  '198722': [
+    ...['File', 'Edit', 'Render', 'Window', 'Help'].map((name, index) => ({ type: 'MenuItem', name, x: 40 + index * 60, y: 2, width: 56, height: 22 })),
+    { type: 'TabItem', name: 'Layout', x: 360, y: 2, width: 64, height: 22 }
+  ]
+};
 
 interface Consent {
   threadId: string;
@@ -68,6 +86,17 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     ['p-boite', [{ path: WINDOWS[0]!.path, process: WINDOWS[0]!.process, addedAt: Date.now() - 86_400_000 }]]
   ]);
   const watches = new Map<string, WindowWatch>();
+  /** Each conversation's last read and its box: a fake person clicks the box a second after a wait starts. */
+  const reads = new Map<string, { window: FakeWindow; controls: WindowControl[] }>();
+  const pointers = new Map<string, { pointer: WindowPointer; timer: ReturnType<typeof setTimeout>; end: Set<(reason: 'clicked' | 'timeout' | 'cleared') => void> }>();
+  const unpoint = (threadId: string, reason: 'clicked' | 'timeout' | 'cleared') => {
+    const shown = pointers.get(threadId);
+    if (!shown) return false;
+    pointers.delete(threadId);
+    clearTimeout(shown.timer);
+    for (const end of [...shown.end]) end(reason);
+    return true;
+  };
   const streamed = new Set<string>();
   const consents = new Map<string, Consent>();
 
@@ -75,6 +104,8 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   const release = (threadId: string) => {
     for (const consent of consents.values()) if (consent.threadId === threadId) consent.settle('expired');
     streamed.delete(threadId);
+    unpoint(threadId, 'cleared');
+    reads.delete(threadId);
     if (watches.delete(threadId)) changed(threadId);
   };
   ctx.bus.observe('thread.updated', thread => { if (thread.archived) release(thread.id); });
@@ -141,7 +172,7 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   };
 
   /** Posts a consent card and waits for its answer; `wait` false leaves it open, for the demo. */
-  const ask = (thread: Thread, window: FakeWindow, kind: WindowCaptureKind, timeoutMs = WINDOW_CONSENT_TIMEOUT_MS): Promise<WindowConsentAnswer | 'expired'> => {
+  const ask = (thread: Thread, window: FakeWindow, kind: WindowConsentKind, timeoutMs = WINDOW_CONSENT_TIMEOUT_MS): Promise<WindowConsentAnswer | 'expired'> => {
     const requestId = `wcr-${++ctx.seq}`;
     const { message, partIndex } = post(thread, { type: 'window_consent', requestId, kind, process: window.process, path: window.path, expiresAt: Date.now() + timeoutMs, answer: null });
     return new Promise(resolve => {
@@ -162,13 +193,13 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     });
   };
   /** An allowed app goes ahead; another asks the owner first. */
-  const consent = async (thread: Thread, window: FakeWindow, kind: WindowCaptureKind) => {
+  const consent = async (thread: Thread, window: FakeWindow, kind: WindowConsentKind) => {
     if (isAllowed(thread, window)) return;
     const answer = await ask(thread, window, kind);
     if (answer === 'refuse') throw refusal(`the owner refused to let this conversation capture ${window.process}`, { process: window.process });
     if (answer === 'expired') throw refusal(`nobody answered the request to capture ${window.process} within 10 minutes`, { process: window.process });
   };
-  const capture = (thread: Thread, window: FakeWindow, kind: WindowCaptureKind, extra: { path?: string; frames?: number }) => {
+  const capture = (thread: Thread, window: FakeWindow, kind: 'screenshot' | 'clip' | 'stream', extra: { path?: string; frames?: number }) => {
     const thumb = fit(window.width, window.height, WINDOW_THUMBNAIL_MAX);
     post(thread, {
       type: 'window_capture', kind, windowId: window.id, process: window.process, width: window.width, height: window.height, at: Date.now(),
@@ -282,6 +313,78 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (!pending || pending.threadId !== threadId) throw refusal('this capture request is no longer waiting: it was answered, expired or the core restarted', { requestId });
       pending.settle(answer);
       return { ok: true };
+    },
+    'windows.read': async ({ threadId, target, filter, limit }) => {
+      const thread = active(threadId);
+      const max = limit ?? WINDOW_READ_LIMIT.default;
+      if (!(Number.isInteger(max) && max >= 1 && max <= WINDOW_READ_LIMIT.max)) throw refusal(`limit must be a whole number from 1 to ${WINDOW_READ_LIMIT.max}`, { field: 'limit' });
+      const window = resolve(thread, target);
+      if (window.minimized) throw refusal('window minimized: restore it first', { windowId: window.id });
+      await consent(thread, window, 'read');
+      const controls = (CONTROLS[window.id] ?? []).map((control, index) => ({ id: index + 1, ...control }));
+      reads.set(threadId, { window, controls });
+      const wanted = filter?.trim().toLowerCase();
+      const matching = wanted ? controls.filter(control => control.name.toLowerCase().includes(wanted)) : controls;
+      return { windowId: window.id, process: window.process, controls: structuredClone(matching.slice(0, max)), total: matching.length };
+    },
+    'windows.point': async ({ threadId, control: id, target, name, at, label = '', seconds = WINDOW_POINT_SECONDS.default }) => {
+      const thread = active(threadId);
+      if ([id, name, at].filter(value => value !== undefined).length !== 1) throw refusal('point needs exactly one of control, name or at', { field: 'control' });
+      if (label.length > WINDOW_POINT_LABEL_MAX) throw refusal(`label must be at most ${WINDOW_POINT_LABEL_MAX} characters with no control characters`, { field: 'label' });
+      if (!(seconds >= 1 && seconds <= WINDOW_POINT_SECONDS.max)) throw refusal(`seconds must lie between 1 and ${WINDOW_POINT_SECONDS.max}`, { field: 'seconds' });
+      let window: FakeWindow;
+      let box: { x: number; y: number; width: number; height: number };
+      let control: WindowControl | undefined;
+      if (id !== undefined) {
+        const read = reads.get(threadId);
+        if (!read) throw refusal('nothing was read in this conversation yet: run `boite window read` first', { field: 'control' });
+        control = read.controls.find(candidate => candidate.id === id);
+        if (!control) throw refusal(`#${id} is not among the ${read.controls.length} controls of the last read: read the window again`, { field: 'control' });
+        window = read.window;
+        box = control;
+      } else if (name !== undefined) {
+        if (!target) throw refusal('point by name needs the window\'s target', { field: 'target' });
+        window = resolve(thread, target);
+        await consent(thread, window, 'read');
+        const controls = (CONTROLS[window.id] ?? []).map((one, index) => ({ id: index + 1, ...one }));
+        reads.set(threadId, { window, controls });
+        const exact = controls.filter(one => one.name.toLowerCase() === name.trim().toLowerCase());
+        const found = exact.length > 0 ? exact : controls.filter(one => one.name.toLowerCase().includes(name.trim().toLowerCase()));
+        if (found.length !== 1) throw refusal(found.length === 0 ? `no control of ${window.process} is named "${name}"` : `${found.length} controls of ${window.process} match "${name}"; point at one by id`, { field: 'name' });
+        control = found[0]!;
+        box = control;
+      } else {
+        if (!target) throw refusal('point at a rectangle needs the window\'s target', { field: 'target' });
+        const problem = windowCropError(at);
+        if (problem) throw refusal(problem, { field: 'at' });
+        window = resolve(thread, target);
+        const scale = at!.unit === 'fraction' ? { x: window.width, y: window.height } : { x: 1, y: 1 };
+        box = { x: Math.round(at!.x * scale.x), y: Math.round(at!.y * scale.y), width: Math.round(at!.width * scale.x), height: Math.round(at!.height * scale.y) };
+      }
+      if (window.minimized) throw refusal('window minimized: restore it first', { windowId: window.id });
+      unpoint(threadId, 'cleared');
+      const pointer: WindowPointer = {
+        windowId: window.id, process: window.process, label: label === '' && control ? control.name : label,
+        x: box.x, y: box.y, width: box.width, height: box.height, expiresAt: Date.now() + seconds * 1000,
+        ...(control ? { control: { type: control.type, name: control.name } } : {})
+      };
+      pointers.set(threadId, { pointer, timer: setTimeout(() => unpoint(threadId, 'timeout'), seconds * 1000), end: new Set() });
+      return { pointer: structuredClone(pointer) };
+    },
+    'windows.waitClick': async ({ threadId, timeoutSeconds = WINDOW_POINT_SECONDS.default }) => {
+      active(threadId);
+      const shown = pointers.get(threadId);
+      if (!shown) throw refusal('nothing is pointed at in this conversation: run `boite window point` first', { threadId });
+      const pointer = structuredClone(shown.pointer);
+      const reason = await new Promise<'clicked' | 'timeout' | 'cleared'>(done => {
+        const click = setTimeout(() => unpoint(threadId, 'clicked'), Math.min(1000, timeoutSeconds * 1000));
+        shown.end.add(reason => { clearTimeout(click); done(reason); });
+      });
+      return reason === 'clicked' ? { clicked: true, pointer } : { clicked: false, reason };
+    },
+    'windows.unpoint': async ({ threadId }) => {
+      active(threadId);
+      return { cleared: unpoint(threadId, 'cleared') };
     },
     'windows.allowlist': async ({ projectId }) => {
       if (!ctx.projects.some(project => project.id === projectId)) throw ctx.notFound('project', projectId);

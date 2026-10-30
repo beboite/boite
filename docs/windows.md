@@ -3,11 +3,15 @@
 `boite window` lets an agent capture a native desktop window of the machine
 that runs the core, such as a Unity editor, a game or Blender. It can save the
 window as a PNG or as a contact sheet of a few seconds, or show the window live
-in the conversation's Window panel. iOS Simulators and Android emulators go
-through [`boite device`](devices.md) instead: that command can also drive them.
+in the conversation's Window panel. On Windows, it can also read a window's
+controls and draw a box showing the user where to click
+([guiding the user](#guiding-the-user)). iOS Simulators and Android emulators
+go through [`boite device`](devices.md) instead: that command can also drive
+them.
 
 Capture is read-only. Boite never restores, raises or focuses a window, never
-sends it input and never draws the cursor.
+sends it input and never draws the cursor. The guide's box is a window of its
+own above the others, which lets every click through.
 
 ## Commands
 
@@ -112,6 +116,7 @@ diagnostic exports.
 | `windows.frame` | yes | yes | no |
 | `windows.consent` | yes | yes | no |
 | `windows.allowlist`, `windows.revoke` | yes | no | no |
+| `windows.read`, `windows.point`, `windows.waitClick`, `windows.unpoint` | yes | no | its own conversation |
 
 The reason for each entry sits beside it in `AGENT_METHODS`
 (`packages/core/src/access.ts`) and `DEVICE_METHODS`
@@ -133,6 +138,70 @@ the [Device panel](devices.md):
   and phone.
 - Every 2 seconds the core checks that the window id still names the same
   process and path. If the window closed, the panel empties.
+
+## Guiding the user
+
+On Windows, an agent can teach the user an app instead of acting for them: it
+reads a window's controls as text, draws a box over the one to press, and
+waits for the user's click there. Nothing is ever clicked, typed or focused
+for the user.
+
+```sh
+boite window read --process Unity --filter play
+boite window point 3 --label "Press Play"
+boite window wait-click --timeout 120
+boite window point --process Unity --name Window
+boite window point --process Unity --at 0.4,0.3,0.2,0.2 --label "The Scene view"
+boite window unpoint
+```
+
+- `read <target>` lists the window's enabled controls on screen from its
+  accessibility tree (UI Automation), one line each:
+  `#3 Button "Play" 912,58 32x24`. Coordinates are the window's physical
+  pixels, those of a full-size screenshot. The types kept are the ones a person
+  acts on: buttons, menu items, tabs, list and tree items, fields, check and
+  radio boxes, sliders, links. A control with neither a name nor an
+  automation id is left out.
+  - 60 lines by default, `--limit` up to 400; `--filter` keeps names that
+    contain the text, without case. About 10 tokens a line, against
+    1,000 to 3,000 for a screenshot.
+  - The ids stay valid until the conversation's next read.
+- `point` draws one box with a label (80 characters at most) and replaces the
+  conversation's previous one. It takes exactly one of:
+  - `<id>`: a control of the last read, `3` for `#3` (a shell reads `#` as
+    the start of a comment). Without `--label`, the box says the
+    control's name.
+  - `<target> --name <name>`: reads the window and takes the control with that
+    name, an exact match without case first, then the names that contain it.
+    Several matches are refused with their ids.
+  - `<target> --at x,y,w,h`: a rectangle of the window in pixels, or fractions
+    from 0 to 1, as `--crop` takes it. For an app with no accessibility tree,
+    such as a game or a Unity scene view: the agent finds the place in a small
+    screenshot first.
+- The box is click-through, takes no focus and has no taskbar button. It
+  follows its window when the window moves, hides while it is minimized, and
+  goes away with it, after `--seconds` (120 by default, 600 at most), on
+  `unpoint`, or when the conversation is archived.
+- `wait-click` returns once the user presses the primary mouse button inside
+  the box, then takes the box away. A button already held when the wait starts
+  does not count. Without a click within `--timeout` (120 s by default, 600 at
+  most), the box stays for another try: a wait keeps it up until at least
+  30 s after the wait ends. The agent learns only that the click
+  happened.
+- The Start menu, search and the other system flyouts lie in a layer of the
+  system above every app's window, the box included. `point` still answers,
+  with `behind: true` and a line telling the agent to say where to click;
+  `wait-click` still sees the click there.
+- The taskbar is listed as the `explorer.exe` window with no title, so an agent
+  can point at its Start button.
+
+Privacy follows the captures': `read` and `point --name` show a consent card
+asking to read the app (`read`), refuse excluded and minimized windows and a
+turn a contact wrote into, and an allowed app reads at once. `point --at`
+reads nothing of the window, so it draws without a card, but excluded apps and
+a contact's turn are still refused. The log keeps the window id, the process,
+the control type and counts, never a control's name. `boite window read` and
+`point` are refused on Linux and macOS, which still have screenshots.
 
 ## Backends
 
@@ -175,6 +244,50 @@ before any pixels came back.
 - A minimized window is refused as minimized, and a window id that no longer
   exists is refused as gone.
 - The test kills only the PIDs it spawned.
+
+### The guide on Windows
+
+`ProcessPlatform.windowGuide()` loads `platform/windows/window-guide.ts` the
+first time `read` or `point` runs. It runs on the core's thread, as captures
+do, and belongs to the core: a window an agent's process opened would be sent
+to the bottom by the focus guard as soon as it took the foreground, losing its
+place above the others.
+
+- `read` is one UI Automation `FindAllBuildCache` from the window
+  (`window-controls.ts`): a condition on the interactive control types and a
+  cache of six properties, so the window's process answers in one round trip
+  and nothing is read element by element. A window that is not responding is
+  refused before the call; UI Automation's connection and transaction timeouts
+  (2 s and 5 s) bound a slow one. `AutoSetFocus` is off and no pattern is
+  asked for, so nothing in the window changes.
+- The box is a layered popup with `WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+  WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` and `DefWindowProcW` as its procedure,
+  drawn once into a premultiplied DIB for `UpdateLayeredWindow`. A 250 ms
+  timer pumps its messages and puts it back above the taskbar, which raises
+  itself when clicked. It stays on the control's monitor, scaled to that
+  monitor's DPI.
+- Every rectangle is in physical pixels: the thread is per-monitor aware (V2)
+  for each call.
+- `wait-click` reads the primary button with `GetAsyncKeyState` and the cursor
+  every 25 ms while a wait lasts; no hook is installed.
+- `GetWindowBand`, which user32 exports without documenting it, tells a system
+  flyout's layer from an app's. Where it is missing, every window reads as an
+  app's.
+
+Measured on 2026-10-30 (Windows 11, Bun 1.4.3, `bun bench/window-guide.ts
+<match> 20 100`):
+
+| Window | Controls | First read | Later read (median) |
+|---|---|---|---|
+| Taskbar, 1920×48 | 16 | 54 ms | 29 ms |
+| Boite, 1920×1032 (WebView2) | 102 | 212 ms | 97 ms |
+
+The Start menu read in 207 ms with 19 controls. Drawing the first box takes
+11 ms, moving it 0.5 ms. RSS grows by 3 MB over 200 reads of the taskbar.
+
+`packages/core/test/window-guide-windows.test.ts` opens a WinForms window that
+never takes the focus, reads its two buttons and its field but not its disabled
+button, draws a box over a button and finds the box's colour on the screen.
 
 ### Linux
 

@@ -91,11 +91,13 @@ const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 const DWMWA_CLOAKED = 14;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 const PW_RENDERFULLCONTENT = 2;
+/** The main and secondary taskbars: tool windows that are still part of what a person sees. */
+const TASKBAR_CLASSES = new Set(['Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
 /** `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`: rectangles in physical pixels on every monitor. */
 const PER_MONITOR_AWARE_V2 = -4n;
 
 /** The thread reads physical pixels for the length of `run`, then goes back to what it was. */
-function physicalPixels<T>(run: () => T): T {
+export function physicalPixels<T>(run: () => T): T {
   const previous = user32().SetThreadDpiAwarenessContext(PER_MONITOR_AWARE_V2);
   try {
     return run();
@@ -104,7 +106,7 @@ function physicalPixels<T>(run: () => T): T {
   }
 }
 
-interface Rect {
+export interface Rect {
   left: number;
   top: number;
   right: number;
@@ -116,7 +118,7 @@ function rectOf(values: Int32Array): Rect {
 }
 
 /** What a person sees of the window: DWM's frame bounds, without the invisible resize border. */
-function frameBounds(hwnd: bigint): Rect | null {
+export function frameBounds(hwnd: bigint): Rect | null {
   const values = new Int32Array(4);
   if (dwm().DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ptr(values), 16) === 0) return rectOf(values);
   if (user32().GetWindowRect(hwnd, ptr(values)) !== 0) return rectOf(values);
@@ -153,7 +155,10 @@ function listWindows(): NativeWindow[] {
       cloaked[0] = 0;
       if (dwm().DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ptr(cloaked), 4) === 0 && cloaked[0] !== 0) continue;
       const exStyle = BigInt(api.GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
-      if ((exStyle & WS_EX_TOOLWINDOW) !== 0n && (exStyle & WS_EX_APPWINDOW) === 0n) continue;
+      const className = utf16(text, api.GetClassNameW(hwnd, ptr(text), text.length));
+      // The taskbar is a tool window, but a person sees it and `boite window point` shows them its Start button.
+      const taskbar = TASKBAR_CLASSES.has(className);
+      if (!taskbar && (exStyle & WS_EX_TOOLWINDOW) !== 0n && (exStyle & WS_EX_APPWINDOW) === 0n) continue;
       if (api.GetWindow(hwnd, GW_OWNER) !== 0n) continue;
       const title = utf16(text, api.InternalGetWindowText(hwnd, ptr(text), text.length));
       const bounds = frameBounds(hwnd);
@@ -174,7 +179,7 @@ function listWindows(): NativeWindow[] {
         path,
         process: path === '' ? '' : path.slice(path.lastIndexOf('\\') + 1),
         title,
-        className: utf16(text, api.GetClassNameW(hwnd, ptr(text), text.length)),
+        className,
         width,
         height,
         minimized: api.IsIconic(hwnd) !== 0,
@@ -192,7 +197,7 @@ function parseWindowId(id: string): bigint {
 }
 
 /** The window behind `id`, or `gone` when it never was one or has closed. */
-function windowOf(id: string): bigint {
+export function windowOf(id: string): bigint {
   const hwnd = parseWindowId(id);
   if (hwnd === 0n || user32().IsWindow(hwnd) === 0) throw goneError(id);
   return hwnd;

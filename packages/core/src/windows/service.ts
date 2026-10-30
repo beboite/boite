@@ -31,6 +31,7 @@ import {
   type ThreadSummary,
   type WindowCaptureKind,
   type WindowConsentAnswer,
+  type WindowConsentKind,
   type WindowFrame,
   type WindowFrameUnchanged,
   type WindowTarget,
@@ -43,9 +44,10 @@ import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { processPlatform } from '../platform/index.ts';
-import type { NativeWindow, WindowCapture, WindowFrames, WindowPixels } from '../platform/types.ts';
+import type { NativeWindow, WindowCapture, WindowFrames, WindowGuide, WindowPixels } from '../platform/types.ts';
 import { isBlank, WindowCaptureError } from '../platform/window-pixels.ts';
 import type { Connection } from '../router.ts';
+import { WindowGuides, type WindowGuidesOptions } from './guide.ts';
 import { contactSheet, cropPixels, cropRect, encode, fit, shrink, sheetTile, type SheetFrame } from './image.ts';
 
 /** A picture is shared by every viewer that asks within this long, as the Device panel does. */
@@ -89,6 +91,10 @@ export interface DesktopWindowsOptions {
   consentTimeoutMs?: number;
   /** Where captures without `output` go, one folder per conversation. */
   tempRoot?: string;
+  /** The OS half of `boite window read` and `point` in place of the OS's, for tests. */
+  guide?: () => Promise<WindowGuide | { unavailable: string }>;
+  /** How often a box follows its window and a wait reads the mouse, for tests. */
+  guideTiming?: WindowGuidesOptions;
 }
 
 /** The executable's name as targets and exclusions compare it: lower case, `.exe` dropped. */
@@ -108,12 +114,15 @@ export class DesktopWindows {
   readonly #consents = new Map<string, Consent>();
   #tableReady = false;
   #closed = false;
+  readonly #guide: WindowGuides;
 
   constructor(core: Core, options: DesktopWindowsOptions = {}) {
     this.#core = core;
     this.#backendLoader = options.backend ?? (async () => processPlatform.windowCapture?.() ?? { unavailable: 'window capture is not available on this platform' });
     this.#consentTimeoutMs = options.consentTimeoutMs ?? WINDOW_CONSENT_TIMEOUT_MS;
     this.#tempRoot = options.tempRoot ?? join(tmpdir(), 'boite-windows');
+    const guide = options.guide ?? (async () => processPlatform.windowGuide?.() ?? { unavailable: 'the on-screen guide is only available on Windows' });
+    this.#guide = new WindowGuides(core, this, guide, options.guideTiming);
   }
 
   async list({ threadId }: RpcParams<'windows.list'>, connection?: Connection): Promise<RpcResult<'windows.list'>> {
@@ -270,8 +279,25 @@ export class DesktopWindows {
     return { apps: this.#apps(projectId) };
   }
 
-  /** What an archived or deleted conversation leaves: its panel and the captures it waits on. */
+  read(params: RpcParams<'windows.read'>, connection?: Connection): Promise<RpcResult<'windows.read'>> {
+    return this.#guide.read(params, connection);
+  }
+
+  point(params: RpcParams<'windows.point'>, connection?: Connection): Promise<RpcResult<'windows.point'>> {
+    return this.#guide.point(params, connection);
+  }
+
+  waitClick(params: RpcParams<'windows.waitClick'>, connection?: Connection): Promise<RpcResult<'windows.waitClick'>> {
+    return this.#guide.waitClick(params, connection);
+  }
+
+  unpoint(params: RpcParams<'windows.unpoint'>, connection?: Connection): RpcResult<'windows.unpoint'> {
+    return this.#guide.unpoint(params, connection);
+  }
+
+  /** What an archived or deleted conversation leaves: its panel, its box and the captures it waits on. */
   release(threadId: string): void {
+    this.#guide.release(threadId);
     this.#close(threadId, 'released');
     for (const consent of new Set(this.#consents.values())) if (consent.threadId === threadId) consent.settle('expired');
   }
@@ -280,11 +306,26 @@ export class DesktopWindows {
     if (this.#closed) return;
     for (const consent of new Set(this.#consents.values())) consent.settle('expired');
     this.#closed = true;
+    this.#guide.stop();
     for (const threadId of [...this.#streams.keys()]) this.#stopStream(threadId);
     this.#watches.clear();
   }
 
   // --- access -------------------------------------------------------------
+
+  /** The conversation `WindowGuides` acts for, refused as a capture's would be. */
+  activeThread(threadId: string, connection?: Connection): ThreadSummary {
+    return this.#thread(threadId, connection);
+  }
+
+  /**
+   * For `WindowGuides`: the one window a target names once its controls may be
+   * read (`read`, with a card for an app the project does not allow) or a box
+   * drawn over it (null: no card, since nothing of the window is read).
+   */
+  async grantedWindow(thread: ThreadSummary, target: WindowTarget, kind: 'read' | null, connection?: Connection): Promise<NativeWindow> {
+    return (await this.#granted(thread, target, kind, connection)).window;
+  }
 
   #thread(threadId: string, connection?: Connection, allowArchived = false): ThreadSummary {
     const thread = this.#core.threads.require(threadId);
@@ -305,7 +346,7 @@ export class DesktopWindows {
    * not minimized, not asked for while a contact's letter drives the turn,
    * and allowed by the project or by the owner on a card.
    */
-  async #granted(thread: ThreadSummary, target: WindowTarget, kind: WindowCaptureKind, connection?: Connection): Promise<{ backend: WindowCapture; window: NativeWindow; grant: Grant }> {
+  async #granted(thread: ThreadSummary, target: WindowTarget, kind: WindowConsentKind | null, connection?: Connection): Promise<{ backend: WindowCapture; window: NativeWindow; grant: Grant }> {
     const problem = windowTargetError(target);
     if (problem) throw invalidParams(problem, { field: 'target' });
     const backend = await this.#load();
@@ -317,6 +358,8 @@ export class DesktopWindows {
     if (connection?.identity.principal === 'agent' && this.#contactWroteThisTurn(thread.id)) {
       throw refused('a contact\'s letter is part of this turn: windows are captured only for the owner\'s own requests', { threadId: thread.id });
     }
+    // A box drawn over the window reads nothing of it: no card.
+    if (kind === null) return { backend, window, grant: 'once' };
     if (window.path === '') throw refused(`the system does not tell which program owns window ${window.id}, so it cannot be allowed`, { windowId: window.id });
     if (allowed.has(pathKey(window.path))) return { backend, window, grant: 'allowed' };
     const grant = await this.#ask(thread, window, kind);
@@ -399,7 +442,7 @@ export class DesktopWindows {
 
   // --- consent ------------------------------------------------------------
 
-  async #ask(thread: ThreadSummary, window: NativeWindow, kind: WindowCaptureKind): Promise<Grant> {
+  async #ask(thread: ThreadSummary, window: NativeWindow, kind: WindowConsentKind): Promise<Grant> {
     // Only the same kind shares a card: an answer to "a screenshot" never lets a clip or a live view through.
     const key = `${thread.id}\n${kind}\n${pathKey(window.path)}`;
     const waiting = this.#consents.get(key);

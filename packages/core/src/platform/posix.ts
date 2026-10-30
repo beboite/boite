@@ -43,6 +43,8 @@ export function createPosixPlatform(
       if (refusal !== null) return { unavailable: refusal };
       return (await import('./x11-window-capture.ts')).loadX11WindowCapture();
     },
+    // AT-SPI (Linux) and the AX API (macOS) are not driven yet: `boite window screenshot` still shows the window.
+    windowGuide: async () => ({ unavailable: `boite window read and point need Windows: ${os === 'linux' ? 'AT-SPI' : 'the macOS Accessibility API'} is not supported yet` }),
     retain() {},
     release: async () => { load?.watchResources?.(false); await load?.closeResources?.(); },
     capability: () => ({ os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' }),

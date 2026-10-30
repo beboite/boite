@@ -10,7 +10,7 @@ import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
 import type { Turn } from './turns';
 import type { InlineView, ViewCheckCapture } from './view.ts';
-import type { WindowCaptureKind, WindowConsentAnswer } from './windows';
+import type { WindowCaptureKind, WindowConsentAnswer, WindowConsentKind } from './windows';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -248,7 +248,7 @@ export type MessagePart =
    * while the capture waits, `expired` once `expiresAt` passed or the core
    * restarted. The window's title is left out: the agent can read its thread.
    */
-  | { type: 'window_consent'; requestId: string; kind: WindowCaptureKind; process: string; path: string; expiresAt: Timestamp; answer: WindowConsentAnswer | 'expired' | null }
+  | { type: 'window_consent'; requestId: string; kind: WindowConsentKind; process: string; path: string; expiresAt: Timestamp; answer: WindowConsentAnswer | 'expired' | null }
   | { type: 'error'; message: string };
 
 export interface Message {

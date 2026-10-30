@@ -109,12 +109,70 @@ export interface AllowedWindowApp {
 export type WindowConsentAnswer = 'once' | 'always' | 'refuse';
 export const WINDOW_CONSENT_ANSWERS: readonly WindowConsentAnswer[] = ['once', 'always', 'refuse'];
 export type WindowCaptureKind = 'screenshot' | 'clip' | 'stream';
+/** What a consent card asks for: a capture, or `read`, the names of a window's controls for `boite window read` and `point`. */
+export type WindowConsentKind = WindowCaptureKind | 'read';
+
+/**
+ * One control of a window a person can act on, as `boite window read` lists
+ * it from the system's accessibility tree: a button, a menu item, a field.
+ */
+export interface WindowControl {
+  /** `#3` in the CLI: names the control to `windows.point` until the conversation's next `windows.read`. */
+  id: number;
+  /** UI Automation's control type in English: `Button`, `MenuItem`, `Edit`. */
+  type: string;
+  name: string;
+  /** The app's own identifier for the control, when it gives one. */
+  automationId?: string;
+  /** Where it lies in the window, in the window's physical pixels: the coordinates of a full-size screenshot. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What `windows.read` found. `total` counts every control that matched before `limit`. */
+export interface WindowControls {
+  windowId: string;
+  process: string;
+  controls: WindowControl[];
+  total: number;
+}
+
+/** The box a conversation draws on the screen with `windows.point`; one at a time. */
+export interface WindowPointer {
+  windowId: string;
+  process: string;
+  label: string;
+  /** The box in the window's physical pixels. It follows the window when the window moves. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** When the box goes away by itself. */
+  expiresAt: number;
+  /** The control it shows, when it was named by id or by name. */
+  control?: { type: string; name: string };
+  /**
+   * The system draws this window above every app's window, as it does the
+   * Start menu: the box stays behind it, so the agent says where to click.
+   */
+  behind?: true;
+}
+
+/** Why `windows.waitClick` ended without a click. */
+export type WindowWaitEnd = 'timeout' | 'cleared' | 'gone';
 
 /** How long a capture waits for the owner's answer on a consent card. */
 export const WINDOW_CONSENT_TIMEOUT_MS = 10 * 60_000;
 /** `--max` when none is given: the longest side, in pixels. 0 asks for the full size. */
 export const WINDOW_SHOT_MAX = 1280;
 export const WINDOW_CLIP_LIMITS = { seconds: 10, fps: 4 } as const;
+/** Controls `windows.read` returns: a line costs about 10 tokens, so the default stays near 600. */
+export const WINDOW_READ_LIMIT = { default: 60, max: 400 } as const;
+/** How long a box stays drawn, and how long `windows.waitClick` waits, in seconds. */
+export const WINDOW_POINT_SECONDS = { default: 120, max: 600 } as const;
+export const WINDOW_POINT_LABEL_MAX = 80;
 /** The longest side of a capture card's thumbnail. */
 export const WINDOW_THUMBNAIL_MAX = 320;
 
@@ -161,6 +219,32 @@ export interface WindowsRpcMethods {
   'windows.allowlist': { params: { projectId: ProjectId }; result: { apps: AllowedWindowApp[] } };
   /** Takes an app off the project's list; its next capture asks again. */
   'windows.revoke': { params: { projectId: ProjectId; path: string }; result: { apps: AllowedWindowApp[] } };
+  /**
+   * The enabled controls on screen of the window, from its accessibility tree,
+   * numbered for `windows.point`. `filter` keeps the names that contain it,
+   * without case. Needs the same consent as a capture, asked as `read`.
+   */
+  'windows.read': { params: { threadId: string; target: WindowTarget; filter?: string; limit?: number }; result: WindowControls };
+  /**
+   * Draws a box with a label above every window, click-through, until a click
+   * inside it ends a `windows.waitClick`, `windows.unpoint` or `seconds`.
+   * Exactly one of: `control`, an id from the conversation's last
+   * `windows.read`; `name`, the one control of `target` with that name, read
+   * as `windows.read` does; `at`, a rectangle of `target` in its pixels or
+   * fractions, for an app with no accessibility tree. Replaces the
+   * conversation's previous box.
+   */
+  'windows.point': {
+    params: { threadId: string; control?: number; target?: WindowTarget; name?: string; at?: WindowCrop; label?: string; seconds?: number };
+    result: { pointer: WindowPointer };
+  };
+  /** Waits until the person presses the primary button inside the conversation's box, then takes the box away. */
+  'windows.waitClick': {
+    params: { threadId: string; timeoutSeconds?: number };
+    result: { clicked: true; pointer: WindowPointer } | { clicked: false; reason: WindowWaitEnd };
+  };
+  /** Takes the conversation's box off the screen. */
+  'windows.unpoint': { params: { threadId: string }; result: { cleared: boolean } };
 }
 
 export interface WindowsRpcEvents {
