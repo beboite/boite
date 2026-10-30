@@ -61,8 +61,14 @@ export const TEAM_SCENARIOS: Record<string, Scenario> = {
 
       // A bot's methods name its thread: the owner may call them for it, an agent token only for its own.
       same((await env.call('teams.list', { threadId: ada.threadId })).teams.map(entry => entry.id), [team.id], 'a bot\'s teams');
+      // The team chat runs no agent: what would reach a provider refuses there.
+      for (const call of [() => env.call('turns.start', { threadId: team.threadId, prompt: 'hello', clientRequestId: `team-turn-${tag}` }), () => env.call('threads.retitle', { threadId: team.threadId })]) {
+        check(String((await refused(call(), RpcErrorCode.Refused)).threadId) === team.threadId, 'a team chat ran an agent call');
+      }
+      check(!(await env.call('threads.get', { threadId: team.threadId })).unread, 'the owner\'s own posts marked the team chat unread');
       const everyone = await env.call('teams.say', { threadId: ada.threadId, team: team.name, text: '@tous done', id: `s1-${tag}` });
       same([everyone.author, everyone.to, everyone.routedBy], [adaKey, [bobKey], 'everyone'], 'a bot\'s post to everyone leaves out its author');
+      check((await env.call('threads.get', { threadId: team.threadId })).unread, 'a bot\'s post left the team chat read');
       const answer = await env.call('teams.say', { threadId: ada.threadId, team: team.id, text: 'on it', inReplyTo: first.id });
       same([answer.to, answer.routedBy], [['owner'], 'reply'], 'a reply');
       const secret = await env.call('teams.dm', { threadId: ada.threadId, team: team.name, to: 'owner', text: 'between us', id: `d1-${tag}` });

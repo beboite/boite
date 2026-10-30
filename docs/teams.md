@@ -27,8 +27,13 @@ Contracts: `packages/contracts/src/teams.ts`; core:
   members, each with the seq it joined at, a paused and an archived flag,
   and `createdBy`: the owner, or the bot whose card the owner accepted. Every
   change bumps its `version` and emits `teams.changed`.
-- The team chat is a projectless thread with `teamId` that runs no agent:
-  `turns.start` on it refuses, and the composer posts through `teams.post`.
+- The team chat is a projectless thread with `teamId` that runs no agent.
+  `ThreadStore.requireAgent` refuses there every call that would reach a
+  provider: `turns.start`, `turns.steer`, `turns.recover`,
+  `threads.retitle`, `threads.compact`, `threads.rewind`, `threads.fork`,
+  `threads.move`, `threads.btw`, `threads.btw.fork`, `threads.update`,
+  `threads.activity.set` and `threads.goal.track`. The composer posts through
+  `teams.post`.
   Each post is one finished turn there, carrying the post. It holds the
   owner's view, private posts included, so coordination never lists it: the
   directory, search and `send` leave team threads out, and a bot reaches a
@@ -39,6 +44,10 @@ Contracts: `packages/contracts/src/teams.ts`; core:
   audience (`team` or `private`), its recipients `to`, the rule that picked
   them (`routedBy`), an optional `inReplyTo`, the bot turn that wrote it, and
   a notice when it woke nobody.
+- A bot's post marks the team chat unread, as a finished turn does, unless a
+  client has it open; the owner's own posts do not. A bot's private post to
+  the owner also sends the owner a notification, `<bot>: <text>`; group posts
+  do not.
 - A member may read group posts and the private posts it wrote or received.
   The owner reads every post and, alone, the delivery state of each post per
   recipient: waiting, delivered, held, expired, rejected or unreachable.
@@ -107,6 +116,16 @@ turn, the wake, recovery after a restart and settlement.
   refusal, an error, a stop, a restart). A released post renders again in
   the next delivery: a post can reach a bot twice when an outcome stays
   uncertain, never zero times.
+- The post is written before its letters. A recipient whose letter a
+  failure or a stop left unwritten gets it when the post is retried with the
+  same id, or at the next start: a delivery still `waiting` whose post no
+  received or uncertain team letter of that bot carries is handed again.
+  Posts older than a letter's six hours are left as they are.
+- At each start, snapshots in flight whose letter nothing will settle any
+  more (a steer no provider acknowledged, a wake whose turn ended) are
+  released; their letter stays as it is.
+- A bot's own coordination switch (mode off, no remote, paused) leaves its
+  team letters and their wakes alone: the team decides who receives.
 - Each member's cursor moves up across seen posts and posts it may not read,
   so a private post between two others never pins it. A new member starts at
   the seq it joined at; older posts stay readable with `boite team read`.
@@ -117,7 +136,9 @@ A wake records a reply envelope on its turn when every team letter it took
 shares one channel: one team, and either the group or private with one
 author. The turn's final answer then becomes a post on that channel, with an
 id derived from the turn id, so a restart or a retried publication never
-posts twice. A final answer of `[quiet]` posts nothing; that is also how two
+posts twice. An envelope stays pending until its answer is posted or found
+to have none; the next start, and the end of any later turn, post what a stop
+or a failure left pending. A final answer of `[quiet]` posts nothing; that is also how two
 bots end an exchange.
 
 A batch that mixes teams or private authors, and a letter steered into a
@@ -170,5 +191,10 @@ invite or leave.
   daily budget is the other bound.
 - The experiment gates the methods and the commands, not delivery: letters
   already in an inbox still go out after the switch is turned off.
+- Private keeps a post out of the other members' letters and
+  `boite team read`. It is not secret from a bot allowed to read the
+  recipient's own conversation (`collaboration.read`), which shows what that
+  bot received, like a message the owner sends it directly. The team chat
+  itself stays out of coordination.
 - The app draws no team chat or team settings yet; the contracts and the
   in-memory client carry the methods for it.

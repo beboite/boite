@@ -43,6 +43,22 @@ function state(ctx: FakeContext): TeamState {
 
 type TeamMethods = Pick<FakeMethods, `teams.${string}` & keyof FakeMethods>;
 
+/** What would reach a provider on a thread: a team chat runs no agent, so each refuses there, as `ThreadStore.requireAgent` does. */
+const AGENT_METHODS = ['turns.start', 'turns.steer', 'turns.recover', 'threads.retitle', 'threads.compact', 'threads.rewind', 'threads.fork', 'threads.move',
+  'threads.btw', 'threads.btw.fork', 'threads.update', 'threads.goal.track', 'threads.activity.set'] as const;
+
+/** `methods` with each of `AGENT_METHODS` refusing a team chat first. */
+export function refuseTeamChats(ctx: FakeContext, methods: FakeMethods): FakeMethods {
+  for (const name of AGENT_METHODS) {
+    const answer = methods[name] as (params: { threadId: string }) => Promise<unknown>;
+    (methods as Record<string, unknown>)[name] = async (params: { threadId: string }) => {
+      if (ctx.threads.get(params.threadId)?.teamId) throw refused('a team chat runs no agent; post to it through teams.post', { threadId: params.threadId });
+      return answer(params);
+    };
+  }
+  return methods;
+}
+
 export function teamMethods(ctx: FakeContext): TeamMethods {
   const self = () => ctx.identity.coreId;
   const key = (botId: string) => teamMemberKey(self(), botId);
@@ -171,6 +187,8 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
     thread.messages.push(message);
     ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
     ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+    // A bot's post is news in the team chat, as the core marks it; the owner's own is not.
+    if (input.author !== TEAM_OWNER) thread.unread ||= !ctx.bus.subscribed.has(thread.id);
     ctx.touch(thread);
     changed(state(ctx).teams.get(team.id)!);
     return structuredClone(saved);
