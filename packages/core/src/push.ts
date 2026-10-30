@@ -1,5 +1,5 @@
 import { createHash, ECDH, randomUUID } from 'node:crypto';
-import { lastAgentText, NOTIFICATION_KINDS, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, requestExcerpt, requestKind } from '@boite/contracts';
+import { lastAgentText, NOTIFICATION_KINDS, notificationExcerpt, notifiesOnFinish, quotaAlertLeft, quotaAlertTitle, requestExcerpt, requestKind } from '@boite/contracts';
 import type { CoordinationPeer, NotificationKind, NotificationLabel, PushPayload, QuotaAlert, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
@@ -149,6 +149,12 @@ export class PushStore {
         this.#deliverAll(null, limitNews(payload as QuotaAlert), `limit-${(payload as QuotaAlert).accountId}-${(payload as QuotaAlert).window.id}`);
       }
     });
+  }
+
+  /** A bot's private post to the owner in a team chat, which runs no turn of its own to report. */
+  teamPost(threadId: string, body: string, tag: string): void {
+    if (this.#closed || this.#core.journal.isClosed()) return;
+    this.notify(threadId, { body: notificationExcerpt(body), kind: 'finished' }, tag);
   }
 
   /** The start of what the agent last wrote in the turn, one line. */

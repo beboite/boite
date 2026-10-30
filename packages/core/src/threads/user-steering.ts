@@ -25,7 +25,7 @@ export function userSteeringUnavailable(core: Core, threads: ThreadStore, thread
 /** User input keeps its own provenance and receipt while sharing the active provider turn. */
 export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>, sentFrom: SentFrom | null = null): Promise<{ accepted: boolean }> {
   const { threadId, turnId, prompt, clientRequestId, expectedSelectionVersion } = params;
-  const thread = threads.require(threadId);
+  const thread = threads.requireAgent(threadId);
   if (core.stopping || thread.archived) throw refused('user steering requires an active, unarchived conversation');
   if (typeof prompt !== 'string') throw refused('prompt must be a string', { field: 'prompt', expected: 'a string' });
   if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');

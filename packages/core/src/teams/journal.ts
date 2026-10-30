@@ -9,7 +9,7 @@ import type { Database } from 'bun:sqlite';
  * - `team_cursors`: per member, the seq below which it saw every post it may read.
  * - `team_seen`: per member, posts above its cursor that are `seen`, or in `flight` in letter `letter_id`.
  * - `team_deliveries`: where a post stands for each recipient.
- * - `team_replies`: the envelope of a team wake: where the final answer of its turn goes.
+ * - `team_replies`: the envelope of a team wake: where the final answer of its turn goes, and whether it was posted.
  */
 export function createTeams(db: Database): void {
   db.exec(`CREATE TABLE IF NOT EXISTS teams (
@@ -71,6 +71,9 @@ export function createTeams(db: Database): void {
     audience TEXT NOT NULL,
     recipient TEXT,
     in_reply_to TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    published INTEGER NOT NULL DEFAULT 0
   )`);
+  db.exec('CREATE INDEX IF NOT EXISTS team_replies_pending ON team_replies(turn_id) WHERE published = 0');
+  db.exec("CREATE INDEX IF NOT EXISTS team_deliveries_waiting ON team_deliveries(at) WHERE state = 'waiting'");
 }

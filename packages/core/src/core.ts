@@ -459,6 +459,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
+    // Then what a stopped core left between a team post and its letters, or a team wake and its answer.
+    try { this.teams.recover(); } catch (error) { this.log('warn', `teams recovery failed: ${String(error)}`); }
     // After recovery: a resume planned before the previous core stopped, a usage limit's among them, goes on.
     this.threads.resumes.start();
     // Watched limits are read on their own, so an alert reaches a phone with no window open.

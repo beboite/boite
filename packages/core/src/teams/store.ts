@@ -18,6 +18,7 @@ import type { Core } from '../core.ts';
 import { invalidParams, messageOf, notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { finalText, quietText } from '../agents/runtime.ts';
+import { RESIDENT_LETTER_TTL_MS } from '../coordination-letter.ts';
 import { withLoad } from '../threads/records.ts';
 import { planTeamLetter, teamPostLine, teamPrompt, type TeamChannel } from './prompt.ts';
 
@@ -31,6 +32,7 @@ type Stored = Pick<Team, 'name' | 'brief' | 'members' | 'dispatcher' | 'paused' 
 /** The letter states that keep a snapshot in flight; any other ends it. */
 const IN_FLIGHT = new Set(['Queued for provider delivery', 'Awaiting provider acknowledgement']);
 const inFlight = (error: string | null): boolean => error !== null && (IN_FLIGHT.has(error) || error.startsWith('Awaiting provider turn '));
+const ACTIVE = new Set(['queued', 'running']);
 const LATER = 'members on other machines come in a later version';
 
 /** A final answer's post id: the same turn always gives the same id, so a retried publication posts once. */
@@ -59,10 +61,23 @@ export class TeamStore {
       if (name !== 'turn.finished' || core.journal.isClosed()) return;
       const turn = payload as Turn;
       try { this.#finished(turn); } catch (error) { core.log('warn', `teams after turn ${turn.id}: ${messageOf(error)}`); }
+      // An answer a failure left unpublished gets another try at each turn's end.
+      this.#replayAnswers();
     });
   }
 
   close(): void { this.#off(); }
+
+  /**
+   * After a restart, what a stopped core left half done: snapshots of
+   * letters nothing will settle any more are released, recipients whose
+   * letter was never written get it, and finished answers are posted.
+   */
+  recover(): void {
+    this.#releaseOrphans();
+    this.#repair();
+    this.#replayAnswers();
+  }
 
   get #db() { return this.#core.journal.db; }
   get #self(): string { return this.#core.coordination.card().coreId; }
@@ -339,6 +354,8 @@ export class TeamStore {
     const known = this.#postById(id);
     if (known) {
       if (known.teamId !== team.id || known.fingerprint !== fingerprint) throw refused('id: already used for a different post', { field: 'id' });
+      // A retry after an interruption hands over the letters the first try did not.
+      this.#repair(known.id);
       return known;
     }
     if (team.archived) throw refused(`${team.name} is archived`, { field: 'team' });
@@ -362,6 +379,7 @@ export class TeamStore {
     };
     let post: TeamPost | null = null;
     let message: Message | null = null;
+    let chat: ThreadSummary | null = null;
     this.#core.journal.append({ type: 'teams.posted', threadId: thread.id, version: 1, payload: { teamId: team.id, id, author: input.author } }, db => {
       const seq = (db.query('SELECT last_seq FROM teams WHERE id = ?').get(team.id) as { last_seq: number }).last_seq + 1;
       post = {
@@ -378,17 +396,50 @@ export class TeamStore {
       message = { id: newId('msg_'), threadId: thread.id, turnId: turn.id, role: input.author === TEAM_OWNER ? 'user' : 'assistant', parts: [{ type: 'text', text, teamPost: ref }], state: 'complete', createdAt: now };
       this.#core.journal.putTurn(turn);
       this.#core.journal.putMessage(message);
+      // A bot's post is news in the team chat, as a finished turn is in a thread; the owner's own is not.
+      chat = { ...thread, updatedAt: now, unread: input.author === TEAM_OWNER ? thread.unread : thread.unread || !this.#core.subscribers.hasSubscribers(thread.id) };
+      this.#core.journal.putThread(chat);
     });
     this.#core.bus.emit('message.started', message!);
     this.#core.bus.emit('message.completed', { threadId: thread.id, messageId: message!.id, state: 'complete' });
+    this.#core.bus.emit('thread.updated', withLoad(this.#core, chat!));
     const saved = post as unknown as TeamPost;
+    // A private post to the owner reaches the owner's devices; group posts wait in the chat.
+    if (saved.audience === 'private' && saved.to[0] === TEAM_OWNER) this.#core.push.teamPost(thread.id, `${this.#name(team, saved.author)}: ${text}`, `team-post-${saved.id}`);
     this.#changed(team);
-    for (const recipient of saved.to) {
+    this.#hand(team, saved);
+    return saved;
+  }
+
+  /** Each recipient's letter. One that fails leaves the others theirs; a retry or the next start repairs it (`#repair`). */
+  #hand(team: Team, post: TeamPost): void {
+    let failed: unknown = null;
+    for (const recipient of post.to) {
       const member = team.members.find(entry => entry.key === recipient);
       const threadId = member ? this.#threadOf(member) : null;
-      if (threadId !== null) this.#core.coordination.acceptTeamLetter(team, threadId, saved.seq, saved.author === TEAM_OWNER);
+      if (threadId === null) continue;
+      try { this.#core.coordination.acceptTeamLetter(team, threadId, post.seq, post.author === TEAM_OWNER); } catch (error) { failed ??= error; }
     }
-    return saved;
+    if (failed !== null) throw failed;
+  }
+
+  /**
+   * A post committed before its letters: a recipient still `waiting` with no
+   * letter of that team carrying the post gets one now. Letters live six
+   * hours, so older posts are left as they are.
+   */
+  #repair(postId?: string): void {
+    const rows = this.#db.query(`SELECT p.team_id, p.seq, p.author, d.member FROM team_deliveries d JOIN team_posts p ON p.id = d.post_id
+      WHERE d.state = 'waiting' AND d.at > ? AND (? IS NULL OR d.post_id = ?) ORDER BY p.team_id, p.seq`).all(Date.now() - RESIDENT_LETTER_TTL_MS, postId ?? null, postId ?? null) as { team_id: string; seq: number; author: string; member: string }[];
+    for (const row of rows) {
+      const team = this.get(row.team_id);
+      const member = team?.archived === false ? team.members.find(entry => entry.key === row.member) : undefined;
+      const threadId = member ? this.#threadOf(member) : null;
+      if (!team || threadId === null) continue;
+      const carried = this.#db.query(`SELECT 1 FROM coordination_letters l, json_each(l.data, '$.team.triggers') t WHERE l.thread_id = ? AND l.direction = 'in'
+        AND l.status IN ('received', 'uncertain') AND json_extract(l.data, '$.team.teamId') = ? AND t.value = ? LIMIT 1`).get(threadId, team.id, row.seq);
+      if (!carried) this.#core.coordination.acceptTeamLetter(team, threadId, row.seq, row.author === TEAM_OWNER);
+    }
   }
 
   /** The owner's post. `to` lists bot ids: the composer's recipients, or the one reader of a private post. */
@@ -639,6 +690,39 @@ export class TeamStore {
     });
   }
 
+  /**
+   * Snapshots in flight whose letter nothing will settle: gone, settled, a
+   * steer that no provider acknowledged before a restart, or a wake whose
+   * turn ended. The letter stays as it is; its posts render again.
+   */
+  #releaseOrphans(): void {
+    const rows = this.#db.query(`SELECT DISTINCT s.letter_id AS id, l.status, json_extract(l.data, '$.error') AS error FROM team_seen s
+      LEFT JOIN coordination_letters l ON l.id = s.letter_id WHERE s.state = 'flight'`).all() as { id: string; status: string | null; error: string | null }[];
+    const orphans = rows.filter(row => {
+      if (row.status !== 'uncertain' || row.error === null) return true;
+      if (row.error === 'Queued for provider delivery') return false;
+      const turnId = row.error.startsWith('Awaiting provider turn ') ? row.error.slice('Awaiting provider turn '.length) : null;
+      return turnId === null || !ACTIVE.has(this.#core.journal.getTurn(turnId)?.status ?? '');
+    }).map(row => row.id);
+    if (orphans.length === 0) return;
+    this.#core.journal.append({ type: 'teams.released', threadId: null, version: 1, payload: { letters: orphans } }, db => {
+      for (const id of orphans) db.query("DELETE FROM team_seen WHERE letter_id = ? AND state = 'flight'").run(id);
+    });
+  }
+
+  /** Envelopes whose turn ended and whose answer was not posted yet: done ones post it, the others have none. */
+  #replayAnswers(): void {
+    if (this.#core.journal.isClosed()) return;
+    const pending = this.#db.query('SELECT r.turn_id, r.thread_id, t.status FROM team_replies r LEFT JOIN turns t ON t.id = r.turn_id WHERE r.published = 0').all() as { turn_id: string; thread_id: string; status: string | null }[];
+    for (const row of pending) {
+      if (row.status !== null && ACTIVE.has(row.status)) continue;
+      try {
+        if (row.status === 'done') this.publishAnswer({ id: row.turn_id, threadId: row.thread_id });
+        else this.#db.query('UPDATE team_replies SET published = 1 WHERE turn_id = ?').run(row.turn_id);
+      } catch (error) { this.#core.log('warn', `teams answer of ${row.turn_id}: ${messageOf(error)}`); }
+    }
+  }
+
   #finished(turn: Turn): void {
     if (turn.execution?.operation !== 'coordination') return;
     if (turn.status !== 'done') { this.#release(turn); return; }
@@ -653,6 +737,13 @@ export class TeamStore {
   publishAnswer(turn: Pick<Turn, 'id' | 'threadId'>): TeamPost | null {
     const envelope = this.#db.query('SELECT * FROM team_replies WHERE turn_id = ?').get(turn.id) as { thread_id: string; team_id: string; audience: TeamAudience; recipient: string | null; in_reply_to: string | null } | null;
     if (envelope === null) return null;
+    const post = this.#answer(turn, envelope);
+    // Posted, or nothing to post: a later start does not try again.
+    this.#db.query('UPDATE team_replies SET published = 1 WHERE turn_id = ?').run(turn.id);
+    return post;
+  }
+
+  #answer(turn: Pick<Turn, 'id' | 'threadId'>, envelope: { thread_id: string; team_id: string; audience: TeamAudience; recipient: string | null; in_reply_to: string | null }): TeamPost | null {
     const team = this.get(envelope.team_id);
     const bot = this.#core.workforce.agentOfThread(envelope.thread_id);
     if (!team || team.archived || !bot || !team.members.some(member => member.botId === bot.id)) return null;

@@ -463,3 +463,151 @@ test('boite team: a bot lists, posts, reads and asks for cards; the experiment a
   expect(off.err).toContain('Teams experiment');
   expect(team.members).toHaveLength(2);
 }, 30_000);
+
+// Round 1 of the review: what a crash, a restart or a setting must not lose.
+
+test('a post whose letters were interrupted reaches its recipients once: a retried id or a restart repairs it', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
+  try {
+    const { h, team, bots: [ada, bob], post } = await setup(['Ada', 'Bob'], dataDir);
+    teamDriver();
+    h.core.teams.pause({ teamId: team.id, paused: true });
+    const cut = spyOn(h.core.coordination, 'acceptTeamLetter').mockImplementationOnce(() => { throw new Error('interrupted before the letter'); });
+    expect((await failure(() => post('@Ada @Bob ping', { id: 'gap-1' }))).message).toContain('interrupted');
+    cut.mockRestore();
+    post('@Ada @Bob ping', { id: 'gap-1' });
+    expect(teamLetters(h, ada!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
+    expect(teamLetters(h, bob!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
+    // Interrupted again, and the core stops before anyone retries.
+    spyOn(h.core.coordination, 'acceptTeamLetter').mockImplementation(() => { throw new Error('interrupted before the letter'); });
+    await failure(() => post('@Ada again', { id: 'gap-2' }));
+    await cores.pop()!.stop();
+    for (const restore of restores.splice(0).reverse()) restore();
+    const again = await startTestCore({ dataDir }); cores.push(again);
+    await experiment(await again.connect());
+    const driver = teamDriver();
+    expect(teamLetters(again, ada!.threadId).map(letter => letter.team!.triggers)).toEqual([[1, 2]]);
+    again.core.teams.pause({ teamId: team.id, paused: false });
+    await waitFor(() => wakes(again, ada!.threadId).length === 1 && settledWakes(again, ada!.threadId));
+    expect(driver.of(ada!.threadId)).toHaveLength(1);
+    expect(driver.of(ada!.threadId)[0]).toContain('again');
+    await cores.pop()!.stop();
+  } finally { await removeDir(dataDir); }
+}, 30_000);
+
+test('a steer left unacknowledged by a restart releases its posts: the next delivery renders them', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
+  try {
+    const { h, team, bots: [ada], post } = await setup(['Ada'], dataDir);
+    const driver = teamDriver(() => ({ hold: true }));
+    h.core.threads.startTurn(ada!.threadId, 'Ordinary work');
+    await waitFor(() => driver.running.length === 1);
+    post('Earlier post');
+    await waitFor(() => driver.steers.length === 1);
+    expect(seenRows(h, team.id).map(row => row.state)).toEqual(['flight']);
+    await cores.pop()!.stop();
+    for (const restore of restores.splice(0).reverse()) restore();
+    const again = await startTestCore({ dataDir }); cores.push(again);
+    await experiment(await again.connect());
+    expect(seenRows(again, team.id)).toEqual([]);
+    expect(teamLetters(again, ada!.threadId)[0]).toMatchObject({ status: 'uncertain', error: 'Awaiting provider acknowledgement' });
+    const fresh = teamDriver();
+    again.core.teams.ownerPost({ teamId: team.id, id: 'fresh', text: 'Fresh trigger' });
+    await waitFor(() => fresh.of(ada!.threadId).length === 1 && settledWakes(again, ada!.threadId));
+    expect(fresh.of(ada!.threadId)[0]).toContain('Earlier post');
+    await cores.pop()!.stop();
+  } finally { await removeDir(dataDir); }
+}, 30_000);
+
+test('an answer the core did not publish before it stopped is posted once at the next start', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
+  const answers = (h: TestCore) => (db(h).query("SELECT COUNT(*) AS n FROM team_posts WHERE text = 'The final answer'").get() as { n: number }).n;
+  try {
+    const { h, bots: [ada], post } = await setup(['Ada'], dataDir);
+    teamDriver(() => ({ text: 'The final answer' }));
+    // Stopped between the turn's commit and its publication.
+    h.core.teams.close();
+    post('Answer this');
+    await waitFor(() => wakes(h, ada!.threadId)[0]?.status === 'done');
+    expect(answers(h)).toBe(0);
+    await cores.pop()!.stop();
+    for (const restore of restores.splice(0).reverse()) restore();
+    for (let start = 0; start < 2; start += 1) {
+      const again = await startTestCore({ dataDir }); cores.push(again);
+      await waitFor(() => answers(again) === 1);
+      await Bun.sleep(50);
+      expect(answers(again)).toBe(1);
+      await cores.pop()!.stop();
+    }
+  } finally { await removeDir(dataDir); }
+}, 30_000);
+
+test('turning a bot\'s coordination off leaves its team letters, waiting or queued, to the team', async () => {
+  const { h, team, bots: [ada, bob], post } = await setup(['Ada', 'Bob']);
+  const driver = teamDriver();
+  const off: CoordinationConfig = { mode: 'off', resources: '', remote: true, paused: false };
+  h.core.teams.pause({ teamId: team.id, paused: true });
+  post('@Ada held');
+  h.core.coordination.configure(ada!.threadId, off);
+  expect(teamLetters(h, ada!.threadId)[0]).toMatchObject({ status: 'received' });
+  const unhold = holdAccountTurns(h);
+  h.core.teams.pause({ teamId: team.id, paused: false });
+  post('@Bob queued');
+  await waitFor(() => wakes(h, bob!.threadId)[0]?.status === 'queued' && wakes(h, ada!.threadId)[0]?.status === 'queued');
+  h.core.coordination.configure(bob!.threadId, off);
+  expect(wakes(h, bob!.threadId)[0]?.status).toBe('queued');
+  unhold();
+  await waitFor(() => [ada!, bob!].every(bot => teamLetters(h, bot.threadId)[0]?.status === 'delivered' && settledWakes(h, bot.threadId)));
+  expect(driver.of(ada!.threadId)[0]).toContain('held');
+  expect(driver.of(bob!.threadId)[0]).toContain('queued');
+}, 30_000);
+
+test('a team chat refuses what would reach a provider: turns, retitle, compact, rewind, fork, move, side requests, selection and goals', async () => {
+  const { h, owner, team, post } = await setup();
+  let titles = 0;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() { throw new Error('a team chat ran an agent'); }, async title() { titles += 1; return 'Not the team'; } }));
+  post('First post');
+  const [message] = h.core.journal.listMessages(team.threadId);
+  const project = await owner.call('projects.add', { name: 'Elsewhere', path: mkdtempSync(join(tmpdir(), 'boite-teams-project-')) });
+  const threadId = team.threadId;
+  const calls: [string, () => Promise<unknown>][] = [
+    ['turns.start', () => owner.call('turns.start', { threadId, prompt: 'hi', clientRequestId: 'c-1' })],
+    ['threads.retitle', () => owner.call('threads.retitle', { threadId })],
+    ['threads.compact', () => owner.call('threads.compact', { threadId })],
+    ['threads.rewind', () => owner.call('threads.rewind', { threadId, messageId: message!.id })],
+    ['threads.fork', () => owner.call('threads.fork', { threadId, messageId: message!.id })],
+    ['threads.move', () => owner.call('threads.move', { threadId, projectId: project.id })],
+    ['threads.btw', () => owner.call('threads.btw', { threadId, question: 'and?', requestId: 'btw-00001' })],
+    ['threads.update', () => owner.call('threads.update', { threadId, model: 'other' })],
+    ['threads.goal.track', () => owner.call('threads.goal.track', { threadId })],
+    ['turns.recover', () => owner.call('turns.recover', { threadId, turnId: message!.turnId, action: 'resume' })],
+  ];
+  const refusals: [string, string][] = [];
+  for (const [name, call] of calls) refusals.push([name, (await failure(call)).message]);
+  expect(refusals.filter(([, text]) => !text.includes('a team chat runs no agent'))).toEqual([]);
+  expect(titles).toBe(0);
+  expect(h.core.threads.require(threadId)).toMatchObject({ title: 'Crew', projectId: null });
+}, 30_000);
+
+test('a bot\'s post marks the team chat unread; a private post to the owner notifies the owner, group and owner posts do not', async () => {
+  const { h, team, bots: [ada], post } = await setup();
+  teamDriver();
+  const notify = spyOn(h.core.push as unknown as { notify(threadId: string, text: { body: string }, tag: string): void }, 'notify').mockImplementation(() => undefined);
+  const updated: string[] = [];
+  const off = h.core.bus.onAny((name, payload) => { if (name === 'thread.updated' && (payload as { id: string }).id === team.threadId) updated.push(name); });
+  const before = h.core.threads.require(team.threadId).updatedAt;
+  post('@Ada status?');
+  expect(h.core.threads.require(team.threadId).unread).toBe(false);
+  await Bun.sleep(5);
+  h.core.teams.say({ threadId: ada!.threadId, team: 'Crew', text: 'All green' });
+  const chat = h.core.threads.require(team.threadId);
+  expect(chat.unread).toBe(true);
+  expect(chat.updatedAt).toBeGreaterThan(before);
+  expect(updated.length).toBeGreaterThan(0);
+  expect(notify).not.toHaveBeenCalled();
+  h.core.threads.markRead(team.threadId);
+  h.core.teams.dm({ threadId: ada!.threadId, team: 'Crew', to: 'owner', text: 'Only for you' });
+  expect(h.core.threads.require(team.threadId).unread).toBe(true);
+  expect(notify.mock.calls.map(([threadId, text]) => [threadId, text.body])).toEqual([[team.threadId, 'Ada: Only for you']]);
+  off();
+}, 30_000);

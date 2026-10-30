@@ -183,23 +183,33 @@ export class Coordination {
     // The owner's own choice, pause included, is never lifted by a later message.
     this.#core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     this.#saveConfig(threadId, { mode: config.mode, resources: config.resources, remote: config.remote, paused: config.paused });
-    if (config.paused) this.#core.threads.stopQueuedCoordination(threadId);
+    // Team letters answer to their team (`docs/teams.md`), not to this switch: their wakes and inbox stay.
+    if (config.paused && !this.#onlyTeamQueued(threadId)) this.#core.threads.stopQueuedCoordination(threadId);
     if (config.mode === 'off' || !config.remote) {
       const queued = this.rows("thread_id = ? AND status = 'uncertain'", threadId).map(row => JSON.parse(row.data) as AgentLetter)
-        .filter(letter => letter.error === 'Queued for provider delivery' && (config.mode === 'off' || !this.#inProject(letter)));
+        .filter(letter => !letter.team && letter.error === 'Queued for provider delivery' && (config.mode === 'off' || !this.#inProject(letter)));
       for (const target of new Set(queued.filter(letter => letter.to.coreId === this.#self('').coreId).map(letter => letter.to.threadId))) {
         this.#core.threads.stopQueuedCoordination(target);
       }
     }
     if (config.mode === 'off') {
-      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) this.update(JSON.parse(row.data), 'rejected', 'Coordination disabled');
+      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) {
+        const letter = JSON.parse(row.data) as AgentLetter;
+        if (!letter.team) this.update(letter, 'rejected', 'Coordination disabled');
+      }
     } else if (!config.remote) {
       for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) {
         const letter = JSON.parse(row.data) as AgentLetter;
-        if (!this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
+        if (!letter.team && !this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
       }
     }
     return this.get(threadId);
+  }
+  /** Whether the queued wake of a thread carries team letters only, which its own pause leaves to the team. */
+  #onlyTeamQueued(threadId: string): boolean {
+    const queued = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId).map(row => JSON.parse(row.data) as AgentLetter)
+      .filter(letter => letter.error === 'Queued for provider delivery');
+    return queued.length > 0 && queued.every(letter => letter.team);
   }
   /**
    * A pause the core applies by itself (Stop, a restart, a failed wake). It lasts until the user's next message;
