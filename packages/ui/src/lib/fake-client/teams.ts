@@ -194,10 +194,15 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
     changed(state(ctx).teams.get(team.id)!);
     return structuredClone(saved);
   };
-  const member = (team: Team, ref: unknown) => {
+  /** A member by bot id, or by a name no other member has. */
+  const member = (team: Team, ref: unknown, field = 'to') => {
     const wanted = typeof ref === 'string' ? ref.trim() : '';
-    if (wanted.includes('/')) throw refused(LATER, { field: 'to' });
-    return team.members.find(entry => entry.botId === wanted) ?? team.members.find(entry => entry.name.toLowerCase() === wanted.toLowerCase());
+    if (wanted.includes('/')) throw refused(LATER, { field });
+    const named = team.members.filter(entry => entry.name.toLowerCase() === wanted.toLowerCase());
+    const found = team.members.find(entry => entry.botId === wanted) ?? (named.length === 1 ? named[0] : undefined);
+    if (found) return found;
+    throw refused(named.length > 1 ? `${field}: ${named.length} members are named ${JSON.stringify(wanted)}; name one by id: ${named.map(entry => entry.botId).join(', ')}`
+      : `${field}: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field });
   };
 
   return {
@@ -269,9 +274,7 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
       const team = require(params.teamId);
       const ask = params.card === undefined ? null : card(params.card, 'leave');
       if (ask !== null && ask.kind === 'leave' && ask.teamId !== team.id) throw refused(`card: it asks about another team, ${ask.teamName}`, { field: 'card' });
-      const wanted = typeof params.botId === 'string' ? params.botId.trim() : '';
-      const leaving = team.members.find(entry => entry.botId === wanted) ?? team.members.find(entry => entry.name.toLowerCase() === wanted.toLowerCase());
-      if (!leaving) throw refused(`botId: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field: 'botId' });
+      const leaving = member(team, params.botId, 'botId');
       const saved = save(team, { members: team.members.filter(entry => entry.key !== leaving.key) });
       settle(params.card, `applied: ${leaving.name} left ${team.name}`);
       return saved;
@@ -281,11 +284,7 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
       const team = require(params.teamId);
       const audience = params.audience ?? 'team';
       if (audience !== 'team' && audience !== 'private') throw invalid('audience: expected team or private');
-      const to = (params.to ?? []).map(ref => {
-        const found = member(team, ref);
-        if (!found) throw refused(`to: ${JSON.stringify(ref)} is no member of ${team.name}`, { field: 'to' });
-        return found.key;
-      });
+      const to = (params.to ?? []).map(ref => member(team, ref).key);
       return post(team, { id: params.id, author: TEAM_OWNER, text: params.text, audience, to, inReplyTo: params.inReplyTo });
     },
     'teams.read': async (params) => {
@@ -311,8 +310,8 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
       gate();
       const { team, member: author } = mine(params.threadId, params.team);
       const wanted = typeof params.to === 'string' ? params.to.trim() : '';
-      const recipient = wanted.toLowerCase() === TEAM_OWNER ? TEAM_OWNER : member(team, wanted)?.key;
-      if (recipient === undefined) throw refused(`to: ${JSON.stringify(wanted)} is no member of ${team.name}; name a member or owner`, { field: 'to' });
+      if (!wanted) throw invalid('to: expected a member or owner');
+      const recipient = wanted.toLowerCase() === TEAM_OWNER ? TEAM_OWNER : member(team, wanted).key;
       return post(team, { id: params.id ?? `post-${++ctx.seq}`, author, text: params.text, audience: 'private', to: [recipient] });
     },
     'teams.propose': async (params) => {

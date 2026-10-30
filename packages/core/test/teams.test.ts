@@ -476,15 +476,20 @@ test('a post whose letters were interrupted reaches its recipients once: a retri
     const { h, team, bots: [ada, bob], post } = await setup(['Ada', 'Bob'], dataDir);
     teamDriver();
     h.core.teams.pause({ teamId: team.id, paused: true });
-    const cut = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementationOnce(() => { throw new Error('interrupted before the letter'); });
-    expect((await failure(() => post('@Ada @Bob ping', { id: 'gap-1' }))).message).toContain('interrupted');
+    // The post stands though both letters fail, and a retry whose first repair fails still makes the other.
+    const cut = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementation(() => { throw new Error('interrupted before the letter'); });
+    expect(post('@Ada @Bob ping', { id: 'gap-1' }).seq).toBe(1);
     cut.mockRestore();
+    const once = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementationOnce(() => { throw new Error('interrupted before the letter'); });
+    post('@Ada @Bob ping', { id: 'gap-1' });
+    expect(teamLetters(h, ada!.threadId).length + teamLetters(h, bob!.threadId).length).toBe(1);
+    once.mockRestore();
     post('@Ada @Bob ping', { id: 'gap-1' });
     expect(teamLetters(h, ada!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
     expect(teamLetters(h, bob!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
     // Interrupted again, and the core stops before anyone retries.
     spyOn(h.core.coordination.teamLetters, 'accept').mockImplementation(() => { throw new Error('interrupted before the letter'); });
-    await failure(() => post('@Ada again', { id: 'gap-2' }));
+    post('@Ada again', { id: 'gap-2' });
     await cores.pop()!.stop();
     for (const restore of restores.splice(0).reverse()) restore();
     const again = await startTestCore({ dataDir }); cores.push(again);
@@ -499,6 +504,25 @@ test('a post whose letters were interrupted reaches its recipients once: a retri
   } finally { await removeDir(dataDir); }
 }, 30_000);
 
+test('two members of one name: a name picks neither, an id picks the right one', async () => {
+  const { h, team, bots: [, second], key } = await setup(['Ada', 'Ada']);
+  teamDriver();
+  for (const call of [() => h.core.teams.ownerPost({ teamId: team.id, id: 'twin-1', text: 'hi', audience: 'private', to: ['Ada'] }),
+    () => h.core.teams.removeMember({ teamId: team.id, botId: 'ada' })]) expect((await failure(call)).message).toMatch(/2 members are named "ada"/i);
+  expect(h.core.teams.ownerPost({ teamId: team.id, id: 'twin-2', text: 'hi', audience: 'private', to: [second!.agent.id] }).to).toEqual([key(second!)]);
+}, 30_000);
+
+test('a private answer to a member who left is dropped once, not retried at every turn', async () => {
+  const { h, team, bots: [ada, bob] } = await setup(['Ada', 'Bob']);
+  const driver = teamDriver(() => ({ text: 'noted', hold: true }));
+  h.core.teams.dm({ threadId: bob!.threadId, team: team.id, to: ada!.agent.id, text: 'between us' });
+  await waitFor(() => driver.running.length === 1);
+  h.core.teams.removeMember({ teamId: team.id, botId: bob!.agent.id });
+  driver.running[0]!.finish();
+  await waitFor(() => settledWakes(h, ada!.threadId) && JSON.stringify(db(h).query('SELECT published FROM team_replies').all()) === '[{"published":1}]');
+  expect(posts(h, team).map(post => post.text)).toEqual(['between us']);
+}, 30_000);
+
 test('an interrupted post to a member the owner removed stays with the old membership: no retry or restart revives it after a rejoin', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
   try {
@@ -506,7 +530,7 @@ test('an interrupted post to a member the owner removed stays with the old membe
     teamDriver();
     h.core.teams.pause({ teamId: team.id, paused: true });
     const cut = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementation(() => { throw new Error('interrupted before the letter'); });
-    await failure(() => post('@Bob OLD_MEMBERSHIP_REQUEST', { id: 'old-1' }));
+    post('@Bob OLD_MEMBERSHIP_REQUEST', { id: 'old-1' });
     cut.mockRestore();
     h.core.teams.removeMember({ teamId: team.id, botId: bob!.agent.id });
     const delivery = (core: typeof h) => core.core.journal.db.query("SELECT state FROM team_deliveries WHERE post_id = 'old-1'").all();

@@ -69,8 +69,8 @@ Contracts: `packages/contracts/src/teams.ts`; core:
 ## Routing
 
 The first rule that applies picks who a post wakes
-(`routeTeamPost`). The author is never a recipient of its own post: its own
-mention, `@tous`, a reply to itself and a team of one wake nobody.
+(`routeTeamPost`). The author is never a recipient of its own post: when
+the author is the only one a rule picks, the post wakes nobody.
 
 0. A private post goes to its one recipient.
 1. `@name` (a member's live name, case ignored, ending at a non-word

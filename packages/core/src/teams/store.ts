@@ -163,6 +163,17 @@ export class TeamStore {
     return { team: this.#named(ref, key), bot, key };
   }
 
+  /** A member by bot id, or by a name no other member has. */
+  #member(team: Team, ref: unknown, field: string): TeamMember {
+    const wanted = typeof ref === 'string' ? ref.trim() : '';
+    if (wanted.includes('/')) throw refused(LATER, { field });
+    const named = team.members.filter(entry => entry.name.toLowerCase() === wanted.toLowerCase());
+    const member = team.members.find(entry => entry.botId === wanted) ?? (named.length === 1 ? named[0] : undefined);
+    if (member) return member;
+    throw refused(named.length > 1 ? `${field}: ${named.length} members are named ${JSON.stringify(wanted)}; name one by id: ${named.map(entry => entry.botId).join(', ')}`
+      : `${field}: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field });
+  }
+
   /** A member's own thread on this machine. */
   #threadOf(member: TeamMember): string | null {
     if (member.coreId !== this.#self) return null;
@@ -304,9 +315,7 @@ export class TeamStore {
     const team = this.#require(params.teamId);
     const ask = params.card === undefined ? null : this.#card(params.card, 'leave');
     if (ask !== null && ask.kind === 'leave' && ask.teamId !== team.id) throw refused(`card: it asks about another team, ${ask.teamName}`, { field: 'card' });
-    const wanted = typeof params.botId === 'string' ? params.botId.trim() : '';
-    const member = team.members.find(entry => entry.botId === wanted) ?? team.members.find(entry => entry.name.toLowerCase() === wanted.toLowerCase());
-    if (!member) throw refused(`botId: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field: 'botId' });
+    const member = this.#member(team, params.botId, 'botId');
     const saved = this.#save(team, { members: team.members.filter(entry => entry.key !== member.key) });
     const threadId = this.#threadOf(member);
     const reason = `${member.name} left the team ${team.name}`;
@@ -415,16 +424,18 @@ export class TeamStore {
     return saved;
   }
 
-  /** Each recipient's letter. One that fails leaves the others theirs; a retry or the next start repairs it (`#repair`). */
+  /** Each recipient's letter. */
   #hand(team: Team, post: TeamPost): void {
-    let failed: unknown = null;
     for (const recipient of post.to) {
       const member = team.members.find(entry => entry.key === recipient);
       const threadId = member ? this.#threadOf(member) : null;
-      if (threadId === null) continue;
-      try { this.#core.coordination.teamLetters.accept(team, threadId, post.seq, post.author === TEAM_OWNER); } catch (error) { failed ??= error; }
+      if (threadId !== null) this.#accept(team, threadId, post.seq, post.author === TEAM_OWNER);
     }
-    if (failed !== null) throw failed;
+  }
+
+  /** The post stands: a letter that fails is logged and its delivery stays `waiting` until a retried id or the next start repairs it (`#repair`). */
+  #accept(team: Team, threadId: string, seq: number, owner: boolean): void {
+    try { this.#core.coordination.teamLetters.accept(team, threadId, seq, owner); } catch (error) { this.#core.log('warn', `teams letter of #${seq} in ${team.id}: ${messageOf(error)}`); }
   }
 
   /**
@@ -443,7 +454,7 @@ export class TeamStore {
       if (!team || !member || threadId === null || row.seq <= member.joinedSeq) continue;
       const carried = this.#db.query(`SELECT 1 FROM coordination_letters l, json_each(l.data, '$.team.triggers') t WHERE l.thread_id = ? AND l.direction = 'in'
         AND l.status IN ('received', 'uncertain') AND json_extract(l.data, '$.team.teamId') = ? AND t.value = ? LIMIT 1`).get(threadId, team.id, row.seq);
-      if (!carried) this.#core.coordination.teamLetters.accept(team, threadId, row.seq, row.author === TEAM_OWNER);
+      if (!carried) this.#accept(team, threadId, row.seq, row.author === TEAM_OWNER);
     }
   }
 
@@ -453,13 +464,7 @@ export class TeamStore {
     const team = this.#require(params.teamId);
     const audience = params.audience ?? 'team';
     if (audience !== 'team' && audience !== 'private') throw invalidParams('audience: expected team or private');
-    const to = (params.to ?? []).map(ref => {
-      const wanted = typeof ref === 'string' ? ref.trim() : '';
-      if (wanted.includes('/')) throw refused(LATER, { field: 'to' });
-      const member = team.members.find(entry => entry.botId === wanted) ?? team.members.find(entry => entry.name.toLowerCase() === wanted.toLowerCase());
-      if (!member) throw refused(`to: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field: 'to' });
-      return member.key;
-    });
+    const to = (params.to ?? []).map(ref => this.#member(team, ref, 'to').key);
     return this.#post(team, { id: params.id, author: TEAM_OWNER, text: params.text, audience, to, inReplyTo: params.inReplyTo });
   }
 
@@ -473,12 +478,10 @@ export class TeamStore {
   /** `boite team dm`: a private post to one member or the owner. */
   dm(params: RpcParams<'teams.dm'>): TeamPost {
     this.gate();
-    const { team, key } = this.#mine(params.threadId, params.to === undefined ? undefined : params.team);
+    const { team, key } = this.#mine(params.threadId, params.team);
     const wanted = typeof params.to === 'string' ? params.to.trim() : '';
-    if (wanted.includes('/')) throw refused(LATER, { field: 'to' });
-    const recipient = wanted.toLowerCase() === TEAM_OWNER ? TEAM_OWNER
-      : (team.members.find(entry => entry.botId === wanted) ?? team.members.find(entry => entry.name.toLowerCase() === wanted.toLowerCase()))?.key;
-    if (recipient === undefined) throw refused(`to: ${JSON.stringify(wanted)} is no member of ${team.name}; name a member or owner`, { field: 'to' });
+    if (!wanted) throw invalidParams('to: expected a member or owner');
+    const recipient = wanted.toLowerCase() === TEAM_OWNER ? TEAM_OWNER : this.#member(team, wanted, 'to').key;
     return this.#post(team, { id: params.id ?? randomUUID(), author: key, text: params.text, audience: 'private', to: [recipient], turnId: this.#core.journal.runningTurn(params.threadId)?.id ?? null });
   }
 
@@ -752,6 +755,7 @@ export class TeamStore {
     const team = this.get(envelope.team_id);
     const bot = this.#core.workforce.agentOfThread(envelope.thread_id);
     if (!team || team.archived || !bot || !team.members.some(member => member.botId === bot.id)) return null;
+    if (envelope.recipient !== null && envelope.recipient !== TEAM_OWNER && !team.members.some(member => member.key === envelope.recipient)) return null;
     const text = finalText(this.#core, turn);
     if (!text || quietText(text)) return null;
     return this.#post(team, {
