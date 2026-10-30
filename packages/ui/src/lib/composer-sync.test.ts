@@ -111,7 +111,7 @@ test('a failed first hello still starts composer sync when the transport reconne
   await desk.client.restore();
   expect(desk.store.connection).toBe('ready');
   queue(desk.store, 't-trace', 'Follow up after startup recovered');
-  await desk.store.sendQueuedNow('t-trace');
+  // An idle thread has no Send now button: its queue must leave automatically.
   await vi.waitFor(async () => expect(await userTexts(desk.client, 't-trace')).toContain('Follow up after startup recovered'));
   expect(called(desk, 'composer.list')).toHaveLength(1);
   expect(putsOf(desk, 't-trace')).not.toHaveLength(0);
