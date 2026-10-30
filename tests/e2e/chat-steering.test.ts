@@ -20,8 +20,21 @@ test('desktop and paired phone deliver queued and immediate follow-ups without e
     const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
     for (const mobile of [false, true]) {
       const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Review changes' });
-      page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+      page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
+      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+        const send = WebSocket.prototype.send;
+        WebSocket.prototype.send = function (data) {
+          if (!window.__steeringHelloDropped && typeof data === 'string' && JSON.parse(data).method === 'hello') {
+            window.__steeringHelloDropped = true;
+            this.close();
+            return;
+          }
+          return send.call(this, data);
+        };
+      ` });
+      await page.navigate(mobile ? await mintPairing(core) : pairingUrlOf(core));
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      expect(await page.evaluate('window.__steeringHelloDropped')).toBe(true);
       await page.click(`[data-thread-id="${thread.id}"]`);
       await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")');
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -40,7 +53,12 @@ test('desktop and paired phone deliver queued and immediate follow-ups without e
       await page.type(input, 'Then check the error message');
       await page.click(send);
       await page.waitFor('document.querySelector("[data-testid=composer-send-now]")');
-      await page.click('[data-testid=composer-send-now]');
+      if (mobile) await page.click('[data-testid=composer-send-now]');
+      else {
+        await page.evaluate('document.querySelector("[data-testid=composer-input]").focus()');
+        await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+        await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      }
       await page.waitFor('!document.querySelector("[data-testid=composer-queued]") && Array.from(document.querySelectorAll("[data-testid=message]")).some(el => el.textContent.includes("Then check the error message"))');
       updated = await client.call('threads.get', { threadId: thread.id });
       expect(updated.status).toBe('running');
