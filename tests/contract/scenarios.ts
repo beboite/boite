@@ -10,6 +10,7 @@
 import { COMPOSER_SCENARIOS } from './composer.ts';
 import { CONTACT_MAIL_SCENARIOS } from './contact-mail.ts';
 import { SHARED_SCENARIOS } from './shared-projects.ts';
+import { TEAM_SCENARIOS } from './teams.ts';
 import {
   GROUP_INVITE_PREFIX,
   PROJECT_NAME_MAX,
@@ -159,6 +160,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   ...SHARED_SCENARIOS,
   ...COMPOSER_SCENARIOS,
   ...CONTACT_MAIL_SCENARIOS,
+  ...TEAM_SCENARIOS,
   'artifacts.viewBlock reuses HTML and refuses empty or oversized UTF-8 input': async (env) => {
     const html = '<p>Shared view</p>';
     const { url } = await env.call('artifacts.viewBlock', { html });

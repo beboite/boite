@@ -36,7 +36,6 @@
   "browser.importCookies",
   "browser.remoteSelection",
   "browser.remoteWatch",
-  "client.preferences",
   "collaboration.bridge.forward",
   "collaboration.bridge.register",
   "collaboration.bridge.reply",

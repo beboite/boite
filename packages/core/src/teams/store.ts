@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  routeTeamPost, teamMemberKey, teamPostVisible, TEAM_BRIEF_MAX, TEAM_NAME_MAX, TEAM_OWNER, TEAM_POST_MAX,
+  routeTeamPost, teamMemberKey, teamPostVisible, TEAM_BRIEF_MAX, TEAM_MEMBERS_MAX, TEAM_NAME_MAX, TEAM_OWNER, TEAM_POST_MAX,
   type AgentLetter, type AgentProfile, type Message, type RequestId, type RpcParams, type Team, type TeamAsk, type TeamAudience,
   type TeamDelivery, type TeamMember, type TeamParty, type TeamPost, type TeamPostRef, type TeamReading, type ThreadSummary, type Turn,
 } from '@boite/contracts';
@@ -32,7 +32,6 @@ type Stored = Pick<Team, 'name' | 'brief' | 'members' | 'dispatcher' | 'paused' 
 const IN_FLIGHT = new Set(['Queued for provider delivery', 'Awaiting provider acknowledgement']);
 const inFlight = (error: string | null): boolean => error !== null && (IN_FLIGHT.has(error) || error.startsWith('Awaiting provider turn '));
 const LATER = 'members on other machines come in a later version';
-const MAX_MEMBERS = 12;
 
 /** A final answer's post id: the same turn always gives the same id, so a retried publication posts once. */
 export function answerPostId(turnId: string): string {
@@ -170,7 +169,7 @@ export class TeamStore {
   }
 
   #bots(refs: unknown): AgentProfile[] {
-    if (!Array.isArray(refs) || refs.length === 0 || refs.length > MAX_MEMBERS) throw invalidParams(`members: expected 1 to ${MAX_MEMBERS} bots`);
+    if (!Array.isArray(refs) || refs.length === 0 || refs.length > TEAM_MEMBERS_MAX) throw invalidParams(`members: expected 1 to ${TEAM_MEMBERS_MAX} bots`);
     const bots = refs.map(ref => this.#bot(ref));
     return bots.filter((bot, index) => bots.findIndex(other => other.id === bot.id) === index);
   }
@@ -278,7 +277,7 @@ export class TeamStore {
     const bot = this.#bot(params.botId, 'botId');
     if (team.archived) throw refused(`${team.name} is archived`, { field: 'teamId' });
     if (team.members.some(member => member.botId === bot.id)) throw refused(`${bot.name} is already a member of ${team.name}`, { field: 'botId' });
-    if (team.members.length >= MAX_MEMBERS) throw refused(`a team holds at most ${MAX_MEMBERS} bots`, { field: 'botId' });
+    if (team.members.length >= TEAM_MEMBERS_MAX) throw refused(`a team holds at most ${TEAM_MEMBERS_MAX} bots`, { field: 'botId' });
     // A new member starts reading after the posts already there; `boite team read` shows the older ones.
     const saved = this.#save(team, { members: [...team.members, { key: this.#key(bot.id), coreId: this.#self, botId: bot.id, name: bot.name, joinedSeq: team.lastSeq }] });
     if (params.card !== undefined) this.#settle(params.card, `applied: ${bot.name} joined ${team.name}`);

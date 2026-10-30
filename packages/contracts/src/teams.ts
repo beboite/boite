@@ -13,6 +13,8 @@ export const TEAM_OWNER = 'owner';
 
 export const TEAM_NAME_MAX = 60;
 export const TEAM_BRIEF_MAX = 1000;
+/** Bots in one team. */
+export const TEAM_MEMBERS_MAX = 12;
 /** A post holds what an agent letter holds. */
 export const TEAM_POST_MAX = 4000;
 /** What one team letter renders, in UTF-8 bytes, triggers and context together. */

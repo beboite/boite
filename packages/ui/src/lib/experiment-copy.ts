@@ -16,6 +16,7 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'resident-agents': strings.experiments.residentAgents,
     whip: strings.experiments.whip,
     contacts: strings.experiments.contacts,
-    'auto-goal': strings.experiments.autoGoal
+    'auto-goal': strings.experiments.autoGoal,
+    teams: strings.experiments.teams
   };
 }
