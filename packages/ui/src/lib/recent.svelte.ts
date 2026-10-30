@@ -50,11 +50,10 @@ export function workingThread(store: Pick<Store, 'subagents'>, thread: ThreadSum
   return state === 'working' || state === 'queued' || state === 'delegating' || state === 'monitoring' || state === 'background' || state === 'watching';
 }
 
-/** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */
+/** Marking done requires an idle thread and accepts unsent drafts. */
 export function canMarkDone(store: Store, thread: ThreadSummary): boolean {
   return !thread.archived && store.connection === 'ready' && !threadActive(thread.status)
-    && !thread.backgroundWork?.kinds.length && !thread.pendingMove && !store.moveBlocked(thread.id)
-    && !hasUnsentDraft(store.composerStates[thread.id]);
+    && !thread.backgroundWork?.kinds.length && !thread.pendingMove && !store.moveBlocked(thread.id);
 }
 
 export async function markDone(store: Store, thread: ThreadSummary): Promise<boolean> {

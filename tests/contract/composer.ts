@@ -61,6 +61,25 @@ async function batching(env: ContractEnv, incognito: boolean) {
 }
 
 export const COMPOSER_SCENARIOS: Record<string, Scenario> = {
+  'composer drafts on another device allow Mark done and removal, retaining input for restore': async env => {
+    const { thread, choice } = await target(env);
+    const peer = await env.peer();
+    const value: ComposerValue = { input: { ...box(), text: 'unfinished draft', queued: [
+      { id: `${thread.id}-held`, text: 'held prompt', attachments: [], choice },
+    ] } };
+    const initial = await peer.call('composer.put', { section: 'inputs', id: thread.id, expectedRevision: 0, value });
+    await peer.call('threads.focus', { threadId: null, protectedThreadIds: [thread.id], protectAllThreads: false });
+    await env.call('threads.focus', { threadId: null, protectedThreadIds: [thread.id], protectAllThreads: false });
+    check((await env.call('threads.archive', { threadId: thread.id, onlyIfIdle: true })).archived, 'reported input blocked Mark done');
+    await env.call('threads.archive', { threadId: thread.id, archived: false });
+    await env.call('threads.remove', { threadId: thread.id });
+    await refused(env.call('threads.get', { threadId: thread.id }), RpcErrorCode.NotFound);
+    await env.call('threads.restore', { threadId: thread.id });
+    const saved = (await peer.call('composer.list', {})).find(row => row.id === thread.id);
+    check(JSON.stringify(saved?.value) === JSON.stringify(initial.record.value), 'putting away the thread lost its draft or paused queue');
+    check((await env.call('threads.get', { threadId: thread.id })).turns.length === 0, 'putting away the thread delivered paused input');
+    peer.disconnect();
+  },
   'composer batches equal choices, splits distinct choices and auto-goal flags, and replays accepted ids once': env => batching(env, false),
   'composer incognito batching and attachment delivery match ordinary queues': env => batching(env, true),
   'composer private records and assets are restricted to the originating connection': async env => {

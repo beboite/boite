@@ -71,6 +71,14 @@ test('expiry observes the exact deadline, disabled retention and active descenda
     await deleteExpiredDoneThreads(harness.core);
     expect(harness.core.journal.getThread(threadId)).not.toBeNull();
     harness.core.journal.putThread({ ...harness.core.threads.require(childId), status: 'idle' });
+    // Automatic expiry still protects input, even though manual Done accepts it.
+    await client.call('threads.focus', { threadId: null, protectedThreadIds: [childId], protectAllThreads: false });
+    await deleteExpiredDoneThreads(harness.core);
+    expect(harness.core.journal.getThread(threadId)).not.toBeNull();
+    await client.call('threads.focus', { threadId: null, protectedThreadIds: [], protectAllThreads: true });
+    await deleteExpiredDoneThreads(harness.core);
+    expect(harness.core.journal.getThread(threadId)).not.toBeNull();
+    await client.call('threads.focus', { threadId: null, protectAllThreads: false });
     await deleteExpiredDoneThreads(harness.core);
     expect(harness.core.journal.getThread(threadId)).toBeNull();
     expect(harness.core.journal.getThread(childId)).toBeNull();

@@ -132,8 +132,7 @@ export class ThreadFocus {
 
   /**
    * Input a client named on this thread. A client that cannot read its drafts
-   * protects every thread for automatic passes, but it names none, so it never
-   * stops the user from marking one conversation done.
+   * protects every thread for automatic passes, but it names none.
    */
   hasReportedInput(threadId: ThreadId): boolean {
     for (const ids of this.#protectedInputs.values()) if (ids.has(threadId)) return true;

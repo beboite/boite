@@ -304,11 +304,12 @@ Recent keeps completed conversations in a collapsed Done section at the bottom,
 and manual archives in an Archived section after it. Done holds only
 conversations with a done date; a manual archive never lands there.
 Mark done uses the persistent archive and its undo action; `threads.archive`
-with `onlyIfIdle: true` refuses pending work or input in the conversation's
+with `onlyIfIdle: true` refuses pending work in the conversation's
 family before changing it, and its refusal names what is pending and in which
-child. Input counts when a device names it on a family member; a device that
-cannot read its drafts protects every thread from expiry and merged-PR archives,
-never from Mark done. A paused workflow run holds expiry but not Mark done,
+child. Unsent drafts and paused input queues never block Mark done or manual
+deletion. Reported input and clients
+that cannot read their drafts still protect automatic expiry and merged-PR archives.
+A paused workflow run holds expiry but not Mark done,
 which stops it as archiving does. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
