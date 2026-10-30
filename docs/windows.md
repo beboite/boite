@@ -196,7 +196,10 @@ boite window unpoint
 - The Start menu, search and the other system flyouts lie in a layer of the
   system above every app's window, the box included. `point` still answers,
   with `behind: true` and a line telling the agent to say where to click;
-  `wait-click` still sees the click there.
+  `wait-click` still sees the click there. While the Start menu is open, the
+  taskbar joins that layer too (measured on Windows 11: its band goes from 1
+  to 6, and back about 2 s after the menu closes), so a box on a taskbar
+  button hides until then; the shell puts it back on top on its next tick.
 - The taskbar is listed as the `explorer.exe` window with no title, so an agent
   can point at its Start button.
 
