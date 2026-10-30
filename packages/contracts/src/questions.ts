@@ -93,6 +93,8 @@ export interface BackgroundTaskObservation extends BackgroundTask {
   providerId: ProviderId;
   sessionGeneration: number;
   parentTurnId: TurnId | null;
+  /** Last task turn that left this observation running; absent only on legacy history. */
+  checkpointTurnId?: TurnId | null;
   state: 'running' | 'completed' | 'error' | 'cancelled' | 'ended';
   observedAt: Timestamp;
   finishedAt: Timestamp | null;
@@ -126,6 +128,15 @@ export type BackgroundWait =
   | { state: 'waiting'; for: string; since: Timestamp; until: Timestamp | null }
   | { state: 'interrupted'; for: string; reason: BackgroundInterruption; at: Timestamp };
 
+/** Durable checkpoint membership distinguishes both event orders within one millisecond. */
+export function backgroundLeftBy(turn: Pick<Turn, 'id' | 'finishedAt'>, history: readonly BackgroundTaskObservation[]): BackgroundTaskObservation[] {
+  if (turn.finishedAt === null) return [];
+  return history.filter(task => task.state !== 'running' && task.finishedAt !== null &&
+    (task.checkpointTurnId !== undefined
+      ? task.checkpointTurnId === turn.id
+      : task.finishedAt > turn.finishedAt! && task.startedAt <= turn.finishedAt!));
+}
+
 /**
  * What a thread at rest still waits on, from its last turn, the background
  * tasks its agent runs now and the observed history of those tasks. The core
@@ -135,7 +146,7 @@ export type BackgroundWait =
  */
 export function backgroundWait(input: {
   status: ThreadStatus;
-  lastTurn: Pick<Turn, 'status' | 'finishedAt'> | null;
+  lastTurn: Pick<Turn, 'id' | 'status' | 'finishedAt'> | null;
   live: readonly BackgroundTask[];
   history: readonly BackgroundTaskObservation[];
   now: Timestamp;
@@ -144,8 +155,7 @@ export function backgroundWait(input: {
   if (threadActive(input.status) || lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
   const names = (tasks: readonly BackgroundTask[]) => [...new Set(tasks.map(task => task.description.trim() || task.kind))].join(', ');
   if (input.live.length > 0) return { state: 'waiting', for: names(input.live), since: Math.min(...input.live.map(task => task.startedAt)), until: null };
-  // The tasks the turn left running: started before it ended, ended after.
-  const ended = input.history.filter(task => task.state !== 'running' && task.finishedAt !== null && task.finishedAt > lastTurn.finishedAt! && task.startedAt <= lastTurn.finishedAt!);
+  const ended = backgroundLeftBy(lastTurn, input.history);
   if (ended.length === 0) return null;
   const failed = ended.filter(task => task.state !== 'completed');
   const reasonOf = (task: BackgroundTaskObservation): BackgroundInterruption =>

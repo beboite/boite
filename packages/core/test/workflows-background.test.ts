@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { BACKGROUND_WAKE_GRACE_MS, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { DelegationConfig, WorkflowPlan } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
+import { unwoken } from '../src/delegation/completion.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -223,4 +224,27 @@ test.each(['live', 'completed'] as const)('stopping a run ends the work of a ste
   expect(settle).toHaveBeenCalledWith(childId);
   expect(h.core.threads.agentState.background.get(childId) ?? []).toEqual([]);
   expect(h.core.workflows.get(threadId, run.id).status).toBe('stopped');
+});
+
+
+test('background work completed before the checkpoint in the same millisecond does not ask for another final answer', async () => {
+  const { h, owner, threadId, runs } = await parent();
+  const started = await owner.call('workflows.start', { threadId, requestId: 'same-ms-before', plan: PLAN });
+  const step = () => h.core.workflows.get(threadId, started.id).nodes[0]!.instances[0]!;
+  await waitFor(() => !!step()?.threadId && runs.has(step().threadId!));
+  const childId = step().threadId!, first = runs.get(childId)!;
+  const now = Date.now.bind(Date), at = now();
+  const clock = spyOn(Date, 'now').mockReturnValue(at);
+  restores.push(() => clock.mockRestore());
+  first.ctx.background!([{ id: 'ci-1', kind: 'monitor', description: 'Pending CI', toolId: null, startedAt: at }]);
+  first.ctx.backgroundFinished!('ci-1', 'completed');
+  first.finish('Final result: CI passed before the turn ended.');
+  await waitFor(() => step().status === 'done');
+  expect(h.core.journal.getTurn(first.ctx.turn.id)!.finishedAt).toBe(at);
+  expect(h.core.threads.agentState.backgroundHistory.list(childId)[0]!.finishedAt).toBe(at);
+  expect(h.core.threads.get(childId).backgroundWait).toBeNull();
+  clock.mockImplementation(() => now() + BACKGROUND_WAKE_GRACE_MS + 1000);
+  expect(unwoken(h.core, childId)).toBeNull();
+  expect(runs.get(childId)).toBe(first);
+  expect(step().result).toBe('Final result: CI passed before the turn ended.');
 });

@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { defaultCoordinationConfig, RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { FAKE_CONTACT_INVITE } from './fake-client/contacts';
-import { fakeCore } from './fake-client/coordination';
+import { deliverContactAnswer, fakeCore } from './fake-client/coordination';
 import { RpcFailure } from './client';
 import { encodeInvite, inviteShare, readInvite } from './contact-link';
 
@@ -79,6 +79,25 @@ test('a group contact keeps both sides of its exchange in the initiating convers
   expect((await source!.call('collaboration.contacts', { threadId: 't-trace' })).find(contact => contact.coreId === 'core-outside')!.projects).toContain('notes');
   await outside!.call('contacts.revoke', { coreId: 'core-gateway', projectId: 'p-boite' });
   await expect(source!.call('collaboration.send', { threadId: 't-trace', to: target, text: 'No longer allowed', requestId: 'routed-revoked' })).rejects.toBeInstanceOf(RpcFailure);
+});
+
+test.each([
+  ['accepted', 'owner', 'Chris opened its project "website" to you.'],
+  ['accepted', 'match', "Chris's Boite automatically opened its project \"website\" to you."],
+  ['accepted', 'concierge', "Chris's Boite automatically opened its project \"website\" to you."],
+  ['refused', 'owner', 'Chris refused your request: Not available.'],
+  ['refused', 'concierge', "Chris's Boite automatically refused your request: Not available."],
+  ['refused', undefined, "Chris's Boite refused your request: Not available."],
+] as const)('contact answer attribution: %s by %s', async (status, decidedBy, expected) => {
+  const { client } = await fake();
+  const { coreId } = await client.call('collaboration.identity', {});
+  const seeded = (await client.call('contacts.get', {})).requests.find(request => request.direction === 'out')!;
+  // Automatic and historical replies have no RPC producer in the fake: deliver its existing seed.
+  deliverContactAnswer(fakeCore(coreId)!, {
+    ...seeded, from: { ...seeded.from, threadId: 't-trace' }, status, decidedBy, reason: 'Not available.'
+  });
+  const answer = (await client.call('collaboration.get', { threadId: 't-trace' })).messages.at(-1)!;
+  expect(answer).toMatchObject({ origin: 'contact', text: expected, status: 'delivered' });
 });
 
 test('a direct contact preserves mutual-trust sends, search and transcript grants', async () => {

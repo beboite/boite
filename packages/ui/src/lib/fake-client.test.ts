@@ -1265,7 +1265,7 @@ test('fake [ask] leaves a card nobody waits on, and its answer opens the next tu
   // The turn ended with the question still open and the shell still listed.
   expect(thread.status).toBe('idle');
   expect(thread.background?.map((task) => task.kind)).toEqual(['shell']);
-  expect(thread.backgroundHistory).toMatchObject([{ state: 'running', parentTurnId: thread.turns[0]!.id, finishedAt: null }]);
+  expect(thread.backgroundHistory).toMatchObject([{ state: 'running', parentTurnId: thread.turns[0]!.id, checkpointTurnId: thread.turns[0]!.id, finishedAt: null }]);
   expect((await client.call('threads.list', {})).find(row => row.id === threadId)).not.toHaveProperty('backgroundHistory');
   const [question] = await client.call('questions.list', { threadId });
   expect(question).toMatchObject({ async: true, text: 'Which port should the dev server take?' });
@@ -1656,3 +1656,24 @@ test.for([{ questionOn: 'parent', release: 'dismiss' }, { questionOn: 'child', r
     expect((await client.call('threads.get', { threadId })).messages).toEqual(history);
   },
 );
+
+
+test('fake rewind keeps background checkpoints owned by their provider session', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const { id: threadId } = await newThread(client);
+  await client.call('turns.start', { threadId, prompt: '[background] watch CI' });
+  await client.settled();
+  const before = await client.call('threads.get', { threadId });
+  const previous = before.backgroundHistory![0]!;
+  expect(previous.checkpointTurnId).toBe(before.turns[0]!.id);
+  const message = before.messages.find(entry => entry.role === 'user')!;
+  const rewound = await client.call('threads.rewind', { threadId, messageId: message.id });
+  await client.call('turns.start', { threadId, prompt: rewound.prompt });
+  await client.settled();
+  const after = await client.call('threads.get', { threadId });
+  expect(after.sessionGeneration).toBeGreaterThan(before.sessionGeneration ?? 0);
+  const old = after.backgroundHistory!.find(task => task.id === previous.id && task.sessionGeneration === previous.sessionGeneration)!;
+  expect(old.checkpointTurnId).toBe(previous.checkpointTurnId);
+  expect(after.backgroundHistory!.filter(task => task.sessionGeneration === after.sessionGeneration))
+    .toContainEqual(expect.objectContaining({ state: 'running', checkpointTurnId: after.turns.at(-1)!.id }));
+});

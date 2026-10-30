@@ -293,10 +293,15 @@ for (const ending of ['completed', 'error', 'refused'] as const) test(`a remote 
     const start = spyOn(pc.core.threads, 'startTurn').mockImplementation(() => { throw new Error('provider disabled'); });
     restores.push(() => start.mockRestore());
   }
-  first.ctx.backgroundFinished!('ci', ending === 'error' ? 'error' : 'completed');
   const now = Date.now.bind(Date);
-  const clock = spyOn(Date, 'now').mockImplementation(() => now() + BACKGROUND_WAKE_GRACE_MS + 1000);
+  const checkpointAt = pc.core.journal.getTurn(first.ctx.turn.id)!.finishedAt!;
+  // Completion is causally after the checkpoint even when the clock has not advanced.
+  const clock = spyOn(Date, 'now').mockReturnValue(checkpointAt);
   restores.push(() => clock.mockRestore());
+  first.ctx.backgroundFinished!('ci', ending === 'error' ? 'error' : 'completed');
+  expect(pc.core.threads.agentState.backgroundHistory.list(childId)[0]!.finishedAt).toBe(checkpointAt);
+  expect(pc.core.threads.get(childId).backgroundWait).toMatchObject({ state: 'waiting' });
+  clock.mockImplementation(() => now() + BACKGROUND_WAKE_GRACE_MS + 1000);
   if (ending !== 'completed') {
     await waitFor(() => ['failed', 'done'].includes(run(started.id).status));
     clock.mockRestore();
@@ -306,7 +311,22 @@ for (const ending of ['completed', 'error', 'refused'] as const) test(`a remote 
     if (ending === 'refused') expect(step().error).toContain('provider disabled');
     return;
   }
-  await waitFor(() => runs.get(childId) !== first, 5000);
+  try {
+    await waitFor(() => runs.get(childId) !== first, 5000);
+  } catch (error) {
+    try {
+      console.error('Background final wake timeout', {
+        now: Date.now(),
+        checkpoint: pc.core.journal.getTurn(first.ctx.turn.id),
+        thread: pc.core.threads.get(childId),
+        history: pc.core.threads.agentState.backgroundHistory.list(childId),
+        run: run(started.id),
+        remote: desk.core.delegation.remote.record(threadId, step().machine!.requestId),
+        logs: await pc.core.logs.query({ limit: 40, minLevel: 'debug' }),
+      });
+    } catch (diagnosticError) { console.error('Background final wake diagnostics failed', diagnosticError); }
+    throw error;
+  }
   clock.mockRestore();
   expect(step()).toMatchObject({ status: 'running', result: null });
   expect(runs.get(childId)!.ctx.prompt).toContain('give your final result now');

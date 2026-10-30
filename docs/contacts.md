@@ -236,9 +236,11 @@ These counts include local cards and the explicitly associated shared cards.
 Local cards stay private. The [shared board protocol](board.md#shared-board-protocol)
 requires both endpoint owners' board consent.
 
-An agent asks a contact for help with `boite threads ask <contact> "<text>"`
-(`collaboration.ask`): "an agent on a project like X". The request carries the
-agent's git remote when its checkout has one. On the contact's side it waits
+An agent requests access to a contact's project with
+`boite threads ask <contact> "<text>"` (`collaboration.ask`): "an agent on a
+project like X". To message an agent conversation, use `boite threads send`.
+The access request carries the agent's git remote when its checkout has one.
+On the contact's side it waits
 in the Contacts page: the owner accepts by opening one project, or refuses with
 a reason. A request from a contact marked trusted can open a project without
 the owner:
@@ -268,8 +270,11 @@ kept only to recognize its retries and to answer it, so two contacts, or a
 contact reusing an id of this core's requests, never reach each other's
 request. The decision comes back to the asking thread as a
 message (`origin: 'contact'`): the project opened and its threads, or the
-reason for the refusal. When the contact's core refuses the ask itself (a
-tier, a full queue), the asking thread is told the same way. That message, like any
+reason for the refusal. Match and concierge decisions identify the remote
+Boite as answering automatically; only an explicit owner decision is attributed
+to the owner. An automatic response does not mean the owner read the request.
+When the contact's core refuses the ask itself (a tier, a full queue), the
+answer names the remote Boite. That message, like any
 contact mail outside a shared project, waits for this owner unless the contact
 is trusted here ([Human letters and file boundaries](#human-letters-and-file-boundaries)).
 

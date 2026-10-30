@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 import { thrown } from './settle.ts';
 import { ContactMailboxes } from '../src/contacts/mailboxes.ts';
+import { Concierge, type ConciergeVerdict } from '../src/contacts/concierge.ts';
 
 const cores: TestCore[] = [];
 afterEach(async () => {
@@ -175,7 +176,7 @@ test('forwarding a mailbox backlog bounds deserialization and retries older fail
 }, 30000);
 
 test('a routed ask returns its decision to the initiating thread, including after an automatic pause', async () => {
-  const { a, b, c, ci, ac, source } = await routed();
+  const { a, b, c, bi, ci, ac, source, recipient } = await routed();
   const asked = await ac.call('collaboration.ask', { threadId: source, contact: ci, text: 'An agent on the opened project' });
   expect(asked.from).toMatchObject({ coreId: a.core.coordination.card().coreId, threadId: source });
   a.core.coordination.pause(source, 'restart');
@@ -185,6 +186,27 @@ test('a routed ask returns its decision to the initiating thread, including afte
   await waitFor(() => a.core.coordination.get(source).messages.some(letter => letter.origin === 'contact' && letter.status === 'delivered'), 12000);
   expect(a.core.coordination.get(source).config.paused).toBe(false);
   expect(a.core.coordination.get(source).messages.find(letter => letter.origin === 'contact')?.text).toContain('No matching project.');
+  const name = b.core.contacts.find(ci)!.name;
+  expect(a.core.coordination.get(source).messages.find(letter => letter.origin === 'contact')?.text).toStartWith(`${name} refused your request:`);
+  // The gateway forwards the same automatic attribution without inventing an owner reply.
+  c.core.contacts.update({ coreId: bi, trusted: true });
+  const decide = spyOn(Concierge.prototype, 'decide');
+  try {
+    for (const accept of [true, false]) {
+      const verdict = Promise.withResolvers<ConciergeVerdict>();
+      decide.mockReturnValueOnce(verdict.promise);
+      const request = await ac.call('collaboration.ask', { threadId: source, contact: ci, text: `Project access: ${accept}` });
+      a.core.coordination.pause(source, 'restart');
+      verdict.resolve(accept ? { accept: true, projectId: c.core.threads.require(recipient).projectId! } : { accept: false, reason: 'No matching project.' });
+      // Older cores can still send concierge refusals; current cores leave them to the owner.
+      if (!accept) b.core.contacts.answered(ci, { id: request.id, status: 'refused', reason: 'No matching project.', decidedBy: 'concierge', decidedAt: Date.now() }, []);
+      await waitFor(() => a.core.coordination.get(source).messages.some(letter => letter.from.threadId === request.id && letter.status === 'delivered'), 12000);
+      const answer = a.core.coordination.get(source).messages.find(letter => letter.from.threadId === request.id)!;
+      expect(answer.text).toStartWith(`${name}'s Boite automatically ${accept ? 'opened its project' : 'refused your request:'}`);
+      if (accept) expect(answer.text).toContain(recipient);
+      expect(a.core.coordination.get(source).config.paused).toBe(false);
+    }
+  } finally { decide.mockRestore(); }
   expect(b.core.journal.listThreads()).toHaveLength(0);
 }, 30000);
 

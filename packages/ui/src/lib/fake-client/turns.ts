@@ -370,6 +370,12 @@ function finishTurn(ctx: FakeContext, thread: Thread, turn: Turn, message: Messa
   };
   turn.status = record.cancelled ? 'stopped' : 'done';
   turn.finishedAt = ctx.now();
+  if (turn.status === 'done' && turn.execution?.operation !== 'compact' && turn.execution?.operation !== 'keepalive') {
+    for (const task of thread.backgroundHistory ?? []) {
+      if (task.state === 'running' && task.providerId === thread.providerId
+        && task.sessionGeneration === (thread.sessionGeneration ?? 0)) task.checkpointTurnId = turn.id;
+    }
+  }
   turn.usage = usage;
   ctx.usage.set(thread.id, addUsage(ctx.usage.get(thread.id) ?? emptyUsage(), usage));
   ctx.finished.push({ at: turn.finishedAt, threadId: thread.id, title: thread.title, projectId: thread.projectId, providerId: thread.providerId, model: thread.model, usage });

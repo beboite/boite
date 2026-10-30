@@ -190,14 +190,14 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     const contacts = await client.call('collaboration.contacts', { threadId });
     const lines = contacts.map(contact => `${contact.name}  (${contact.link}, opened to you: ${contact.projects.length ? contact.projects.join(', ') : 'no project yet'})`);
     if (lines.length === 0) lines.push("no contact; the user links other owners' Boites in Contacts");
-    else lines.push('Their threads in opened projects are in boite threads as <contact>/<thread-id>. Ask a contact for one with threads ask <contact> <text>.');
+    else lines.push('Their threads in opened projects are in boite threads as <contact>/<thread-id>. Request project access with threads ask <contact> <text>; the remote Boite can decide automatically. Message an agent conversation with threads send.');
     print(lines, contacts);
   } else if (action === 'ask') {
     const contact = want(1, 'a contact from threads contacts');
     const body = rest.slice(2).join(' ');
     if (!body) throw new AgentsUsage('threads ask needs the request text: the project or work you need a thread for');
     const request = await client.call('collaboration.ask', { threadId, contact, text: body });
-    const lines = [`request ${request.id} to ${request.contact}: ${request.status}${request.gitRemote ? ` (sent with your git remote ${request.gitRemote})` : ''}`];
+    const lines = [`request ${request.id} to ${request.contact}: ${request.status}${request.gitRemote ? ` (sent with your git remote ${request.gitRemote})` : ''}`, 'This requests project access; the remote Boite can decide automatically. Use threads send to message an agent conversation.'];
     if (options.wait) lines.push(...await waitFor({ coreId: request.coreId, threadId: request.id }, { coreId: request.from.coreId, threadId }));
     else lines.push('The answer comes back to this thread as a message: the project opened and its threads, or the reason for a refusal.');
     print(lines, request);

@@ -192,6 +192,7 @@ test('an ask waits for the owner, who opens a project; the asking thread hears t
   await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact'), 15000);
   const answer = letters(guest, guestThread).find(letter => letter.origin === 'contact')!;
   expect(answer.contact?.coreId).toBe(hostId);
+  expect(answer.text).toStartWith(`${guest.core.contacts.find(hostId)!.name} opened its project`);
   expect(answer.text).toContain('"alpha"');
   expect(answer.text).toContain(hostThread);
   const mine = (await guestClient.call('contacts.get', {})).requests.find(request => request.id === asked.id);
@@ -210,6 +211,7 @@ test('contact request answers resume automatic pauses while preserving Stop and 
     const incoming = requestsOf(host).find(request => request.remoteId === asked.id)!;
     await hostClient.call('contacts.decide', { id: incoming.id, accept: false, reason: 'No matching project.' });
     await waitFor(() => letters(guest, guestThread).some(letter => letter.origin === 'contact'), 10000);
+    expect(letters(guest, guestThread).find(letter => letter.origin === 'contact')!.text).toStartWith(`${guest.core.contacts.find(hostId)!.name} refused your request:`);
     const automatic = reason === 'restart' || reason === 'failure';
     expect(guest.core.coordination.get(guestThread).config.paused).toBe(!automatic);
     if (automatic) {
@@ -238,6 +240,7 @@ test('a trusted contact whose git remote matches exactly one project is answered
   await waitFor(() => requestsOf(guest).find(request => request.id === matched.id)?.status === 'accepted', 15000);
   const answered = (await hostClient.call('contacts.get', {})).requests.find(request => request.text === 'help on the app');
   expect(answered).toMatchObject({ status: 'accepted', decidedBy: 'match', project: { id: app.id } });
+  expect(letters(guest, guestThread).find(letter => letter.from.threadId === matched.id)!.text).toStartWith(`${guest.core.contacts.find(hostId)!.name}'s Boite automatically opened its project`);
 
   // No remote decides this one: the concierge, on the owner's "concierge" profile, opens docs.
   const echo = (await hostClient.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!;
@@ -273,6 +276,7 @@ test('a trusted contact whose git remote matches exactly one project is answered
   await waitFor(() => requestsOf(guest).find(request => request.id === other.id)?.status === 'accepted', 20000);
   const viaConcierge = (await hostClient.call('contacts.get', {})).requests.find(request => request.text === 'someone who writes documentation');
   expect(viaConcierge).toMatchObject({ status: 'accepted', decidedBy: 'concierge', project: { id: docs.id } });
+  expect(letters(guest, plainThread).find(letter => letter.from.threadId === other.id)!.text).toStartWith(`${guest.core.contacts.find(hostId)!.name}'s Boite automatically opened its project`);
   expect(prompts).toHaveLength(1);
   expect(prompts[0]).toContain('someone who writes documentation');
   expect(childEnv.map(out => JSON.parse(out) as unknown)).toEqual([[null, null, null, 'kept']]);

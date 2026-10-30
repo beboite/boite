@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { BACKGROUND_WAKE_GRACE_MS, backgroundWait, threadBusy, type BackgroundTask, type BackgroundTaskObservation } from '@boite/contracts';
 
 const END = 1_000_000;
-const turn = { status: 'done' as const, finishedAt: END };
+const turn = { id: 'checkpoint', status: 'done' as const, finishedAt: END };
 const task = (id: string, description: string, startedAt = END - 5_000): BackgroundTask => ({ id, kind: 'shell', description, toolId: null, startedAt });
 function seen(base: BackgroundTask, state: BackgroundTaskObservation['state'], finishedAt: number | null, reason: BackgroundTaskObservation['reason'] = 'provider-reported'): BackgroundTaskObservation {
   return { ...base, threadId: 't', providerId: 'claude', sessionGeneration: 0, parentTurnId: null, state, observedAt: finishedAt ?? base.startedAt, finishedAt, reason: state === 'running' ? null : reason };
@@ -18,8 +18,8 @@ test('a turn that ended on live background work waits on it, since its oldest ta
 test('a running turn, a turn that did not end done, or a turn that left nothing behind is not a wait', () => {
   const live = [task('a', 'test_emotes')];
   expect(wait({ status: 'running', live })).toBeNull();
-  expect(wait({ lastTurn: { status: 'error', finishedAt: END }, live })).toBeNull();
-  expect(wait({ lastTurn: { status: 'stopped', finishedAt: END }, live })).toBeNull();
+  expect(wait({ lastTurn: { ...turn, status: 'error' }, live })).toBeNull();
+  expect(wait({ lastTurn: { ...turn, status: 'stopped' }, live })).toBeNull();
   expect(wait({ lastTurn: null, live })).toBeNull();
   expect(wait({})).toBeNull();
   expect(threadBusy({ status: 'idle', backgroundWait: null })).toBe(false);
@@ -49,4 +49,12 @@ test('only the work the last turn left running counts: what ended before it, or 
   const before = seen(task('a', 'old'), 'error', END - 1_000);
   const afterwards = seen(task('b', 'next', END + 500), 'error', END + 2_000);
   expect(wait({ history: [before, afterwards], now: END + 60_000 })).toBeNull();
+});
+
+
+test('checkpoint membership distinguishes equal timestamps and supersedes timestamp guesses', () => {
+  const ended = seen(task('a', 'CI'), 'completed', END);
+  expect(wait({ history: [{ ...ended, checkpointTurnId: turn.id }] })).toMatchObject({ state: 'waiting', for: 'CI' });
+  expect(wait({ history: [{ ...ended, checkpointTurnId: null }] })).toBeNull();
+  expect(wait({ history: [{ ...ended, checkpointTurnId: 'previous', finishedAt: END + 1 }] })).toBeNull();
 });

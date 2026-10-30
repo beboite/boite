@@ -40,7 +40,7 @@ export function unwoken(core: Core, threadId: string): string | null {
   const turn = taskTurn(core, threadId);
   if (turn?.status !== 'done' || turn.finishedAt === null) return null;
   const end = turn.finishedAt;
-  const ended = core.threads.agentState.backgroundHistory.endedAfter(threadId, end).filter(task => task.startedAt <= end);
+  const ended = core.threads.agentState.backgroundHistory.afterCheckpoint(threadId, turn);
   if (ended.length === 0 || ended.some(task => task.state !== 'completed') || Date.now() < Math.max(...ended.map(task => task.finishedAt ?? end)) + BACKGROUND_WAKE_GRACE_MS) return null;
   return [...new Set(ended.map(task => task.description.trim() || task.kind))].join(', ');
 }

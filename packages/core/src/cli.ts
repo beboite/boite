@@ -167,8 +167,8 @@ ${CONTROL_HELP}
                                  <thread>: <thread-id>, <machine>/<thread-id>
   threads contacts               other owners' Boites linked as contacts and
                                  the projects each opened to you
-  threads ask <contact> <text>   ask a contact for a thread on a project like
-                                 yours; the answer comes back as a message
+  threads ask <contact> <text>   request project access; the remote Boite can
+                                 decide automatically; send messages with threads send
   bot memory                     a bot's MEMORY.md and its path
   bot remember <fact>            add a dated line to MEMORY.md
   bot routines                   its routines: schedule, next run, last outcome

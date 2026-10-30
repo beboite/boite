@@ -79,3 +79,20 @@ test('snapshot history caps newest observations deterministically without cappin
   expect(history.finish('thread', 'native-104', owner, 'completed', 40)).toBe(false);
   expect(journal.db.query(`SELECT COUNT(*) AS count FROM background_observations WHERE json_extract(payload, '$.state') = 'cancelled'`).get()).toEqual({ count: 105 });
 });
+
+
+test('checkpoint membership survives repeated observations and restart and preserves same-millisecond event order', () => {
+  const early = { ...task, id: 'early' }, late = { ...task, id: 'late' };
+  history.observe('thread', [early, task], owner, 20);
+  history.finish('thread', early.id, owner, 'completed', 20);
+  history.checkpoint('thread', 'checkpoint-1');
+  history.observe('thread', [task], owner, 20);
+  expect(history.list('thread').find(entry => entry.id === task.id)?.checkpointTurnId).toBe('checkpoint-1');
+  history.checkpoint('thread', 'checkpoint-2');
+  history.observe('thread', [task, late], owner, 20);
+  history.finish('thread', task.id, owner, 'completed', 20);
+  history.finish('thread', late.id, owner, 'completed', 20);
+  journal.close(); journal = new Journal(join(dir, 'journal.db')); history = new BackgroundHistory(journal);
+  expect(history.afterCheckpoint('thread', { id: 'checkpoint-1', finishedAt: 20 })).toEqual([]);
+  expect(history.afterCheckpoint('thread', { id: 'checkpoint-2', finishedAt: 20 }).map(entry => entry.id)).toEqual([task.id]);
+});

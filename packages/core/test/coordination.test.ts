@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'node:crypto';
-import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite/contracts';
+import { RpcErrorCode, type AgentAddress, type ContactRequest, type CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { Coordination, coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
@@ -27,6 +27,34 @@ function dest(h: TestCore, threadId: string): AgentAddress { return h.core.coord
 function send(h: TestCore, from: string, to: AgentAddress, text = 'May I restart the VM?', requestId: string = crypto.randomUUID()) {
   return h.core.coordination.send({ threadId: from, to, text, requestId });
 }
+
+test('contact answer letters distinguish automatic decisions from explicit owner decisions', async () => {
+  const { h, a, b } = await setup();
+  h.core.coordination.configure(a, { ...h.core.coordination.get(a).config, paused: true });
+  const from = h.core.coordination.describe(a);
+  const target = { ...h.core.coordination.describe(b), coreId: 'a'.repeat(64), machine: 'Remote' };
+  const cases: [ContactRequest['decidedBy'], 'accepted' | 'refused', string][] = [
+    ['concierge', 'refused', "Remote's Boite automatically refused your request: No matching project."],
+    ['concierge', 'accepted', "Remote's Boite automatically opened its project"],
+    ['match', 'accepted', "Remote's Boite automatically opened its project"],
+    ['owner', 'accepted', 'Remote opened its project'],
+    ['owner', 'refused', 'Remote refused your request: No matching project.'],
+    [undefined, 'refused', "Remote's Boite refused your request: No matching project."],
+  ];
+  for (const [decidedBy, status, expected] of cases) {
+    const id = `request-${decidedBy ?? 'core'}-${status}`;
+    h.core.coordination.contactAnswer({ id, direction: 'out', coreId: target.coreId, contact: 'Remote', from, text: 'An agent for this project', createdAt: Date.now(), status, decidedBy,
+      ...(status === 'accepted' ? { project: { id: 'remote-project', name: 'Shared project' } } : { reason: 'No matching project.' }),
+    }, 'Remote', status === 'accepted' ? [target] : []);
+    const answer = h.core.coordination.get(a).messages.find(letter => letter.from.threadId === id)!;
+    expect(answer.text).toStartWith(expected);
+    if (status === 'accepted') {
+      expect(answer.text).toContain('"Shared project"');
+      expect(answer.text).toContain(`Remote/${b}`);
+      expect(answer.text).toContain('boite threads send');
+    }
+  }
+});
 
 test('agents communicate by default, respect explicit restrictions and cannot change permissions', async () => {
   const { h, owner, a, b } = await setup();

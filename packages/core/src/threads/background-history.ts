@@ -1,4 +1,4 @@
-import type { BackgroundTask, BackgroundTaskObservation, ProviderId, ThreadId, TurnId } from '@boite/contracts';
+import { backgroundLeftBy, type BackgroundTask, type BackgroundTaskObservation, type ProviderId, type ThreadId, type Turn, type TurnId } from '@boite/contracts';
 import type { Journal } from '../journal.ts';
 import { parseJson } from '../journal/rows.ts';
 
@@ -32,11 +32,21 @@ export class BackgroundHistory {
     return rows.map(row => parseJson<BackgroundTaskObservation>(row.payload, 'background_observations.payload'));
   }
 
-  /** Observations that ended after `at`, any owner: what a turn ending at `at` left running and has since stopped. */
-  endedAfter(threadId: ThreadId, at: number): BackgroundTaskObservation[] {
+  /** Inside turn settlement: remember exactly which live tasks this turn left behind. */
+  checkpoint(threadId: ThreadId, turnId: TurnId): void {
+    const thread = this.journal.getThread(threadId);
+    if (!thread) return;
+    this.journal.db.query(`UPDATE background_observations SET payload = json_set(payload, '$.checkpointTurnId', ?)
+      WHERE thread_id = ? AND provider_id = ? AND session_generation = ? AND json_extract(payload, '$.state') = 'running'`)
+      .run(turnId, threadId, thread.providerId, thread.sessionGeneration ?? 0);
+  }
+
+  /** Work this checkpoint left running that has since stopped, including equal timestamps. */
+  afterCheckpoint(threadId: ThreadId, turn: Pick<Turn, 'id' | 'finishedAt'>): BackgroundTaskObservation[] {
     const rows = this.journal.db.query(`SELECT payload FROM background_observations WHERE thread_id = ?
-      AND json_extract(payload, '$.finishedAt') > ?`).all(threadId, at) as { payload: string }[];
-    return rows.map(row => parseJson<BackgroundTaskObservation>(row.payload, 'background_observations.payload'));
+      AND (json_extract(payload, '$.checkpointTurnId') = ? OR json_extract(payload, '$.finishedAt') > ?)`)
+      .all(threadId, turn.id, turn.finishedAt) as { payload: string }[];
+    return backgroundLeftBy(turn, rows.map(row => parseJson<BackgroundTaskObservation>(row.payload, 'background_observations.payload')));
   }
 
   private task(threadId: ThreadId, taskId: string, owner: BackgroundOwner): BackgroundTaskObservation | null {
@@ -72,6 +82,7 @@ export class BackgroundHistory {
         // A terminal observation cannot be resurrected by a delayed live snapshot.
         if (previous && (previous.state !== 'running' || previous.observedAt > at)) continue;
         this.put({ ...task, threadId, ...owner, parentTurnId: previous ? previous.parentTurnId : owner.parentTurnId,
+          checkpointTurnId: previous ? previous.checkpointTurnId : null,
           state: 'running', observedAt: at, finishedAt: null, reason: null });
       }
     });
