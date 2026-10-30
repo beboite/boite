@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
 import { MessageRuns } from './memory-timeline';
-import { activityShown, agentSummary, commandOf, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, ThoughtTitleScan, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
+import { activityShown, agentSummary, commandOf, liveLabel, pairPermissions, partRuns, programOf, runKey, runSpan, runSummary, thinkingShown, ThoughtTitleScan, thoughtTitle, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
 
 function tool(name: string, input: unknown, extra: Partial<ToolPart> = {}): ToolPart {
   return { type: 'tool', toolId: `${name}-${JSON.stringify(input)}`, name, input, output: 'ok', status: 'done', ...extra };
@@ -229,4 +229,32 @@ test('a proposed plan is a part of its own, never folded into the calls around i
     { kind: 'part', index: 2 },
     { kind: 'activity', indices: [3] }
   ]);
+});
+
+test('a permission folds into the run of the call it gates, a call standing alone included, and pairs with the closest call of its name', () => {
+  const bash = (toolId: string): ToolPart => ({ type: 'tool', toolId, name: 'Bash', input: { command: 'ls' }, output: null, status: 'done' });
+  const edit: ToolPart = { type: 'tool', toolId: 'e', name: 'Edit', input: { file_path: 'a.ts', old_string: 'a', new_string: 'b' }, output: null, status: 'done' };
+  const asked = (requestId: string, toolName: string) => ({ type: 'permission' as const, requestId, toolName, decision: 'allow' as const });
+  expect(partRuns([edit, asked('p', 'Edit'), bash('b')])).toEqual([{ kind: 'activity', indices: [0, 1] }, { kind: 'activity', indices: [2] }]);
+  expect(partRuns([bash('a'), asked('p', 'Bash'), { type: 'text', text: 'done' }])).toEqual([{ kind: 'activity', indices: [0, 1] }, { kind: 'part', index: 2 }]);
+  // An earlier call that needed no answer gets no shield: the ask belongs to the call just before it.
+  expect([...pairPermissions([bash('a'), bash('b'), asked('p', 'Bash')])]).toEqual([[2, 1]]);
+  expect([...pairPermissions([bash('a'), asked('p', 'Bash'), bash('b'), asked('q', 'Bash')])]).toEqual([[1, 0], [3, 2]]);
+  expect([...pairPermissions([asked('p', 'Bash'), bash('a')])]).toEqual([[0, 1]]);
+  expect([...pairPermissions([asked('p', 'Bash'), edit, bash('a')])]).toEqual([[0, 2]]);
+  // Calls that stand alone still take their permission, asked before or after them.
+  expect(partRuns([asked('p', 'Edit'), edit])).toEqual([{ kind: 'activity', indices: [0, 1] }]);
+  expect(partRuns([edit, bash('a'), asked('p', 'Edit')])).toEqual([{ kind: 'activity', indices: [0, 2] }, { kind: 'activity', indices: [1] }]);
+  expect([...pairPermissions([bash('a'), asked('p', 'fake_tool')])]).toEqual([]);
+  // Written text between them: the ask is for the call after it, not one before the paragraph.
+  expect([...pairPermissions([bash('a'), { type: 'text', text: 'Now the build.' }, asked('p', 'Bash'), bash('b')])]).toEqual([[2, 3]]);
+});
+
+test('a permission asked before its call keeps the block it opened when the call arrives', () => {
+  const asked = { type: 'permission' as const, requestId: 'p', toolName: 'Bash', decision: null };
+  const call: ToolPart = { type: 'tool', toolId: 'b', name: 'Bash', input: { command: 'ls' }, output: null, status: 'running' };
+  const [before] = partRuns([asked]);
+  const [after] = partRuns([asked, call]);
+  expect(after).toEqual({ kind: 'activity', indices: [0, 1] });
+  expect(runKey(after!)).toBe(runKey(before!));
 });

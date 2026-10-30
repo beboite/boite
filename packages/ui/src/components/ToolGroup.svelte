@@ -1,9 +1,11 @@
 <script lang="ts">
   import { secondClock } from '../lib/clock.svelte';
-  import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
+  import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, ShieldCheck, ShieldX, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
+  import type { PermissionRequest, RequestId } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
-  import { agentSummary, familyOf, liveLabel, runSpan, runSummary, thinkingShown, ThoughtTitleScan, type ActivityPart, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
+  import { agentSummary, familyOf, liveLabel, pairPermissions, runSpan, runSummary, thinkingShown, ThoughtTitleScan, type ActivityPart, type PermissionStep, type ThinkingStep, type ToolPart } from '../lib/tool-groups';
+  import PermissionCard from './PermissionCard.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolCard from './ToolCard.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -16,13 +18,17 @@
    * data.txt"); the running step's own words ("Running git", the thought it is
    * on) while one runs. The fold opens on the steps, each one the same line it
    * would be alone. Reasoning with no words that took under a second is not
-   * drawn at all.
+   * drawn at all. A permission the agent asked is one thing with its call:
+   * while it waits, its card stands for the call under the run; once answered,
+   * the call's line carries the answer as a shield.
    */
   let {
     parts,
     thinkingLive = false,
     isBackground,
     loadOutput,
+    permissionRequest = () => null,
+    answerPermission = () => false,
     store,
     threadId
   }: {
@@ -32,6 +38,10 @@
     /** Whether the work a call started still runs in the background. */
     isBackground: (toolId: string) => boolean;
     loadOutput?: (toolId: string) => Promise<void>;
+    /** What a permission asked, for its card: null once the record is gone. */
+    permissionRequest?: (requestId: RequestId) => PermissionRequest | null;
+    /** Sends the user's answer to a permission; false gives its buttons back. */
+    answerPermission?: (requestId: RequestId, decision: 'allow' | 'deny') => unknown;
     /** The machine and thread the run belongs to, where a thread link in it starts from. */
     store?: Store;
     threadId?: string;
@@ -40,7 +50,21 @@
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
 
   const isLive = (index: number) => thinkingLive && index === parts.length - 1;
-  let steps = $derived(parts.flatMap((part, index) => part.type === 'tool' || thinkingShown(part, isLive(index)) ? [{ part, index }] : []));
+  let pairs = $derived(pairPermissions(parts));
+  /** The permission each paired call was asked under, by the call's index. */
+  let asked = $derived(new Map([...pairs].map(([at, call]) => [call, parts[at] as PermissionStep])));
+  /** Waiting permissions: each card stands for its call, under the run. */
+  let waiting = $derived(parts.filter((part): part is PermissionStep => part.type === 'permission' && part.decision === null));
+  let steps = $derived(parts.flatMap((part, index): { part: ActivityPart; index: number }[] => {
+    if (part.type === 'permission') return part.decision !== null && !pairs.has(index) ? [{ part, index }] : [];
+    if (part.type === 'tool') return asked.get(index)?.decision === null ? [] : [{ part, index }];
+    return thinkingShown(part, isLive(index)) ? [{ part, index }] : [];
+  }));
+  /** The run's answers on its folded line: a cross when the user refused any call. */
+  let verdict = $derived.by(() => {
+    const decisions = [...asked.values()].map((permission) => permission.decision);
+    return decisions.includes('deny') ? 'deny' : decisions.includes('allow') ? 'allow' : null;
+  });
   let tools = $derived(parts.filter((part): part is ToolPart => part.type === 'tool'));
 
   let open = $state(false);
@@ -48,6 +72,7 @@
   let thinking = $derived(running === undefined && thinkingLive);
   let live = $derived(running !== undefined || thinking);
   let issues = $derived(tools.filter(part => part.status === 'error' || part.status === 'denied').length);
+  let said = $derived(verdict === 'allow' ? strings.chat.permissionAllowedBy : verdict === 'deny' ? strings.chat.permissionDeniedBy : null);
   let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
   // Live, the thought being written; otherwise the last one that has words.
   let thought = $derived(thinking ? parts.at(-1) as ThinkingStep : parts.findLast((part): part is ThinkingStep => part.type === 'thinking' && part.text.trim() !== ''));
@@ -75,7 +100,9 @@
 
 
 {#snippet step(part: ActivityPart, index: number, nested = false)}
-  {#if part.type === 'thinking'}
+  {#if part.type === 'permission'}
+    {@render ask(part)}
+  {:else if part.type === 'thinking'}
     <ThinkingPart text={part.text} live={isLive(index)} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} {store} {threadId} />
   {:else}
     <ToolCard
@@ -93,11 +120,21 @@
       startedAt={part.startedAt ?? null}
       finishedAt={part.finishedAt ?? null}
       background={isBackground(part.toolId)}
+      permission={asked.get(index)?.decision ?? null}
       {nested}
       {store}
       {threadId}
     />
   {/if}
+{/snippet}
+
+{#snippet ask(part: PermissionStep)}
+  <PermissionCard
+    toolName={part.toolName}
+    decision={part.decision}
+    request={permissionRequest(part.requestId)}
+    answer={(decision) => answerPermission(part.requestId, decision)}
+  />
 {/snippet}
 
 {#if steps.length === 1 && steps[0]}
@@ -110,7 +147,7 @@
       data-testid="tool-group-toggle"
       aria-expanded={open}
       title={open ? strings.chat.toolRunHide : strings.chat.toolRunShow}
-      aria-label={issues ? `${label}, ${issueLabel}` : undefined}
+      aria-label={said || issues ? [label, said, issues ? issueLabel : null].filter(Boolean).join(', ') : undefined}
       onclick={() => (open = !open)}
     >
       <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
@@ -121,6 +158,11 @@
       {/if}
       {#if running}
         <span class="spinner" aria-hidden="true"></span>
+      {/if}
+      {#if verdict}
+        <span class="verdict" class:denied={verdict === 'deny'} data-testid="tool-group-permission" data-decision={verdict} title={said} aria-label={said}>
+          {#if verdict === 'allow'}<ShieldCheck size={13} strokeWidth={2} />{:else}<ShieldX size={13} strokeWidth={2} />{/if}
+        </span>
       {/if}
       {#if issues}
         <span class="status" data-testid="tool-group-issues" title={issueLabel}><TriangleAlert size={12} strokeWidth={1.75} /><span class="ui-label">{issues}</span></span>
@@ -140,6 +182,9 @@
     </div>
   </div>
 {/if}
+{#each waiting as part (part.requestId)}
+  <div class="waiting" class:after={steps.length > 0}>{@render ask(part)}</div>
+{/each}
 
 <style>
   .group {
@@ -188,6 +233,16 @@
     color: var(--color-subtle);
     font-size: var(--text-xs);
   }
+
+  .verdict {
+    display: inline-flex;
+    flex: none;
+    color: var(--color-success);
+  }
+
+  .verdict.denied { color: var(--color-danger); }
+
+  .waiting.after { margin-top: var(--chat-part-gap); }
 
   .label {
     flex: 0 1 auto;
