@@ -7,6 +7,7 @@ import {
   claudeThread,
   harness,
   init,
+  queries,
   scripted,
   success,
   useClaudeHarness,
@@ -39,12 +40,58 @@ test('coordination arrives once through Claude PostToolUse with agent provenance
   await client.call('turns.stop', { threadId });
 });
 
-test('an async answer reaches a running Claude turn at its next PostToolUse, not at its end', async () => {
+test.each([false, true])('async answers enter the Claude input stream without waiting for a tool hook, cold=%s', async cold => {
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
+  const ready = Promise.withResolvers<void>();
+  scripted(fake => fake.emit(init('native-answer-session')), undefined, cold ? ready.promise : undefined);
+  try {
+    const turn = await client.call('turns.start', { threadId, prompt: 'Migrate the schema' });
+    await waitFor(() => cold ? harness.core.threads.runner.handles.has(threadId) : calls[0]?.prompts.length === 1);
+    const { questionId } = await client.call('questions.ask', { threadId, text: 'Which database?', options: ['SQLite'] });
+    await client.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
+    if (cold) {
+      expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Which database?\n\nSQLite']);
+      expect(calls).toHaveLength(0);
+    }
+    ready.resolve();
+    // No PostToolUse invocation or model output: user input must use the live stream.
+    await waitFor(() => calls[0]?.prompts.length === 2);
+    expect(calls[0]!.prompts[1]).toBe('> Which database?\n\nSQLite');
+    const delivered = await client.call('threads.get', { threadId });
+    expect(delivered.pendingAnswers).toEqual([]);
+    expect(delivered.status).toBe('running');
+    expect(delivered.turns).toHaveLength(1);
+    expect(delivered.messages.filter(message => message.role === 'user')).toHaveLength(2);
+    expect(delivered.messages.at(-1)).toMatchObject({ turnId: turn.id, parts: [{ type: 'text', text: '> Which database?\n\nSQLite' }] });
+    expect(queries[0]!.interrupts).toBe(0);
+    const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
+    expect(JSON.stringify(await hook({ hook_event_name: 'PostToolUse', session_id: 'native-answer-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' }, 'read-1', { signal: new AbortController().signal }))).not.toContain('SQLite');
+    await client.call('turns.stop', { threadId });
+  } finally { ready.resolve(); }
+}, 15_000);
+
+test.each(['compact', 'keepalive'] as const)('async answers wait outside Claude %s maintenance', async kind => {
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  scripted(fake => fake.emit(init('maintenance-answer-session')));
+  harness.core.threads.startTurn(threadId, 'Maintenance only', kind === 'compact' ? { kind, automatic: false } : { kind });
+  await waitFor(() => calls[0]?.prompts.length === 1);
+  harness.core.threads.deferred.deliverAnswer(threadId, 'Use SQLite');
+  await harness.core.threads.deferred.flushRunning(threadId);
+  expect(calls[0]!.prompts).toEqual(['Maintenance only']);
+  expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual(['Use SQLite']);
+  await client.call('turns.stop', { threadId });
+});
+
+test('an async answer falls back to PostToolUse while Claude native input is unavailable', async () => {
   scripted(fake => fake.emit(init('answer-session')));
   const client = await harness.connect();
   const threadId = await claudeThread(client);
   await client.call('turns.start', { threadId, prompt: 'Migrate the schema' });
   await waitFor(() => !!calls[0]?.prompts.length);
+  harness.core.threads.runner.handles.get(threadId)!.steerUser = async () => false;
   harness.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
   expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Which database?\n\nSQLite']);
   const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;

@@ -423,7 +423,10 @@ export class TurnContexts {
       compactionSummary: () => effectiveCompaction(this.#core.settings.get(), this.#core.journal.getThread(threadId) ?? thread).compactionSummary ?? null,
       emit,
       reportProgress: progress,
-      inputReady: () => this.#core.composer.inputReady(threadId),
+      inputReady: () => {
+        this.#core.composer.inputReady(threadId);
+        if (!bare) void this.#threads.deferred.flushRunning(threadId);
+      },
       reportProviderEvent: () => this.#threads.progress.contact(threadId, turn.id),
       authenticationFailed: () => this.#core.accounts.authenticationFailed(account.id),
       log: (level, message, context) => {
