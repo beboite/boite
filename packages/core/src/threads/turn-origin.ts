@@ -31,7 +31,9 @@ export type TurnOrigin =
   | Keyed & { kind: 'compact'; automatic: boolean }
   | Keyed & { kind: 'keepalive' }
   | Keyed & { kind: 'resume'; reason: ResumeReason }
-  | Keyed & { kind: 'delegation' | 'goal-check' | 'coordination' | 'background' | 'pull-request' | 'routine' | 'event' };
+  /** `owner`: a team letter with the owner's post among its triggers, a wake no bot pause or budget holds (`docs/teams.md`). */
+  | Keyed & { kind: 'coordination'; owner?: true }
+  | Keyed & { kind: 'delegation' | 'goal-check' | 'background' | 'pull-request' | 'routine' | 'event' };
 
 export interface StartTurnOptions {
   /** Refuses the start when the thread's agent selection changed since the client read it. */
@@ -71,7 +73,8 @@ export function originAutomatic(origin: TurnOrigin): boolean {
 export function autonomousSource(origin: TurnOrigin): AutonomousSource | null {
   switch (origin.kind) {
     case 'goal': return 'goal';
-    case 'background': case 'coordination': case 'delegation': case 'pull-request': return origin.kind;
+    case 'coordination': return origin.owner ? null : 'coordination';
+    case 'background': case 'delegation': case 'pull-request': return origin.kind;
     case 'goal-check': return 'delegation';
     case 'resume': return origin.reason === 'handoff' || origin.reason === 'delegation-restart' ? null : 'resume';
     default: return null;

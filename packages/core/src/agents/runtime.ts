@@ -191,6 +191,12 @@ export class AgentRuntime {
     }
   }
 
+  /** This bot thread's agent is archived or paused, or bots are: a bot's team letter waits for it (`docs/teams.md`). */
+  holds(threadId: string): boolean {
+    const agent = this.#store.agentOfThread(threadId);
+    return agent !== null && this.#refusal(agent) !== null;
+  }
+
   /**
    * The policy every turn the core starts by itself on an agent's thread
    * meets: an archived or paused agent, or paused agents, start none. The

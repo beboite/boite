@@ -31,6 +31,7 @@ import { registerContactMethods } from './contacts/rpc.ts';
 import { registerSharedComputeMethods } from './contacts/compute.ts';
 import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
+import { registerTeams } from './teams/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
@@ -71,6 +72,7 @@ export function registerModules(core: Core): void {
   registerContactMethods(core);
   registerResidentMethods(core);
   registerGroupMethods(core);
+  registerTeams(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));

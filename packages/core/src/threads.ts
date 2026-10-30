@@ -618,6 +618,7 @@ export class ThreadStore {
     const sentFrom = origin.kind === 'user' ? origin.sentFrom ?? null : null;
     if (this.#core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     let thread = this.require(threadId);
+    if (thread.teamId) throw refused('a team chat runs no agent; post to it through teams.post', { threadId });
     this.codeCheckpoints.assertAvailable(thread.cwd);
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);
