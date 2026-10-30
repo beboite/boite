@@ -50,7 +50,13 @@ async function setup(entry: typeof cases[number]) {
   await client.call('threads.subscribe', { threadId: thread.id });
   const core = harness.core;
   const ctx = core.threads.contexts.makeSessionContext(core.threads.get(thread.id), core.providers.require('prepared-fake'), core.accounts.require(account.id));
-  const processes = countProcesses(client, thread.id);
+  const events = countProcesses(client, thread.id);
+  // Native Windows events also include descendants such as console hosts.
+  // These assertions count the providers launched directly by this core.
+  const processes = {
+    get started() { return events.started.filter(record => record.parentPid === process.pid); },
+    get exited() { return events.exited.filter(record => record.parentPid === process.pid); },
+  };
   const run = async (prompt: string) => {
     const finished = client.next('turn.finished', turn => turn.threadId === thread.id);
     await client.call('turns.start', { threadId: thread.id, prompt });
@@ -146,6 +152,13 @@ setInterval(() => {}, 1000);`);
     expect(await thrown(driver!.prepare!(fixture.ctx))).toThrow();
     await waitFor(() => fixture.core.procs.liveCount(fixture.ctx.thread.id) === 0);
     expect(fixture.core.journal.listTurns(fixture.ctx.thread.id)).toHaveLength(0);
+    // Windows can report a console host beneath the failed agent. It is not
+    // another provider launch, even when its executable could not be read.
+    await waitFor(() => fixture.processes.started.length > 0);
+    const root = fixture.processes.started[0]!;
+    const descendant = fixture.client.next('process.started', record => record.parentPid === root.pid);
+    fixture.core.bus.emit('process.started', { ...root, pid: root.pid + 1, parentPid: root.pid, exe: 'unknown', commandLine: null });
+    await descendant;
     await fixture.run('recover');
     if (launches.length !== 2 || fixture.processes.started.length !== 2) {
       console.error('PREPARED_FAILURE_PROCESS_DIAGNOSTIC', JSON.stringify({
