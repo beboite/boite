@@ -288,6 +288,18 @@ stopped: a browser that starts late still serves the next `open`. A
 thread, the tab, the action, the step, how long the step waited and how long the
 command had run.
 
+A command given up this way never reaches its next step, since the commands
+after it already ran. An `open` given up while its browser started creates no
+tab once the browser answers; one given up while its tab attached closes that
+tab before the conversation sees it, so the page is never loaded and the active
+tab does not change. An action given up in its `act` step may still change its
+page: until its work ends, its tab refuses every command but `close` at once,
+with a message that names the tab and the action and says to close the tab or
+open another. `status` shows that tab's `stuck` field (`BrowserStuckAction`: the
+action and when it was given up), and the CLI prints it under the tab. The mark
+goes when the work ends, and that late end leaves the dialog handling of the
+command after it alone.
+
 A command whose caller closed its connection before the command's turn came
 never runs; one already running finishes, since it may be changing the page.
 
@@ -670,7 +682,7 @@ profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
 once nobody uses it and meets the next command and viewer awake and focused
 (its page busy 400 ms each time it is hidden, so each freeze lands late),
-a background tab whose screenshot answers once it wakes, one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-stuck.test.ts`, with no browser and a desktop app that never answers, checks that `status` answers and names the command stuck at its `start` step, that a step past its bound fails with the step named, logs `browser.command-stalled` and lets the next command run, and that a command whose caller left before its turn never runs. `browser-sleep.test.ts` checks, with the page
+a background tab whose screenshot answers once it wakes, one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-stuck.test.ts`, with no browser and a desktop app that never answers, checks that `status` answers and names the command stuck at its `start` step, that a step past its bound fails with the step named, logs `browser.command-stalled` and lets the next command run, and that a command whose caller left before its turn never runs. `browser-abandoned.test.ts` checks, with a real browser, that an `open` given up while a held desktop app started its browser leaves no tab, no request for its page and no change of active tab once the browser answers and the next `open` ran, and that an `evaluate` given up in its `act` step marks its tab: a `snapshot` on it is refused at once, `status` shows the mark until the evaluate ends, and `close` works while it runs. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app

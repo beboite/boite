@@ -95,6 +95,11 @@ const RECORDING_ACT_MS = 110_000;
 const READS: ReadonlySet<BrowserAction['kind']> = new Set(['status', 'profiles', 'downloads', 'recipes', 'recipe-get']);
 export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
 
+/** The late work of a command given up past a bound stops at its next step. */
+function abandoned(running: Running): Error {
+  return refused(`browser ${running.action} was given up at its ${running.step} step; its late work stops here`);
+}
+
 /** A queued command while it runs: `status` reports it, and `enter` starts a step's bound. */
 interface Running {
   action: BrowserAction['kind'];
@@ -104,6 +109,11 @@ interface Running {
   stepStartedAt: number;
   /** Ended or given up: the work still running in the background moves no step. */
   done: boolean;
+  /** Given up past a bound: its late work must not reach its next step. */
+  abandoned: boolean;
+  /** The tab its `act` step runs on, until that step settles. */
+  acting?: Tab;
+  /** Starts a step's bound; throws once the command was given up. */
   enter(step: BrowserCommandStep): void;
 }
 
@@ -209,7 +219,7 @@ export class AgentBrowser {
     if (!state) return [];
     return state.order.flatMap(id => {
       const tab = this.#tabs.get(id);
-      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active, ...(tab.engine.hosted ? { view: tab.targetId } : {}) }] : [];
+      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active, ...(tab.engine.hosted ? { view: tab.targetId } : {}), ...(tab.stuck ? { stuck: { action: tab.stuck.action, since: tab.stuck.since } } : {}) }] : [];
     });
   }
 
@@ -258,12 +268,12 @@ export class AgentBrowser {
 
   // ---------- tabs ----------
 
-  async #attach(engine: Engine, threadId: ThreadId, targetId: string, url: string): Promise<Tab> {
+  async #attach(engine: Engine, threadId: ThreadId, targetId: string, url: string, running: Running | null = null): Promise<Tab> {
     const { sessionId } = await engine.cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(), network: null,
-      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(!engine.hosted),
+      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, actor: null, stuck: null, sleep: sleepState(!engine.hosted),
       page: {
         session: sessionId,
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
@@ -293,6 +303,11 @@ export class AgentBrowser {
     if (current) { tab.url = current.targetInfo.url || tab.url; tab.title = current.targetInfo.title.slice(0, 200); }
     // Every tab counts as focused, so a page waiting for focus or visibility runs.
     await engine.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId).catch(() => {});
+    // Given up while it attached: the tab is never the conversation's, and the caller closes its target.
+    if (running?.abandoned) {
+      for (const off of tab.off) off();
+      throw abandoned(running);
+    }
     this.#tabs.set(tab.id, tab);
     engine.tabs.add(tab.id); clearTimeout(engine.idle);
     this.#sleep.schedule(tab);
@@ -443,8 +458,9 @@ export class AgentBrowser {
     const stalled = Promise.withResolvers<never>();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const running: Running = {
-      action: action.kind, ...(tabId ? { tabId } : {}), step: 'act', startedAt: now, stepStartedAt: now, done: false,
+      action: action.kind, ...(tabId ? { tabId } : {}), step: 'act', startedAt: now, stepStartedAt: now, done: false, abandoned: false,
       enter: (step) => {
+        if (running.abandoned) throw abandoned(running);
         if (running.done) return;
         running.step = step;
         running.stepStartedAt = Date.now();
@@ -468,6 +484,13 @@ export class AgentBrowser {
   /** The failure of a command whose step passed its bound, logged as a problem that names where it stood. */
   #stalled(threadId: ThreadId, running: Running, bound: number): Error {
     const at = Date.now();
+    running.abandoned = true;
+    // An action stuck on its tab may still change the page: until it ends, the tab refuses the next ones but `close`.
+    const tab = running.acting;
+    if (tab && !tab.stuck) {
+      tab.stuck = { action: running.action, since: at, by: running };
+      this.#changed(threadId);
+    }
     const where = running.tabId ? ` on tab ${running.tabId}` : '';
     this.#core.logs.record('warn', `Browser ${running.action} of thread ${threadId}${where} stalled at its ${running.step} step for ${at - running.stepStartedAt} ms, ${at - running.startedAt} ms after it started; its queue moved on`, {
       source: 'browser', event: 'browser.command-stalled', threadId, durationMs: at - running.stepStartedAt,
@@ -529,11 +552,27 @@ export class AgentBrowser {
 
   /** An agent command on a tab: on an awake page, recorded, and the dialogs it raises are its own. */
   async #command<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>, running: Running | null): Promise<T> {
-    tab.acting = true;
+    if (tab.stuck && action.kind !== 'close') {
+      throw refused(`browser tab ${tab.id} is still running the ${tab.stuck.action} given up ${Math.round((Date.now() - tab.stuck.since) / 1000)} s ago, which may still change its page; close it with browser close, or open another tab`);
+    }
     if (running && !running.done) running.tabId = tab.id;
     running?.enter('wake');
-    try { return await this.#sleep.use(tab, () => { running?.enter('act'); return this.#track(tab, action, run); }); }
-    finally { tab.acting = false; }
+    return this.#sleep.use(tab, async () => {
+      running?.enter('act');
+      if (running) running.acting = tab;
+      const actor = {};
+      tab.acting = true; tab.actor = actor;
+      try { return await this.#track(tab, action, run); }
+      finally {
+        // A late end of a given-up action leaves the dialogs of the command after it alone.
+        if (tab.actor === actor) { tab.acting = false; tab.actor = null; }
+        if (running) running.acting = undefined;
+        if (running && tab.stuck?.by === running) {
+          tab.stuck = null;
+          this.#changed(tab.threadId);
+        }
+      }
+    });
   }
 
   #profileName(id: string): string {
@@ -574,10 +613,12 @@ export class AgentBrowser {
     try {
       running?.enter('start');
       const engine = await this.#engines.get(profile);
-      running?.enter('attach');
+      // Given up while the browser started: it serves the next open, this one creates nothing.
+      try { running?.enter('attach'); }
+      catch (error) { this.#engines.idle(engine); throw error; }
       clearTimeout(engine.idle);
       const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
-      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
+      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank', running); }
       catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
     } finally { release(); }
     return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url), running), profile };

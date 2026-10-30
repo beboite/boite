@@ -260,7 +260,13 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
  * set when the desktop app of this machine hosts the tab in a webview of its
  * own (`browser.hostAttach`): that app shows the page itself, by this id.
  */
-export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean; view?: string }
+/**
+ * A tab whose agent action was given up past its bound while its work still
+ * runs: until that work ends, every command on the tab but `close` is refused.
+ * `since` is when it was given up, in ms since the epoch.
+ */
+export interface BrowserStuckAction { action: BrowserAction['kind']; since: number }
+export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean; view?: string; stuck?: BrowserStuckAction }
 /**
  * What a viewer shows for a conversation: whether its agent has a browser open
  * (`live`), the tabs, and whether this machine can run one at all. `reason`
