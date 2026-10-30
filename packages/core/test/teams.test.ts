@@ -3,6 +3,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { routeTeamPost, teamMemberKey, TEAM_LETTER_BYTES, type AgentLetter, type CoordinationConfig, type Team, type TeamPost } from '@boite/contracts';
+import { AGENT_ENV } from '@boite/contracts';
+import { runCli } from '../src/cli.ts';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/types.ts';
@@ -24,7 +26,7 @@ interface Step { text?: string; status?: 'done' | 'error'; hold?: boolean; usage
  */
 function teamDriver(next: (prompt: string, threadId: string) => Step = () => ({ text: '[quiet]' }), steers = true) {
   const prompts: { threadId: string; prompt: string }[] = [];
-  const steered: { threadId: string; prompt: string; ack: PromiseWithResolvers<boolean> }[] = [];
+  const steered: { threadId: string; prompt: string; ack: ReturnType<typeof Promise.withResolvers<boolean>> }[] = [];
   const running: { threadId: string; finish(status?: 'done' | 'error' | 'stopped'): void }[] = [];
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx) {
     prompts.push({ threadId: ctx.thread.id, prompt: ctx.prompt });
@@ -424,4 +426,40 @@ test('a retried publication or post gives one post, and a reused id with other c
   expect(again?.id).toBe(answerPostId(wake!.id));
   expect(posts(h, team)).toHaveLength(2);
   expect(h.core.journal.listTurns(team.threadId)).toHaveLength(2);
+}, 30_000);
+
+/** `boite <args>` from a bot's thread, with its agent token. */
+async function boiteAs(h: TestCore, threadId: string, args: string[]) {
+  let out = '';
+  let err = '';
+  const env = { [AGENT_ENV.threadId]: threadId, [AGENT_ENV.coreUrl]: h.url, [AGENT_ENV.token]: h.core.agents.tokenFor(threadId) };
+  const code = await runCli(args, { out: text => { out += text; }, err: text => { err += text; }, env, cwd: process.cwd() });
+  return { code, out, err };
+}
+
+test('boite team: a bot lists, posts, reads and asks for cards; the experiment and other machines refuse', async () => {
+  const { h, owner, bots: [ada, bob], team, key } = await setup(['Ada', 'Bob']);
+  teamDriver();
+  expect((await boiteAs(h, ada!.threadId, ['team', 'list'])).out).toContain('Crew: Ada, Bob');
+  const said = await boiteAs(h, ada!.threadId, ['team', 'say', 'Crew', '@Bob', 'check', 'the', 'build', '--request-id', 'post-1']);
+  expect(said.out).toContain('posted: #1 in Crew (post-1)');
+  expect(said.out).toContain(`wakes: ${key(bob!)}`);
+  // A retry with the same id gives the same post.
+  expect((await boiteAs(h, ada!.threadId, ['team', 'say', 'Crew', '@Bob check the build', '--request-id', 'post-1'])).out).toContain('posted: #1');
+  await boiteAs(h, ada!.threadId, ['team', 'dm', 'Crew', 'owner', 'private', 'note']);
+  const read = await boiteAs(h, bob!.threadId, ['team', 'read', 'Crew', '--before', '5']);
+  expect(read.out).toContain('#1 Ada in the group (post-1): @Bob check the build');
+  expect(read.out).not.toContain('private note');
+  const proposed = await boiteAs(h, ada!.threadId, ['team', 'propose', '--name', 'Pair', '--members', 'Bob', '--brief', 'Release work']);
+  expect(proposed.out).toContain('card: create Pair with Bob');
+  expect(h.core.threads.listQuestions(ada!.threadId).map(request => request.team?.kind)).toEqual(['create']);
+  expect((await boiteAs(h, bob!.threadId, ['team', 'leave', 'Crew'])).out).toContain('card: leave Crew');
+  const remote = await boiteAs(h, ada!.threadId, ['team', 'invite', 'Crew', 'pc/Cy']);
+  expect(remote.code).not.toBe(0);
+  expect(remote.err).toContain('members on other machines come in a later version');
+  await experiment(owner, false);
+  const off = await boiteAs(h, ada!.threadId, ['team', 'list']);
+  expect(off.code).not.toBe(0);
+  expect(off.err).toContain('Teams experiment');
+  expect(team.members).toHaveLength(2);
 }, 30_000);

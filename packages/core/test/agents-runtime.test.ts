@@ -8,7 +8,7 @@ import { runCli } from '../src/cli.ts';
 import { notifiesOnFinish } from '@boite/contracts';
 import { AgentRuntime, EVENT_PROMPT_MAX, eventPrompt, isAgentHeld, NOTICES_PER_HOUR } from '../src/agents/runtime.ts';
 import { agentSpend, rootThread } from '../src/agents/spend.ts';
-import { agentGuide, BOT_GUIDE, OWN_SETTINGS } from '../src/agent-guide.ts';
+import { agentGuide, BOT_GUIDE, OWN_SETTINGS, TEAM_GUIDE } from '../src/agent-guide.ts';
 import { DELEGATION_WORDS } from '../src/delegation/guide.ts';
 import { agentContext } from '../src/agents/context.ts';
 import { costing, makeAgent, scripted, settled, turnsOf } from './agent-fixture.ts';
@@ -41,6 +41,11 @@ test('a bot\'s Boite guide is the thread guide less the project-bound commands, 
   const bot = agentGuide(true, false, [], true);
   const thread = agentGuide(true, false, [], false);
   expect(bot).toEndWith(`${BOT_GUIDE}\n\n`);
+  // With Teams on, a bot also learns its teams: where its answer goes, group or private, when to propose one.
+  expect(agentGuide(true, false, [], true, false, true)).toEndWith(`${BOT_GUIDE}\n${TEAM_GUIDE}\n\n`);
+  expect(agentGuide(true, false, [], false, false, true)).not.toContain(TEAM_GUIDE);
+  for (const team of ['[quiet]', 'boite team say', 'boite team dm', 'boite team propose', 'Go private only']) expect(TEAM_GUIDE).toContain(team);
+  expect(TEAM_GUIDE).not.toMatch(/question/i);
   expect(thread).not.toContain(BOT_GUIDE);
   for (const command of ['boite pr link <url>', 'boite pr watch', 'boite ask', 'boite settings [bot]', 'boite attach', 'boite browser']) expect(bot).toContain(command);
   for (const projectBound of ['boite where', 'Stay in the checkout', 'boite todo', 'projects add']) {

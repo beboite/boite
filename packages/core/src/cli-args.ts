@@ -73,6 +73,8 @@ const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (p
   { owns: ([command, action]) => command === 'window' && action !== undefined, help: true },
   // view-cli.ts: the script and scheme flags of `view check`.
   { owns: ([command, action]) => command === 'view' && action === 'check', help: true },
+  // team-cli.ts: --before, --reply, --name, --members and --brief are its own.
+  { owns: ([command, action]) => command === 'team' && action !== undefined, help: true },
   // secret-cli.ts; after `--` every word is the child command's.
   { owns: ([command]) => command === 'secret', help: false, text: positional => positional.includes('--'), terminator: true },
 ];
