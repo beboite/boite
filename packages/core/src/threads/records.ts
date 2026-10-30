@@ -88,7 +88,7 @@ export function backgroundWaitOf(core: Core, thread: ThreadSummary, live: Backgr
   const row = core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND COALESCE(json_extract(execution, '$.operation'), '') NOT IN ('compact', 'keepalive') ORDER BY rowid DESC LIMIT 1").get(thread.id) as { id: string } | null;
   const lastTurn = row ? core.journal.getTurn(row.id) : null;
   if (lastTurn?.status !== 'done' || lastTurn.finishedAt === null) return null;
-  const history = live.length > 0 ? [] : core.threads.agentState.backgroundHistory.endedAfter(thread.id, lastTurn.finishedAt);
+  const history = live.length > 0 ? [] : core.threads.agentState.backgroundHistory.afterCheckpoint(thread.id, lastTurn);
   // The last turn is the truth: `turn.finished` is heard before the row's status turns idle.
   return backgroundWait({ status: 'idle', lastTurn, live, history, now: Date.now() });
 }

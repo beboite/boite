@@ -39,6 +39,9 @@ export function finishTurn(core: Core, finished: Turn, cause: TurnClose, patch?:
   if (current === null) return { thread: null, owned: false, toolsClosed };
   const newer = core.journal.db.query("SELECT id FROM turns WHERE thread_id = ? AND id != ? AND status IN ('queued', 'running') LIMIT 1").get(threadId, finished.id);
   if (newer) return { thread: current, owned: false, toolsClosed };
+  if (finished.status === 'done' && finished.execution?.operation !== 'compact' && finished.execution?.operation !== 'keepalive') {
+    core.threads.agentState.backgroundHistory.checkpoint(threadId, finished.id);
+  }
   const next: ThreadSummary = { ...(patch ? patch(current) : current), status: restingStatus(finished), updatedAt: Date.now() };
   core.journal.append({ type: 'thread.finished', threadId, version: 1, payload: next }, () => core.journal.putThread(next));
   return { thread: next, owned: true, toolsClosed };

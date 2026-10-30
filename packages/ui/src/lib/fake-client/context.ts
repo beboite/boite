@@ -638,7 +638,7 @@ export class FakeContext {
         && entry.sessionGeneration === (thread.sessionGeneration ?? 0) && (entry.state === 'running' || entry.parentTurnId === parentTurnId));
       if (prior) { if (prior.state === 'running') Object.assign(prior, task, { observedAt: at }); }
       else history.push({ ...task, threadId: thread.id, providerId: thread.providerId, sessionGeneration: thread.sessionGeneration ?? 0,
-        parentTurnId, state: 'running', observedAt: at, finishedAt: null, reason: null });
+        parentTurnId, checkpointTurnId: null, state: 'running', observedAt: at, finishedAt: null, reason: null });
     }
     thread.backgroundHistory = history.slice(-100);
     thread.background = tasks;

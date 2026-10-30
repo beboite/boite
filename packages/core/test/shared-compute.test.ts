@@ -504,7 +504,21 @@ test('the existing workflow runner distributes four local and five remote jobs w
     id: `step${i}`, task: `workflow fixture ${i}`, compute: {sharedProjectId: scope.sharedProjectId, host: i < 4 ? a.ref : b.ref, profileId: 'conversation', baseCommit},
   }))};
   const run = await a.client.call('workflows.start', {threadId: a.threadId, plan, requestId: 'workflow-nine'});
-  await waitFor(() => ['done', 'failed'].includes(a.h.core.workflows.get(a.threadId, run.id).status), 15000);
+  try {
+    await waitFor(() => ['done', 'failed'].includes(a.h.core.workflows.get(a.threadId, run.id).status), 15000);
+  } catch (error) {
+    try {
+      console.error('Shared fanout timeout', {
+        run: a.h.core.workflows.get(a.threadId, run.id),
+        hosts: await Promise.all([a, b].map(async side => ({
+          coreId: side.coreId,
+          records: side.h.core.sharedCompute.journal.all(scope.sharedProjectId),
+          logs: await side.h.core.logs.query({ limit: 40, minLevel: 'debug' }),
+        }))),
+      });
+    } catch (diagnosticError) { console.error('Shared fanout diagnostics failed', diagnosticError); }
+    throw error;
+  }
   const result = await a.client.call('workflows.get', {threadId: a.threadId, runId: run.id});
   if (result.error) for (const {h, coreId} of [a, b]) {
     console.error('Shared workflow host diagnostics', {coreId, logs: await h.core.logs.query({limit: 40, minLevel: 'debug'}),

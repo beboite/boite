@@ -1265,7 +1265,7 @@ test('fake [ask] leaves a card nobody waits on, and its answer opens the next tu
   // The turn ended with the question still open and the shell still listed.
   expect(thread.status).toBe('idle');
   expect(thread.background?.map((task) => task.kind)).toEqual(['shell']);
-  expect(thread.backgroundHistory).toMatchObject([{ state: 'running', parentTurnId: thread.turns[0]!.id, finishedAt: null }]);
+  expect(thread.backgroundHistory).toMatchObject([{ state: 'running', parentTurnId: thread.turns[0]!.id, checkpointTurnId: thread.turns[0]!.id, finishedAt: null }]);
   expect((await client.call('threads.list', {})).find(row => row.id === threadId)).not.toHaveProperty('backgroundHistory');
   const [question] = await client.call('questions.list', { threadId });
   expect(question).toMatchObject({ async: true, text: 'Which port should the dev server take?' });

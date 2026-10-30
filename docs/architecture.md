@@ -500,7 +500,11 @@ originating turn. `threads.get` carries the newest 100; the chat lists
 none of them and names only the tasks still running in the turn summary. A missing live task is marked ended, not
 successful; explicit provider outcomes can complete it later. Session release
 and core restart record cancellation without trying to adopt or restart native
-work. Delayed callbacks cannot change another session's observations.
+work. Delayed callbacks cannot change another session's observations. A completed task turn records which observations it left running in the
+same settlement transaction. Wake decisions use that durable checkpoint membership,
+so a task ending in the checkpoint's millisecond still wakes it, while a task
+already complete before the checkpoint does not. Older observations without that
+membership retain their timestamp-based interpretation.
 
 `/btw` asks a tool-free side question over a frozen transcript excerpt. It does
 not steer the main turn or append its answer to the journal. A pending request
