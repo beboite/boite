@@ -50,13 +50,22 @@ export function activityShown(parts: readonly ActivityPart[], thinkingLive: bool
   return parts.some((part, index) => part.type !== 'thinking' || thinkingShown(part, thinkingLive && index === parts.length - 1));
 }
 
+/** Written text or any part that stands on its own between activity: a call's permission never reaches past it. */
+function breaksRun(part: MessagePart | undefined): boolean {
+  if (!part || part.type === 'thinking' || part.type === 'permission') return false;
+  if (part.type === 'text') return part.text.trim() !== '';
+  return part.type !== 'tool' || planOf(part.name, part.input) !== null;
+}
+
 /**
  * Which call each permission was asked for, as indices into `parts`:
  * permission to call. A permission carries no call id, so it takes the closest
  * call of its tool's name before it that no other permission took (an agent
  * asks right after it announces the call), else the first such call after it
- * (one that asks before it calls). One with no call of its name stays
- * unpaired and draws as its own line. `from` and `to` bound the search.
+ * (one that asks before it calls). The search never crosses written text or
+ * any other part that breaks a run: a call before the answer's last paragraph
+ * is not the one asked for. One with no call of its name stays unpaired and
+ * draws as its own line. `from` and `to` bound the search.
  */
 export function pairPermissions(parts: readonly MessagePart[], from = 0, to = parts.length): Map<number, number> {
   const pairs = new Map<number, number>();
@@ -70,8 +79,8 @@ export function pairPermissions(parts: readonly MessagePart[], from = 0, to = pa
       return call?.type === 'tool' && call.name === part.toolName && !taken.has(index) && planOf(call.name, call.input) === null;
     };
     let found = -1;
-    for (let back = at - 1; back >= from && found < 0; back -= 1) if (fits(back)) found = back;
-    for (let next = at + 1; next < to && found < 0; next += 1) if (fits(next)) found = next;
+    for (let back = at - 1; back >= from && found < 0 && !breaksRun(parts[back]); back -= 1) if (fits(back)) found = back;
+    for (let next = at + 1; next < to && found < 0 && !breaksRun(parts[next]); next += 1) if (fits(next)) found = next;
     if (found < 0) continue;
     pairs.set(at, found);
     taken.add(found);

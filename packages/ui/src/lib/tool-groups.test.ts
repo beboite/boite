@@ -246,4 +246,6 @@ test('a permission folds into the run of the call it gates, a call standing alon
   expect(partRuns([asked('p', 'Edit'), edit])).toEqual([{ kind: 'activity', indices: [1, 0] }]);
   expect(partRuns([edit, bash('a'), asked('p', 'Edit')])).toEqual([{ kind: 'activity', indices: [0, 2] }, { kind: 'activity', indices: [1] }]);
   expect([...pairPermissions([bash('a'), asked('p', 'fake_tool')])]).toEqual([]);
+  // Written text between them: the ask is for the call after it, not one before the paragraph.
+  expect([...pairPermissions([bash('a'), { type: 'text', text: 'Now the build.' }, asked('p', 'Bash'), bash('b')])]).toEqual([[2, 3]]);
 });
