@@ -172,12 +172,27 @@ test('requests of closed connections that ignore their signal cannot push runnin
     await queue.enqueue(fresh, frame('where'));
     expect(refused.length).toBe(before + 1);
     expect(refused.at(-1)!.connection).toBe(fresh);
+    // The agent cap leaves the owner admitted until the shared cap of 64 fills.
+    const owner = () => ({ authenticated: true, identity: { principal: 'owner' }, close: () => undefined }) as unknown as ServerConnection;
+    let count = handled;
+    await queue.enqueue(owner(), frame('where'));
+    expect(handled).toBe(count + 1);
+    for (let round = 0; round < 2; round++) {
+      const client = owner();
+      for (let i = 0; i < 8; i++) pending.push(queue.enqueue(client, frame('browser.command')));
+      await Bun.sleep(5);
+      queue.drop(client);
+    }
+    expect(queue.counts.detached).toBe(64);
+    const late = owner();
+    await queue.enqueue(late, frame('where'));
+    expect(refused.at(-1)!.connection).toBe(late);
     // The detached work ends: requests are admitted again, and nothing is freed twice.
     gate.resolve();
     await Promise.all(pending);
     await Bun.sleep(10);
     expect(queue.counts).toEqual({ active: 0, activeAgents: 0, detached: 0, detachedAgents: 0 });
-    const count = handled;
+    count = handled;
     await queue.enqueue(agent(), frame('where'));
     expect(handled).toBe(count + 1);
   } finally { gate.resolve(); queue.close(); }

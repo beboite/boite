@@ -412,7 +412,7 @@ function statusLines(_action: BrowserAction, result: BrowserReply): string[] {
     ...(tab.stuck ? [`  still running the ${tab.stuck.action} given up at ${new Date(tab.stuck.since).toISOString()}; only close works on this tab until it ends`] : []),
   ]) : ['no browser tab; open one with boite browser open <url>'];
   const blocking = value?.blocking;
-  if (blocking) lines.push(`running: ${blocking.action}${blocking.tabId ? ` on ${blocking.tabId}` : ''} since ${new Date(blocking.startedAt).toISOString()}, at its ${blocking.step} step since ${new Date(blocking.stepStartedAt).toISOString()}; later commands wait for it`);
+  if (blocking) lines.push(`running: ${blocking.action}${blocking.tabId ? ` on ${blocking.tabId}` : ''} since ${new Date(blocking.startedAt).toISOString()}, at its ${blocking.step} step since ${new Date(blocking.stepStartedAt).toISOString()}; later commands except reads wait for it`);
   return lines;
 }
 

@@ -109,7 +109,7 @@ export class FrameQueue {
         const size = byBytes ? queue.bytes : queue.frames.length - queue.head;
         if (size > largest) { largest = size; victim = candidate; }
       }
-      // Active handlers retain their budget until completion or disconnect and cannot be dropped.
+      // Active and detached handlers retain their budget until completion and cannot be dropped.
       this.#refuse(victim ?? connection, `RPC queue exceeds ${MAX_PENDING_FRAMES} frames or ${MAX_PENDING_BYTES} bytes; reconnect`);
       if (victim === undefined || victim === connection) return Promise.resolve();
     }
