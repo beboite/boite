@@ -28,7 +28,7 @@ export interface TeamMember {
   key: TeamMemberKey;
   coreId: string;
   botId: string;
-  /** The bot's name when the team last changed; mentions match the live name. */
+  /** The bot's current name; the last one known once it is gone or on another machine. Mentions match it. */
   name: string;
   /** The seq the bot joined at: it starts reading after it. */
   joinedSeq: number;
@@ -63,7 +63,7 @@ export type TeamAudience = 'team' | 'private';
 export type TeamRoute = 'mention' | 'everyone' | 'reply' | 'single' | 'dispatcher' | 'private' | 'none';
 
 export interface TeamPost {
-  /** Picked by its writer before the first send: a retry returns the same post. */
+  /** Picked by its writer before the first send: a retry with it returns the same post. A bot post sent without one gets a fresh id. */
   id: string;
   teamId: string;
   /** The host's order in the team, from 1. */
@@ -79,7 +79,7 @@ export interface TeamPost {
   inReplyTo: string | null;
   /** The bot turn that wrote it. */
   turnId: TurnId | null;
-  /** Of author, audience, to, text, inReplyTo and attachments: a reused id with other content is refused. */
+  /** Of author, audience, to, text and inReplyTo: a reused id with other content is refused. */
   fingerprint: string;
   createdAt: Timestamp;
   /** Why the post woke nobody, for the owner. */
@@ -177,12 +177,13 @@ export interface TeamsRpcMethods {
   'teams.post': { params: { teamId: string; id: string; text: string; audience?: TeamAudience; to?: string[]; inReplyTo?: string }; result: TeamPost };
   /** Posts before `before` (a seq), newest page first returned oldest first. A bot reads only what it may see. */
   'teams.read': { params: { threadId?: ThreadId; team: string; before?: number; limit?: number }; result: TeamReading };
-  /** A bot's group post (`boite team say`). */
+  /** A bot's group post (`boite team say`). In every bot method, `team` is a team name or id. */
   'teams.say': { params: { threadId: ThreadId; team: string; text: string; id?: string; inReplyTo?: string }; result: TeamPost };
-  /** A bot's private post to one member or the owner (`boite team dm`). */
+  /** A bot's private post (`boite team dm`): `to` is a member's bot name or id, or `owner`. */
   'teams.dm': { params: { threadId: ThreadId; team: string; to: string; text: string; id?: string }; result: TeamPost };
   /** A bot proposes a team: a card in its thread the owner applies or refuses. */
   'teams.propose': { params: { threadId: ThreadId; name: string; members: string[]; brief?: string }; result: { questionId: RequestId } };
+  /** `bot` is a bot name or id of this machine. */
   'teams.invite': { params: { threadId: ThreadId; team: string; bot: string }; result: { questionId: RequestId } };
   'teams.leave': { params: { threadId: ThreadId; team: string }; result: { questionId: RequestId } };
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { routeTeamPost, teamMemberKey, TEAM_LETTER_BYTES, type AgentLetter, type CoordinationConfig, type Team, type TeamPost } from '@boite/contracts';
 import { AGENT_ENV } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
+import { RESIDENT_LETTER_TTL_MS } from '../src/coordination.ts';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/types.ts';
@@ -275,6 +276,8 @@ test('a team letter fits 16 KB: whole triggers oldest first, the rest wait in a 
   const release = holdDelivery(h);
   const big = (n: number) => `@Ada ${n} ${'é'.repeat(3_900)}`;
   post(big(1)); post(big(2)); post(big(3));
+  // Near its expiry, a letter still hands what it could not carry a full lifetime.
+  db(h).query("UPDATE coordination_letters SET data = json_set(data, '$.expiresAt', ?) WHERE thread_id = ? AND direction = 'in'").run(Date.now() + 60_000, ada!.threadId);
   release();
   await deliver(h, ada!.threadId);
   await waitFor(() => wakes(h, ada!.threadId).length === 3 && settledWakes(h, ada!.threadId), 10_000);
@@ -282,6 +285,7 @@ test('a team letter fits 16 KB: whole triggers oldest first, the rest wait in a 
   for (const prompt of prompts) expect(Buffer.byteLength(prompt, 'utf8')).toBeLessThanOrEqual(TEAM_LETTER_BYTES);
   prompts.forEach((prompt, index) => expect(prompt).toContain(`for you:\n@Ada ${index + 1} `));
   expect(teamLetters(h, ada!.threadId).map(letter => letter.team!.triggers)).toEqual([[1], [2], [3]]);
+  for (const letter of teamLetters(h, ada!.threadId).slice(1)) expect(letter.expiresAt - letter.createdAt).toBe(RESIDENT_LETTER_TTL_MS);
   // Context from the newest back; what does not fit is named, and counts as read.
   const at = (seq: number, text: string): TeamPost => ({ id: `p${seq}`, teamId: 't', seq, author: 'owner', text, audience: 'team', to: [], routedBy: 'none', why: null, inReplyTo: null, turnId: null, fingerprint: '', createdAt: 0 });
   const line = (entry: TeamPost, trigger: boolean) => teamPostLine(entry, 'c/a', () => 'owner', trigger);

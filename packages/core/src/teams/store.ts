@@ -354,7 +354,7 @@ export class TeamStore {
     if (!text || text.length > TEAM_POST_MAX) throw invalidParams(`text: expected 1 to ${TEAM_POST_MAX} characters`);
     const inReplyTo = input.inReplyTo === undefined || input.inReplyTo === null ? null : String(input.inReplyTo);
     const to = input.audience === 'private' ? [...new Set(input.to ?? [])] : [...new Set(input.to ?? [])].sort();
-    const fingerprint = createHash('sha256').update(JSON.stringify([input.author, input.audience, to, text, inReplyTo, []])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify([input.author, input.audience, to, text, inReplyTo])).digest('hex');
     const known = this.#postById(id);
     if (known) {
       if (known.teamId !== team.id || known.fingerprint !== fingerprint) throw refused('id: already used for a different post', { field: 'id' });

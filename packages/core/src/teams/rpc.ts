@@ -8,7 +8,7 @@ export function registerTeams(core: Core): void {
     if (params === null || typeof params !== 'object') throw invalidParams('params: expected an object');
     return params;
   };
-  core.router.register('teams.list', params => ({ teams: teams().list(params ?? {}) }));
+  core.router.register('teams.list', params => ({ teams: teams().list(object(params ?? {})) }));
   core.router.register('teams.create', params => teams().create(object(params)));
   core.router.register('teams.update', params => teams().update(object(params)));
   core.router.register('teams.archive', params => teams().archive(object(params)));

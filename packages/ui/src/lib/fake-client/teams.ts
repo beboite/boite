@@ -154,7 +154,7 @@ export function teamMethods(ctx: FakeContext): TeamMethods {
     if (!text || text.length > TEAM_POST_MAX) throw invalid(`text: expected 1 to ${TEAM_POST_MAX} characters`);
     const inReplyTo = input.inReplyTo === undefined || input.inReplyTo === null ? null : String(input.inReplyTo);
     const to = input.audience === 'private' ? [...new Set(input.to ?? [])] : [...new Set(input.to ?? [])].sort();
-    const fingerprint = JSON.stringify([input.author, input.audience, to, text, inReplyTo, []]);
+    const fingerprint = JSON.stringify([input.author, input.audience, to, text, inReplyTo]);
     const posts = [...state(ctx).posts.values()].flat();
     const known = posts.find(entry => entry.id === id);
     if (known) {

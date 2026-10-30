@@ -99,7 +99,8 @@ export class TeamLetters {
     const team = batch.filter(letter => letter.team);
     const rendering = this.#core.teams.render(threadId, team, mode, reply && plain.length === 0);
     for (const { letter, seqs, owner } of rendering.leftovers) {
-      this.#side.receive({ ...letter, id: randomUUID(), createdAt: Date.now(), status: 'received', error: null, team: { teamId: letter.team!.teamId, triggers: seqs, owner } }, threadId);
+      const now = Date.now();
+      this.#side.receive({ ...letter, id: randomUUID(), createdAt: now, expiresAt: now + RESIDENT_LETTER_TTL_MS, status: 'received', error: null, team: { teamId: letter.team!.teamId, triggers: seqs, owner } }, threadId);
       this.#side.kick(threadId);
     }
     const parts = plain.length ? [letterPrompt(plain, senderContext(this.#core, this.#side.self('').coreId, threadId))] : [];
