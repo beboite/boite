@@ -139,7 +139,11 @@ export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.len
     if (run === null || part.type !== 'tool') continue;
     runOf.set(index, run);
     const asked = askedFor.get(index);
-    if (asked !== undefined && asked < index) run.indices.push(asked);
+    // Asked before its call: back in timeline order, so the run keeps the key it opened with.
+    if (asked !== undefined && asked < index) {
+      const at = run.indices.findIndex((step) => step > asked);
+      run.indices.splice(at < 0 ? run.indices.length : at, 0, asked);
+    }
   }
   return runs;
 }

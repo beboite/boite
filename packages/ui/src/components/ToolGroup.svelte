@@ -72,6 +72,7 @@
   let thinking = $derived(running === undefined && thinkingLive);
   let live = $derived(running !== undefined || thinking);
   let issues = $derived(tools.filter(part => part.status === 'error' || part.status === 'denied').length);
+  let said = $derived(verdict === 'allow' ? strings.chat.permissionAllowedBy : verdict === 'deny' ? strings.chat.permissionDeniedBy : null);
   let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
   // Live, the thought being written; otherwise the last one that has words.
   let thought = $derived(thinking ? parts.at(-1) as ThinkingStep : parts.findLast((part): part is ThinkingStep => part.type === 'thinking' && part.text.trim() !== ''));
@@ -146,7 +147,7 @@
       data-testid="tool-group-toggle"
       aria-expanded={open}
       title={open ? strings.chat.toolRunHide : strings.chat.toolRunShow}
-      aria-label={issues ? `${label}, ${issueLabel}` : undefined}
+      aria-label={said || issues ? [label, said, issues ? issueLabel : null].filter(Boolean).join(', ') : undefined}
       onclick={() => (open = !open)}
     >
       <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
@@ -159,7 +160,6 @@
         <span class="spinner" aria-hidden="true"></span>
       {/if}
       {#if verdict}
-        {@const said = verdict === 'allow' ? strings.chat.permissionAllowedBy : strings.chat.permissionDeniedBy}
         <span class="verdict" class:denied={verdict === 'deny'} data-testid="tool-group-permission" data-decision={verdict} title={said} aria-label={said}>
           {#if verdict === 'allow'}<ShieldCheck size={13} strokeWidth={2} />{:else}<ShieldX size={13} strokeWidth={2} />{/if}
         </span>
