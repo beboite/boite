@@ -1,4 +1,4 @@
-import type { AgentRoutine, AgentSchedule } from '@boite/contracts';
+import { nextAgentOccurrence, type AgentRoutine, type AgentSchedule } from '@boite/contracts';
 import { formatLocale } from './i18n.svelte';
 import { fill, strings } from './strings';
 
@@ -51,8 +51,13 @@ export function describeSchedule(schedule: AgentSchedule): string {
   const t = strings.agents.when;
   if (schedule.kind === 'once') return fill(t.onceAt, { date: dateTime(schedule.at) });
   if (schedule.kind === 'interval') return everyName(schedule.everyMinutes);
-  const days = schedule.days && schedule.days.length < 7 ? schedule.days : null;
   const time = clock(schedule.time);
+  if (schedule.kind === 'monthly' || schedule.kind === 'yearly') {
+    const base = schedule.kind === 'monthly' ? fill(t.monthly, { day: String(schedule.day), time })
+      : fill(t.yearly, { date: new Date(Date.UTC(2000, schedule.month - 1, schedule.day)).toLocaleDateString(formatLocale(), { month: 'long', day: 'numeric', timeZone: 'UTC' }), time });
+    return schedule.timezone === localZone() ? base : `${base} (${schedule.timezone})`;
+  }
+  const days = schedule.days && schedule.days.length < 7 ? schedule.days : null;
   const base = !days ? fill(t.daily, { time })
     : sameDays(days, WEEKDAYS) ? fill(t.weekdays, { time })
       : sameDays(days, WEEKEND) ? fill(t.weekend, { time })
@@ -106,21 +111,5 @@ export function routineName(prompt: string, max = 60): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,.;:!?]+$/, '')}...`;
 }
 
-/**
- * The next run a schedule would have, read in this browser's time: what the
- * form previews before the core computes the real one.
- */
-export function previewNext(schedule: AgentSchedule, now = Date.now()): number | null {
-  if (schedule.kind === 'once') return schedule.at > now ? schedule.at : null;
-  if (schedule.kind === 'interval') return now + schedule.everyMinutes * 60_000;
-  const [h = 0, m = 0] = schedule.time.split(':').map(Number);
-  for (let offset = 0; offset <= 7; offset++) {
-    const at = new Date(now);
-    at.setDate(at.getDate() + offset);
-    at.setHours(h, m, 0, 0);
-    if (at.getTime() <= now) continue;
-    if (schedule.days && !schedule.days.includes(at.getDay())) continue;
-    return at.getTime();
-  }
-  return null;
-}
+/** The form previews the same timezone-aware instant the core will save. */
+export const previewNext = nextAgentOccurrence;

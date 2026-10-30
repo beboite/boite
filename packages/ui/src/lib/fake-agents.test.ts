@@ -1,11 +1,26 @@
 import { expect, vi } from 'vitest';
-import { AGENT_MEMORY_MAX, type AgentProfile, type Message } from '@boite/contracts';
+import { AGENT_MEMORY_MAX, nextAgentOccurrence, type AgentProfile, type AgentSchedule, type Message } from '@boite/contracts';
 import { test } from '../test/fake-client';
 import { deskState } from './agent-desk';
 import { FakeAgents } from './fake-agents';
 
 const selection = { providerId: 'echo', accountId: 'a-echo', model: null, effort: null, permissionMode: 'default' as const };
 const promptOf = (messages: Message[], turnId: string) => messages.find(m => m.turnId === turnId && m.role !== 'assistant')?.parts.find(p => p.type === 'text');
+
+test('the fake saves calendar reminders with the same next date as the core', async ({ ready }) => {
+  const { client } = await ready({ delayMs: 0 });
+  const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection, status: 'active' } });
+  const schedules: AgentSchedule[] = [
+    { kind: 'monthly', day: 31, time: '09:00', timezone: 'Europe/Paris' },
+    { kind: 'yearly', month: 2, day: 29, time: '09:00', timezone: 'Asia/Tokyo' },
+    { kind: 'once', at: Date.parse('2030-11-14T08:00:00Z') },
+  ];
+  for (const schedule of schedules) {
+    const routine = await client.call('agents.routine.save', { value: { agentId: agent.id, name: schedule.kind, prompt: 'Review the notes', schedule, enabled: true, nextAt: null, lastTurnId: null, lastScheduledAt: null } });
+    expect(routine.schedule).toEqual(schedule);
+    expect(routine.nextAt).toBe(nextAgentOccurrence(schedule));
+  }
+});
 
 test('creating an agent makes its thread and starts its first turn there, labelled in the conversation', async ({ ready }) => {
   const { client } = await ready({ delayMs: 0 });

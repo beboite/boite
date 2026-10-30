@@ -100,7 +100,9 @@ export const fr: Translation = {
     },
     when: {
       who: 'Bot', pickAgent: 'Choisir un bot', what: 'Que doit-il faire ?', whatPlaceholder: 'Par exemple : résume les nouveaux messages et dis-moi lesquels attendent une réponse.',
-      when: 'Quand ?', modes: { once: 'Une fois', daily: 'Chaque jour', days: 'Certains jours', interval: 'Régulièrement' },
+      when: 'Quand ?', modes: { once: 'Une fois', daily: 'Chaque jour', days: 'Certains jours', monthly: 'Chaque mois', yearly: 'Chaque année', interval: 'Régulièrement' },
+      dayOfMonth: 'Jour du mois', month: 'Mois', missingDate: 'Les mois ou années sans cette date sont ignorés.',
+      monthly: 'Le {day} de chaque mois à {time}', yearly: 'Le {date} de chaque année à {time}',
       inAnHour: 'Dans une heure', thisEvening: 'Ce soir, 18:00', tomorrowMorning: 'Demain, 09:00', dateAndTime: 'Date et heure',
       otherInterval: 'Toutes les', minutesUnit: 'minutes', at: 'À', inThePast: 'Cette date est passée. Choisissez un moment à venir.', pickDays: 'Choisissez au moins un jour.',
       next: 'Prochaine fois : {when}', name: 'Nom', schedule: 'Planifier', newRoutine: 'Ajouter une routine',

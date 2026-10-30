@@ -99,7 +99,9 @@ export const strings = {
     },
     when: {
       who: 'Bot', pickAgent: 'Choose a bot', what: 'What should it do?', whatPlaceholder: 'For example: sum up the new messages and tell me what needs an answer.',
-      when: 'When?', modes: { once: 'Once', daily: 'Every day', days: 'Some days', interval: 'Repeatedly' },
+      when: 'When?', modes: { once: 'Once', daily: 'Every day', days: 'Some days', monthly: 'Monthly', yearly: 'Yearly', interval: 'Repeatedly' },
+      dayOfMonth: 'Day of the month', month: 'Month', missingDate: 'Months or years without this date are skipped.',
+      monthly: 'Every month on day {day} at {time}', yearly: 'Every year on {date} at {time}',
       inAnHour: 'In an hour', thisEvening: 'This evening, 18:00', tomorrowMorning: 'Tomorrow, 09:00', dateAndTime: 'Date and time',
       otherInterval: 'Every', minutesUnit: 'minutes', at: 'At', inThePast: 'This date has passed. Pick a time to come.', pickDays: 'Pick at least one day.',
       next: 'Next: {when}', name: 'Name', schedule: 'Plan it', newRoutine: 'Add a routine',

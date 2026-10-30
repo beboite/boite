@@ -14,6 +14,7 @@ export * from './browser-remote';
 export * from './mobile-devices';
 export * from './windows';
 export * from './agents';
+export { nextAgentOccurrence } from './agent-schedule';
 export * from './workflows';
 export * from './workflow-plan';
 export * from './thread-focus';

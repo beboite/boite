@@ -31,6 +31,15 @@ test('the form previews the next run on a picked weekday, later today or on a la
   expect(previewNext({ kind: 'once', at: now - 1 })).toBeNull();
 });
 
+test('calendar reminders describe and preview their actual timezone and calendar date', () => {
+  const monthly = { kind: 'monthly' as const, day: 31, time: '09:00', timezone: 'Europe/Paris' };
+  const yearly = { kind: 'yearly' as const, month: 11, day: 14, time: '09:00', timezone: 'Asia/Tokyo' };
+  expect(describeSchedule(monthly)).toBe(`Every month on day 31 at 9:00 AM${zone === monthly.timezone ? '' : ' (Europe/Paris)'}`);
+  expect(describeSchedule(yearly)).toBe(`Every year on November 14 at 9:00 AM${zone === yearly.timezone ? '' : ' (Asia/Tokyo)'}`);
+  expect(previewNext(monthly, Date.parse('2027-01-31T08:00:00Z'))).toBe(Date.parse('2027-03-31T07:00:00Z'));
+  expect(previewNext(yearly, Date.parse('2026-11-14T00:00:00Z'))).toBe(Date.parse('2027-11-14T00:00:00Z'));
+});
+
 test('a routine names itself from its first words and says where it stands', () => {
   expect(routineName('Sum up the new issues.\nThen post them.')).toBe('Sum up the new issues.');
   expect(routineName('Read every new message in the shared inbox and tell me which ones need an answer today')).toBe('Read every new message in the shared inbox and tell me...');
