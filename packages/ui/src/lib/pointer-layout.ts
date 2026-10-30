@@ -32,6 +32,9 @@ type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknow
 
 const tauriInvoke: Invoke = async (command, args) => (await import('@tauri-apps/api/core')).invoke(command, args);
 
+/** The shell's commands run in parallel: one at a time, in the core's order, so a box that replaces another gets its window. */
+let queue: Promise<void> = Promise.resolve();
+
 /**
  * One `windows.pointer` event as the Store that received it hands it on.
  * Outside the shell, or from another machine's core, nothing happens: only
@@ -39,8 +42,10 @@ const tauriInvoke: Invoke = async (command, args) => (await import('@tauri-apps/
  */
 export function pointerRequested(from: { localCore: boolean }, box: WindowPointerBox, invoke: Invoke = tauriInvoke): Promise<void> {
   if (window.__TAURI_INTERNALS__ === undefined || !from.localCore) return Promise.resolve();
-  const call = box.rect === null
+  const rect = box.rect;
+  queue = queue.then(() => rect === null
     ? invoke('pointer_hide', { id: box.id })
-    : invoke('pointer_show', { id: box.id, rect: box.rect, label: box.label });
-  return call.then(() => undefined, (error: unknown) => { console.warn('windows.pointer failed', error); });
+    : invoke('pointer_show', { id: box.id, rect, label: box.label }))
+    .then(() => undefined, (error: unknown) => { console.warn('windows.pointer failed', error); });
+  return queue;
 }

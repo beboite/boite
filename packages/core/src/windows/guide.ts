@@ -161,11 +161,12 @@ export class WindowGuides {
     const screen = { left: frame.rect.left + box.x, top: frame.rect.top + box.y, width: box.width, height: box.height };
     // Without a label, a control's box says its name.
     const shownLabel = label === '' && control ? control.name.slice(0, WINDOW_POINT_LABEL_MAX) : label;
+    // The previous box goes first, so the desktop app hands its window to the new one.
+    this.#remove(thread.id, 'cleared');
     const boxId = newId('box_');
     if (this.#core.subscribers.pointer({ id: boxId, rect: frame.minimized ? null : screen, label: shownLabel }) === 0) {
       throw refused('the box is drawn by the Boite desktop app of this computer, and none is open: ask the user to open Boite', { code: 'no-app' });
     }
-    this.#remove(thread.id, 'cleared');
     const pointer: WindowPointer = {
       windowId: window.id, process: window.process, label: shownLabel,
       x: box.x, y: box.y, width: box.width, height: box.height, expiresAt: Date.now() + seconds * 1000,

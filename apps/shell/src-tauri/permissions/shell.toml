@@ -28,6 +28,7 @@ commands.allow = [
   "quota_window",
   "pointer_show",
   "pointer_hide",
+  "pointer_layout",
   "window_material",
   "window_material_supported",
   "tray_labels",

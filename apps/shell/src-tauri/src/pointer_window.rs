@@ -60,6 +60,8 @@ pub fn place(rect: ScreenRect, label: &str, scale: f64, monitor: (i32, i32, i32,
     let height = rect.height + 2 * px(MARGIN) + px(LABEL_ROOM);
     let below = rect.top - px(MARGIN) - px(LABEL_ROOM) < monitor.1;
     let top = if below { rect.top - px(MARGIN) } else { rect.top - px(MARGIN) - px(LABEL_ROOM) };
+    // The window ends at the monitor's bottom: the page keeps the ring inside it, so a control on the taskbar keeps all four sides.
+    let height = height.min(monitor.3 - top).max(1);
     // The window stays on the monitor sideways, so a label near the right edge is not cut.
     let left = (rect.left - px(MARGIN)).min(monitor.2 - width).max(monitor.0);
     let layout = Layout {
@@ -125,9 +127,11 @@ fn monitor_of<R: Runtime>(app: &AppHandle<R>, rect: ScreenRect) -> (f64, (i32, i
     }
 }
 
-/// Draws the box `id` around `rect`, or moves it there.
+/// Draws the box `id` around `rect`, or moves it there. Async: a synchronous
+/// command runs on the event loop, and building a window there deadlocks on
+/// Windows, since WebView2 needs that same loop to come up.
 #[tauri::command]
-pub fn pointer_show(app: AppHandle, webview: Webview, id: String, rect: ScreenRect, label: String) -> Result<(), String> {
+pub async fn pointer_show(app: AppHandle, webview: Webview, id: String, rect: ScreenRect, label: String) -> Result<(), String> {
     only_main(&webview)?;
     if id.is_empty() || id.len() > 64 { return Err("pointer id must be 1 to 64 characters".into()); }
     if rect.width <= 0 || rect.height <= 0 || rect.width > 32768 || rect.height > 32768 {
@@ -167,7 +171,7 @@ pub fn pointer_show(app: AppHandle, webview: Webview, id: String, rect: ScreenRe
 
 /// Takes the box `id` away; its window waits hidden for the next one.
 #[tauri::command]
-pub fn pointer_hide(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
+pub async fn pointer_hide(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
     only_main(&webview)?;
     let state = app.state::<PointerState>();
     let label = {
@@ -274,7 +278,8 @@ mod tests {
 
     #[test]
     fn the_window_stays_on_the_monitor_near_its_right_edge() {
-        let ((x, _, width, _), layout) = place(ScreenRect { left: 1880, top: 1032, width: 40, height: 48 }, "Notifications", 1.0, FULL_HD);
+        let ((x, y, width, height), layout) = place(ScreenRect { left: 1880, top: 1032, width: 40, height: 48 }, "Notifications", 1.0, FULL_HD);
+        assert_eq!(y + height as i32, 1080);
         assert_eq!(x + width as i32, 1920);
         assert_eq!(layout.x, f64::from(1880 - x));
     }

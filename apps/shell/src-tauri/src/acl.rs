@@ -30,4 +30,16 @@ mod tests {
             assert!(authority.resolve_access(command, "quotas", "quotas", &Origin::Local).is_none(), "quota popup can invoke {command}");
         }
     }
+
+    #[test]
+    fn a_pointer_window_reads_its_box_and_nothing_more() {
+        let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
+        let authority = context.runtime_authority_mut();
+        for command in ["pointer_layout", "plugin:event|listen", "plugin:event|unlisten"] {
+            assert!(authority.resolve_access(command, "pointer-1", "pointer-1", &Origin::Local).is_some(), "a pointer window cannot invoke {command}");
+        }
+        for command in ["core_endpoint", "pointer_show", "pointer_hide", "browser_create", "quit_shell", "save_attachment"] {
+            assert!(authority.resolve_access(command, "pointer-1", "pointer-1", &Origin::Local).is_none(), "a pointer window can invoke {command}");
+        }
+    }
 }

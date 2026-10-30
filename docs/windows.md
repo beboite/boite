@@ -122,7 +122,8 @@ The reason for each entry sits beside it in `AGENT_METHODS`
 (`packages/core/src/access.ts`) and `DEVICE_METHODS`
 (`packages/contracts/src/access.ts`). An agent's token works only for its own
 conversation, so it cannot reach another project's windows panel or cards.
-`windows.changed` goes only to clients subscribed to the conversation.
+`windows.changed` goes only to clients subscribed to the conversation, and
+`windows.pointer` only to the owner's desktop app on the core's own machine.
 
 ## The Window panel
 
