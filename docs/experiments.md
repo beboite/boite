@@ -77,6 +77,13 @@ the switch off closes the page if it is open. It hides the page only: bots
 already made keep their threads and routines on the core, which knows nothing
 of a client's experiments.
 
+## Teams
+
+Teams of bots ([teams](teams.md)). The switch gates every `teams.*` method
+and `boite team` command on the core, which reads the desktop app's
+experiments, and the team lines of the bots' guide. Letters already in a
+bot's inbox still go out once it is off. The app draws no team page yet.
+
 ## Contacts
 
 The contacts column and the Contacts page ([contacts](contacts.md)). On a

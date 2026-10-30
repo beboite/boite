@@ -474,6 +474,7 @@ boite bot schedule <json>
 boite bot unschedule <routine-id>
 boite bot watch|unwatch <thread-id>
 boite bot event <bot> [--key <key>] <text>
+boite team list|say|dm|read|propose|invite|leave
 boite delegate models [--machine <name>]
 boite delegate profiles|list
 boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>] [--worktree] [--machine <name> [--project <name>]] [context flags]
@@ -504,6 +505,10 @@ parent's checkout ([delegation](delegation.md#children-in-their-own-worktree)).
 Coordination commands are documented in [coordination](coordination.md#agent-commands),
 child controls in [delegation](delegation.md#agent-commands), and plan/output
 commands in [workflows](workflows.md#commands).
+
+`team` lets a bot talk with the other bots of its teams, behind the Teams
+experiment: group or private posts, reading, and cards that ask the owner to
+create, join or leave a team ([teams](teams.md#commands)).
 
 Bots schedule work from their own conversation. `bot schedule` accepts `name`, `prompt`, and `schedule`,
 for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.

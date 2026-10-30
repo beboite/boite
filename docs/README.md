@@ -46,6 +46,7 @@
 - [Contacts](contacts.md): experimental collaboration with another owner on explicitly shared projects.
 - [Agent coordination](coordination.md): messages between threads and machines, discussions and permissions.
 - [Bots](bots.md): experimental persistent agents with their own identity, thread, memory, desk and routines.
+- [Teams](teams.md): experimental groups of bots and the owner, routing by name, group or private posts, `boite team`.
 - [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.
 - [Agent hooks](hooks.md): hooks on each account and what they blocked.
 - [Plugins](plugins.md): install recommended plugins or a Git URL, and write your own.
