@@ -50,10 +50,11 @@ const AGENT_METHODS = ['turns.start', 'turns.steer', 'turns.recover', 'threads.r
 /** `methods` with each of `AGENT_METHODS` refusing a team chat first. */
 export function refuseTeamChats(ctx: FakeContext, methods: FakeMethods): FakeMethods {
   for (const name of AGENT_METHODS) {
-    const answer = methods[name] as (params: { threadId: string }) => Promise<unknown>;
-    (methods as Record<string, unknown>)[name] = async (params: { threadId: string }) => {
-      if (ctx.threads.get(params.threadId)?.teamId) throw refused('a team chat runs no agent; post to it through teams.post', { threadId: params.threadId });
-      return answer(params);
+    const answer = methods[name] as (params: { threadId: string }, ...rest: unknown[]) => Promise<unknown>;
+    // Not async: an extra tick before the method would let a running fake turn end first.
+    (methods as Record<string, unknown>)[name] = (params: { threadId: string }, ...rest: unknown[]) => {
+      if (ctx.threads.get(params.threadId)?.teamId) return Promise.reject(refused('a team chat runs no agent; post to it through teams.post', { threadId: params.threadId }));
+      return answer(params, ...rest);
     };
   }
   return methods;
