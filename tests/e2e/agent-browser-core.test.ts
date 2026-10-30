@@ -130,16 +130,23 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
         await owner.call('panel.open', { threadId: thread.id, surface: { kind: 'browser', url: site.url.href } });
         await page.settleAnimations();
         expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
+        // Finish the desktop's initial viewport fit before the phone starts
+        // its own. A tap between those two resizes targets an obsolete frame.
+        await pages[0]!.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 3`);
+        await pages[0]!.waitFor(frameShown(), 20_000);
         await page.click(id('phone-browser-toggle'));
         await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 3`);
-        // Both viewers may fit this new tab at once. Either viewport is valid;
-        // the phone must have a decoded, usable frame and drive the new page.
-        await page.waitFor(`(() => { const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && image.naturalWidth > 100 && !image.closest('button').disabled; })()`, 20_000);
+        await page.waitFor(frameShown(), 20_000);
         const nextBefore = await button();
         await tapFrame(page, true);
         const nextDeadline = Date.now() + 10_000;
         while (await button() === nextBefore && Date.now() < nextDeadline) await Bun.sleep(100);
-        expect(await button()).not.toBe(nextBefore);
+        const nextAfter = await button();
+        if (nextAfter === nextBefore) {
+          await capture(page, 'agent-browser-core-failed-tap-phone.png');
+          console.error('browser tap failure', await page.evaluate('document.body.innerText'));
+        }
+        expect(nextAfter).not.toBe(nextBefore);
         await page.evaluate('history.back()');
         await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
         expect(await button(tabId)).not.toBe(before);
