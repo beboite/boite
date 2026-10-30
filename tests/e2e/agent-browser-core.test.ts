@@ -37,13 +37,16 @@ async function tapFrame(page: BrowserPage, touch: boolean) {
     await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   } else for (const type of ['mousePressed', 'mouseReleased'] as const) await page.send('Input.dispatchMouseEvent', { type, ...box, button: 'left', clickCount: 1 });
 }
-// The first decoded image can precede the automatic viewport fit, which disables input.
-const frameShown = `(() => {
+// A lone viewer fits the viewport. With two viewers, the page may keep the
+// other's dimensions, but its decoded frame must fit without distortion.
+const frameShown = (fit = true) => `(() => {
   const image = document.querySelector('${id('remote-browser-frame')}');
   const screen = image?.closest('button'), area = screen?.closest('.screen-area');
-  return image?.complete && image.naturalWidth > 100 && screen && area && !screen.disabled
-    && Math.abs(screen.offsetWidth - area.clientWidth) <= 2
-    && Math.abs(screen.offsetHeight - area.clientHeight) <= 2;
+  if (!image?.complete || image.naturalWidth <= 100 || !screen || !area || screen.disabled) return false;
+  const scale = Math.min(area.clientWidth / image.naturalWidth, area.clientHeight / image.naturalHeight);
+  return Math.abs(screen.offsetWidth - image.naturalWidth * scale) <= 2
+    && Math.abs(screen.offsetHeight - image.naturalHeight * scale) <= 2
+    && (${!fit} || Math.abs(screen.offsetWidth - area.clientWidth) <= 2 && Math.abs(screen.offsetHeight - area.clientHeight) <= 2);
 })()`;
 
 real('the core runs the agent browser; desktop and phone show it covered, then live, and their taps reach the page', async () => {
@@ -81,6 +84,10 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
         await page.settleAnimations();
         expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
         await capture(page, 'agent-browser-core-chat-phone.png');
+        // Let the desktop finish fitting the new tab before the phone starts
+        // its own deferred fit, so neither can overwrite the later preset.
+        await pages[0]!.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 2`);
+        await pages[0]!.waitFor(frameShown(), 20_000);
         await page.click(id('phone-browser-toggle'));
       }
       await page.waitFor(`document.querySelector('${id('agent-browser-cover-text')}')?.getBoundingClientRect().width > 0`, 20_000);
@@ -89,7 +96,24 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
       expect(await page.evaluate<number>(`document.querySelectorAll('${id('remote-browser-frame')}').length`)).toBe(0);
       await capture(page, `agent-browser-core-cover-${phone ? 'phone' : 'desktop'}.png`);
       await page.click(id('agent-browser-show'));
-      await page.waitFor(frameShown, 20_000);
+      if (phone) {
+        // A preset applied from the other device remains valid until this
+        // viewer changes size. Two viewers cannot both own the tab's viewport.
+        await page.waitFor(frameShown(), 20_000);
+        await owner.call('browser.command', {threadId: thread.id, tabId, action: {kind: 'preset', preset: 'laptop-1366x768'}});
+        await page.waitFor(`(() => {const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && Math.abs(image.naturalWidth / image.naturalHeight - 1366 / 768) < .02;})()`);
+      }
+      try { await page.waitFor(frameShown(!phone), 20_000); }
+      catch (error) {
+        console.error('browser frame geometry', phone, await page.evaluate(`(() => {
+          const image = document.querySelector('${id('remote-browser-frame')}');
+          const screen = image?.closest('button'), area = screen?.closest('.screen-area');
+          return {complete: image?.complete, natural: [image?.naturalWidth, image?.naturalHeight],
+            screen: [screen?.offsetWidth, screen?.offsetHeight], area: [area?.clientWidth, area?.clientHeight], disabled: screen?.disabled};
+        })()`));
+        await capture(page, `agent-browser-core-failed-${phone ? 'phone' : 'desktop'}.png`);
+        throw error;
+      }
       const before = await button(tabId);
       await tapFrame(page, phone);
       const deadline = Date.now() + 10_000;
@@ -109,16 +133,23 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
         await owner.call('panel.open', { threadId: thread.id, surface: { kind: 'browser', url: site.url.href } });
         await page.settleAnimations();
         expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
+        // Finish the desktop's initial viewport fit before the phone starts
+        // its own. A tap between those two resizes targets an obsolete frame.
+        await pages[0]!.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 3`);
+        await pages[0]!.waitFor(frameShown(), 20_000);
         await page.click(id('phone-browser-toggle'));
         await page.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 3`);
-        // Both viewers may fit this new tab at once. Either viewport is valid;
-        // the phone must have a decoded, usable frame and drive the new page.
-        await page.waitFor(`(() => { const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && image.naturalWidth > 100 && !image.closest('button').disabled; })()`, 20_000);
+        await page.waitFor(frameShown(), 20_000);
         const nextBefore = await button();
         await tapFrame(page, true);
         const nextDeadline = Date.now() + 10_000;
         while (await button() === nextBefore && Date.now() < nextDeadline) await Bun.sleep(100);
-        expect(await button()).not.toBe(nextBefore);
+        const nextAfter = await button();
+        if (nextAfter === nextBefore) {
+          await capture(page, 'agent-browser-core-failed-tap-phone.png');
+          console.error('browser tap failure', await page.evaluate('document.body.innerText'));
+        }
+        expect(nextAfter).not.toBe(nextBefore);
         await page.evaluate('history.back()');
         await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
         expect(await button(tabId)).not.toBe(before);

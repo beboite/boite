@@ -7,6 +7,24 @@ Use the Bun version in `package.json`. Desktop builds also need Rust and the
 [CI](ci.md) defines automated check selection and
 [portability](portability.md) records platform coverage and gaps.
 
+## Shared-project fixtures
+
+Shared compute admission acknowledges a durable queued job before preparing its
+checkout. Completion includes Git provenance inspection after the worker's turn
+finishes. Tests use `waitForComputeJob` to observe durable changes, within the
+test's own deadline, without extra peer reads or a shorter helper cutoff.
+The fanout test retains four local and five remote workers.
+
+Board edits may return a queued receipt after 100 ms while the authority still
+answers. Storage-exhaustion tests drain that outstanding operation through a
+board read before asserting the local disk error and retained pending edit.
+The authority must still contain the accepted change.
+
+Two remote browser viewers share one page viewport. A lone viewer fits it to
+its available area; another viewer or an agent preset may change its dimensions.
+The real-core E2E test checks a decoded, usable frame without distortion on the
+second viewer and verifies its input still reaches the page.
+
 ## The core
 
 ```sh

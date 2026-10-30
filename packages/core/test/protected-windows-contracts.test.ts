@@ -1,13 +1,13 @@
 import {expect, test} from 'bun:test';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Bus} from '../src/bus.ts';
 import {Journal} from '../src/journal.ts';
 import {ProcRegistry} from '../src/procs.ts';
 
-// Only fixed case/run IDs, captured PIDs and phase states enter these diagnostics.
-// The two runs per case bound the snapshot; no output, command paths or environment are logged.
+// Only fixed case/run IDs, captured PIDs, phase states and measured resources enter these diagnostics.
+// Compiler stages are allowlisted basenames; no output, command paths or environment are logged.
 function contractPhases(caseId: string) {
   const started = performance.now();
   type Status = 'pending' | 'fulfilled' | 'rejected';
@@ -21,15 +21,29 @@ function contractPhases(caseId: string) {
   };
   return {
     phase,
-    launched(id: string, pid: number) {
+    launched(id: string, pid: number, procs: ProcRegistry) {
       // Track the original waits, including those still pending at cleanup.
       const waits: RunState = {pid, exit: 'pending', stdout: 'pending', stderr: 'pending'};
       runs.set(id, waits);
       phase('launched', id);
+      // Three samples before the existing 20 s deadline distinguish a busy compiler
+      // from a parent waiting for a compiler stage or inherited output pipes.
+      const timers = process.platform === 'win32' ? [5000, 10000, 15000].map(ms => setTimeout(() => {
+        const load = procs.loadOf(id);
+        const processes = procs.liveOf(id);
+        console.error('[windows-contract-sample]', JSON.stringify({caseId, runId: id,
+          ms: Math.round(performance.now() - started), load,
+          count: processes.length, processes: processes.slice(0, 8).map(record => {
+            const name = basename(record.exe).toLowerCase().replace(/\.exe$/, '');
+            return {pid: record.pid, parentPid: record.parentPid,
+              stage: ['gcc', 'clang', 'cc1', 'as', 'collect2', 'ld', 'nonce', 'contracts'].includes(name) ? name : 'other'};
+          })}));
+      }, ms)) : [];
+      const stopSamples = () => { if (Object.values(waits).every(value => value !== 'pending')) timers.forEach(clearTimeout); };
       return <T>(wait: Wait, promise: Promise<T>): Promise<T> => promise.then(value => {
-        waits[wait] = 'fulfilled'; phase(wait, id, 'fulfilled'); return value;
+        waits[wait] = 'fulfilled'; phase(wait, id, 'fulfilled'); stopSamples(); return value;
       }, error => {
-        waits[wait] = 'rejected'; phase(wait, id, 'rejected'); throw error;
+        waits[wait] = 'rejected'; phase(wait, id, 'rejected'); stopSamples(); throw error;
       });
     },
   };
@@ -79,7 +93,7 @@ int main(void) {
     const run = async (id: string, command: string, args: string[]) => {
       phases.phase('launch-intent', id);
       const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false});
-      const observe = phases.launched(id, child.proc.pid);
+      const observe = phases.launched(id, child.proc.pid, procs);
       child.proc.stdin.end();
       const [code, out, err] = await Promise.all([observe('exit', child.exited),
         observe('stdout', new Response(child.proc.stdout).text()), observe('stderr', new Response(child.proc.stderr).text())]);
@@ -109,7 +123,7 @@ test('production Null scheduler grows, replays queued traps and validates native
     const run = async (id: string, command: string, args: string[]) => {
       phases.phase('launch-intent', id);
       const child = procs.spawnPiped(id, command, args, {cwd: scratch, agentRoot: false});
-      const observe = phases.launched(id, child.proc.pid);
+      const observe = phases.launched(id, child.proc.pid, procs);
       child.proc.stdin.end();
       const [code, out, err] = await Promise.all([observe('exit', child.exited),
         observe('stdout', new Response(child.proc.stdout).text()), observe('stderr', new Response(child.proc.stderr).text())]);

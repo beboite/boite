@@ -6,6 +6,7 @@ import type { SharedProjectRef } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { connect } from '../src/client.ts';
 import { thrown } from './settle.ts';
+import { waitForComputeJob } from './shared-compute-fixture.ts';
 import { sharedExecutionProtection } from '../src/contacts/compute-policy.ts';
 import { snapshot } from '../src/threads/checkpoint-files.ts';
 import {protectedProviderApi} from './fixtures/protected-provider-api.ts';
@@ -55,7 +56,7 @@ async function fixture() {
   await b.client.call('sharedProjects.decide', { sharedProjectId, accept: true, requestId: 'accept' });
   await b.client.call('sharedProjects.configure', { sharedProjectId, computeThreadId: b.threadId, compute: {enabled: true, profiles: ['conversation'], permissionMode: 'default', maxConcurrent: null} });
   const job = await a.client.call('sharedCompute.start', {threadId: a.threadId, sharedProjectId, requestId: 'job', host: b.ref, profileId: 'conversation', baseCommit: await git(a.h, a.path, 'rev-parse', 'HEAD'), task: '[sleep:90000]'});
-  await waitFor(() => b.h.core.sharedCompute.journal.get(job.id, 'host')?.job.status === 'running');
+  expect((await waitForComputeJob(b.h, job.id, ['running'])).status).toBe('running');
   const worker = b.h.core.threads.require(job.worker!.threadId);
   const agent = await connect(b.h.url, b.h.core.agents.tokenFor(worker.id));
   return {a, b, sharedProjectId, job, worker, agent};
