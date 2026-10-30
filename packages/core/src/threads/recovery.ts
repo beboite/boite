@@ -3,6 +3,7 @@ import type { Message, MessageId, MessagePart, RpcParams, ThreadId, Turn } from 
 import type { Core } from '../core.ts';
 import { assertDriverRunnable } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
+import { requireAgent } from './agentless.ts';
 import { newId } from '../ids.ts';
 import { markQueued, settleStatus } from './lifecycle.ts';
 import { checkStoredEffort, checkStoredSpeed } from './selection.ts';
@@ -98,7 +99,7 @@ export class ThreadRecovery {
     const { threadId, turnId, action } = params;
     if (action !== 'resume' && action !== 'discard') throw refused('action must be resume or discard', { field: 'action', expected: ['resume', 'discard'] });
     if (this.#core.stopping) throw refused('the core is stopping; reconnect before recovering a prompt');
-    const thread = this.#core.threads.require(threadId);
+    const thread = requireAgent(this.#core.threads, threadId);
     const turn = this.#core.journal.getTurn(turnId);
     if (!turn || turn.threadId !== threadId) throw notFound('turnId must name a turn of this thread', { field: 'turnId', threadId, turnId });
     // A response lost after admission is an idempotent read, not another launch.

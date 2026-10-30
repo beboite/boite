@@ -182,9 +182,7 @@ ${CONTROL_HELP}
                                  (--key <key>: a later event with the same key
                                  replaces it while it waits); from a terminal
                                  as the owner, or --core with a paired device
-  team list|say|dm|read          a bot's teams: post in the group or privately,
-                                 read them (boite team help)
-  team propose|invite|leave      a card asking the owner to change a team
+  team <command>                 a bot's teams: post, read, propose (boite team help)
   --request-id <id>              reuse to retry threads send|reply or delegate spawn|send
   delegate models                models, reasoning levels and speeds a subagent can use
                                  (--machine <name>: another machine's, for

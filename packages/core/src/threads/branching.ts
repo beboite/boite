@@ -19,6 +19,7 @@ import { getDriver } from '../drivers/index.ts';
 import { NativeForkUnsupported } from '../drivers/native-fork.ts';
 import type { ForkedSession } from '../drivers/types.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { requireAgent } from './agentless.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { MOVE_NOTE_PREFIX, moveNote } from './move.ts';
@@ -49,7 +50,7 @@ export class ThreadBranching {
   constructor(core: Core, threads: ThreadStore) { this.#core = core; this.#threads = threads;}
 
   async rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
-    const thread = this.#threads.require(threadId);
+    const thread = requireAgent(this.#threads, threadId);
     if (thread.archived) throw refused('cannot rewind an archived thread', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
     if (this.#threads.isBusy(threadId)) {
       throw refused('this thread has a turn running or queued; stop it before editing a message', {
@@ -181,7 +182,7 @@ export class ThreadBranching {
    * and a refusal after that removes the worktree again.
    */
   async fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
-    const source = this.#threads.require(threadId);
+    const source = requireAgent(this.#threads, threadId);
     if (source.agentSessionId || source.projectId === null) {
       throw refused('a bot\'s thread has no project to fork into', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }

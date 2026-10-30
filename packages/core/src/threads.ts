@@ -62,6 +62,7 @@ import { eraseIncognito } from './threads/incognito.ts';
 import { removeTranscripts, threadSessions, type NativeSession } from './threads/transcript-purge.ts';
 import { ThreadCreation } from './threads/creation.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
+import { requireAgent } from './threads/agentless.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -169,17 +170,6 @@ export class ThreadStore {
   require(threadId: ThreadId): ThreadSummary {
     const thread = this.#core.journal.getThread(threadId);
     if (thread === null) throw notFound(`unknown thread ${threadId}`, { threadId });
-    return thread;
-  }
-
-  /**
-   * A thread that may reach a provider. A team chat (`docs/teams.md`) runs no
-   * agent: every turn, title, compaction, branch, move, side request, selection
-   * and goal on it is refused here, and its posts go through `teams.post`.
-   */
-  requireAgent(threadId: ThreadId): ThreadSummary {
-    const thread = this.require(threadId);
-    if (thread.teamId) throw refused('a team chat runs no agent; post to it through teams.post', { threadId });
     return thread;
   }
 
@@ -579,13 +569,12 @@ export class ThreadStore {
    * thread with no prompt yet, or while an earlier ask is still running.
    */
   retitle(threadId: ThreadId): Promise<ThreadSummary> {
-    this.requireAgent(threadId);
     return this.titles.retitle(threadId);
   }
 
   /** `automatic`: the core opens it by the `autoCompact` setting (`threads/auto-compact.ts`). */
   compact(threadId: ThreadId, expectedSelectionVersion?: number, automatic = false): Turn {
-    const thread = this.requireAgent(threadId);
+    const thread = requireAgent(this, threadId);
     const refusal = this.compactRefusal(thread);
     if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.#core.providers.require(thread.providerId).protocol;
@@ -606,19 +595,16 @@ export class ThreadStore {
 
   /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
   rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
-    this.requireAgent(threadId);
     return this.branching.rewind(threadId, messageId);
   }
 
   /** A new thread with the history up to and including a message (`threads/branching.ts`). */
   fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
-    this.requireAgent(threadId);
     return this.branching.fork(threadId, messageId, worktree);
   }
 
   /** Move a thread and its sub-threads to another project (`threads/move.ts`). */
   move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
-    this.requireAgent(threadId);
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
@@ -632,7 +618,7 @@ export class ThreadStore {
     const startedBy = origin.kind === 'spawned' ? origin.startedBy : undefined;
     const sentFrom = origin.kind === 'user' ? origin.sentFrom ?? null : null;
     if (this.#core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
-    let thread = this.requireAgent(threadId);
+    let thread = requireAgent(this, threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);
@@ -867,7 +853,6 @@ export class ThreadStore {
   }
 
   recoverTurn(params: RpcParams<'turns.recover'>): Turn {
-    this.requireAgent(params.threadId);
     return this.#recovery.recover(params);
   }
 

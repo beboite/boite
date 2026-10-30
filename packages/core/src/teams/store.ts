@@ -2,7 +2,7 @@
  * Teams of bots (`docs/teams.md`): a few bots and the owner in one group. The
  * team chat is a projectless thread that runs no agent; each post is one turn
  * there. A post addressed to a bot becomes a team letter in its inbox
- * (`Coordination.acceptTeamLetter`), rendered from what that bot has not seen
+ * (`TeamLetters.accept`, `coordination-team.ts`), rendered from what that bot has not seen
  * yet. Member keys are `<coreId>/<botId>`, so the rows fit members on other
  * machines; this version takes this machine's bots only.
  */
@@ -261,7 +261,7 @@ export class TeamStore {
     if (typeof params.archived !== 'boolean') throw invalidParams('archived: expected a boolean');
     if (team.archived === params.archived) return team;
     const saved = this.#save(team, { archived: params.archived });
-    if (params.archived) this.#core.coordination.rejectTeamLetters(team.id, null, `The team ${team.name} was archived`);
+    if (params.archived) this.#core.coordination.teamLetters.reject(team.id, null, `The team ${team.name} was archived`);
     else this.#kickMembers(saved);
     return saved;
   }
@@ -280,7 +280,7 @@ export class TeamStore {
   #kickMembers(team: Team): void {
     for (const member of team.members) {
       const threadId = this.#threadOf(member);
-      if (threadId !== null) this.#core.coordination.kickThread(threadId);
+      if (threadId !== null) this.#core.coordination.teamLetters.kick(threadId);
     }
   }
 
@@ -309,7 +309,7 @@ export class TeamStore {
     if (!member) throw refused(`botId: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field: 'botId' });
     const saved = this.#save(team, { members: team.members.filter(entry => entry.key !== member.key) });
     const threadId = this.#threadOf(member);
-    if (threadId !== null) this.#core.coordination.rejectTeamLetters(team.id, threadId, `${member.name} left the team ${team.name}`);
+    if (threadId !== null) this.#core.coordination.teamLetters.reject(team.id, threadId, `${member.name} left the team ${team.name}`);
     this.#core.journal.append({ type: 'teams.member.removed', threadId: team.threadId, version: 1, payload: { teamId: team.id, member: member.key } }, db => {
       db.query('DELETE FROM team_cursors WHERE team_id = ? AND member = ?').run(team.id, member.key);
       db.query('DELETE FROM team_seen WHERE team_id = ? AND member = ?').run(team.id, member.key);
@@ -418,7 +418,7 @@ export class TeamStore {
       const member = team.members.find(entry => entry.key === recipient);
       const threadId = member ? this.#threadOf(member) : null;
       if (threadId === null) continue;
-      try { this.#core.coordination.acceptTeamLetter(team, threadId, post.seq, post.author === TEAM_OWNER); } catch (error) { failed ??= error; }
+      try { this.#core.coordination.teamLetters.accept(team, threadId, post.seq, post.author === TEAM_OWNER); } catch (error) { failed ??= error; }
     }
     if (failed !== null) throw failed;
   }
@@ -438,7 +438,7 @@ export class TeamStore {
       if (!team || threadId === null) continue;
       const carried = this.#db.query(`SELECT 1 FROM coordination_letters l, json_each(l.data, '$.team.triggers') t WHERE l.thread_id = ? AND l.direction = 'in'
         AND l.status IN ('received', 'uncertain') AND json_extract(l.data, '$.team.teamId') = ? AND t.value = ? LIMIT 1`).get(threadId, team.id, row.seq);
-      if (!carried) this.#core.coordination.acceptTeamLetter(team, threadId, row.seq, row.author === TEAM_OWNER);
+      if (!carried) this.#core.coordination.teamLetters.accept(team, threadId, row.seq, row.author === TEAM_OWNER);
     }
   }
 

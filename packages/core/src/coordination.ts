@@ -2,7 +2,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { threadActive, defaultCoordinationConfig, TEAM_LETTERS_PER_BATCH } from '@boite/contracts';
-import type { Team, AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams, ThreadStatus } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams, ThreadStatus } from '@boite/contracts';
 import { checkRemoteContact } from './coordination-lookup.ts';
 import { CoordinationLookups } from './coordination-directory.ts';
 import { PeerDesk } from './coordination-peer.ts';
@@ -22,7 +22,7 @@ import { isAgentHeld } from './agents/runtime.ts';
 import { ContactMailboxes } from './contacts/mailboxes.ts';
 import { forwardCoordination } from './coordination-rpc.ts';
 import { trustCoordination, trustedCoordinationPeers } from './coordination-trust.ts';
-import type { TeamChannel } from './teams/prompt.ts';
+import { TeamLetters } from './coordination-team.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -45,6 +45,7 @@ type Row = { data: string; fingerprint: string | null };
 export class Coordination {
   readonly bridge = new CoordinationBridge();
   readonly mailboxes: ContactMailboxes;
+  readonly teamLetters: TeamLetters;
   readonly #lookups: CoordinationLookups;
   #key: ReturnType<typeof createPrivateKey> | null = null;
   #publicKey = '';
@@ -72,6 +73,9 @@ export class Coordination {
   constructor(core: Core, threadJsonChecked = false) {
     this.#core = core;
     this.mailboxes = new ContactMailboxes(core);
+    this.teamLetters = new TeamLetters(core, { rows: (where, ...params) => this.rows(where, ...params), update: (letter, status, error) => this.update(letter, status, error), accept: letter => this.acceptLetter(letter),
+      receive: (letter, threadId) => this.#core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: letter }, () => this.#put(letter, 'in', threadId)),
+      kick: threadId => this.#kick(threadId), changed: threadId => this.#changed(threadId), handToWaiter: threadId => this.#handToWaiter(threadId, null), self: threadId => this.#self(threadId) });
     this.#lookups = new CoordinationLookups(core, {
       selfId: () => this.#self('').coreId, config: threadId => this.config(threadId), trusted: () => this.trusted(), localReach: threadId => this.#localReach(threadId),
       contact: (threadId, resident) => this.#contact(threadId, resident), checkLookupAccess: (threadId, remote) => this.checkLookupAccess(threadId, remote), mailboxes: this.mailboxes,
@@ -184,7 +188,7 @@ export class Coordination {
     this.#core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     this.#saveConfig(threadId, { mode: config.mode, resources: config.resources, remote: config.remote, paused: config.paused });
     // Team letters answer to their team (`docs/teams.md`), not to this switch: their wakes and inbox stay.
-    if (config.paused && !this.#onlyTeamQueued(threadId)) this.#core.threads.stopQueuedCoordination(threadId);
+    if (config.paused && !this.teamLetters.onlyQueued(threadId)) this.#core.threads.stopQueuedCoordination(threadId);
     if (config.mode === 'off' || !config.remote) {
       const queued = this.rows("thread_id = ? AND status = 'uncertain'", threadId).map(row => JSON.parse(row.data) as AgentLetter)
         .filter(letter => !letter.team && letter.error === 'Queued for provider delivery' && (config.mode === 'off' || !this.#inProject(letter)));
@@ -192,24 +196,13 @@ export class Coordination {
         this.#core.threads.stopQueuedCoordination(target);
       }
     }
-    if (config.mode === 'off') {
-      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) {
-        const letter = JSON.parse(row.data) as AgentLetter;
-        if (!letter.team) this.update(letter, 'rejected', 'Coordination disabled');
-      }
-    } else if (!config.remote) {
-      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) {
-        const letter = JSON.parse(row.data) as AgentLetter;
-        if (!letter.team && !this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
-      }
+    for (const row of config.mode === 'off' || !config.remote ? this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId) : []) {
+      const letter = JSON.parse(row.data) as AgentLetter;
+      if (letter.team) continue;
+      if (config.mode === 'off') this.update(letter, 'rejected', 'Coordination disabled');
+      else if (!this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
     }
     return this.get(threadId);
-  }
-  /** Whether the queued wake of a thread carries team letters only, which its own pause leaves to the team. */
-  #onlyTeamQueued(threadId: string): boolean {
-    const queued = this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId).map(row => JSON.parse(row.data) as AgentLetter)
-      .filter(letter => letter.error === 'Queued for provider delivery');
-    return queued.length > 0 && queued.every(letter => letter.team);
   }
   /**
    * A pause the core applies by itself (Stop, a restart, a failed wake). It lasts until the user's next message;
@@ -354,7 +347,7 @@ export class Coordination {
     return this.admit(threadId, this.#ready(threadId, Infinity, from), batch => {
       if (batch.length > 0) this.#restoreProject(threadId);
       // A waiter reads a team letter as rendered, never its raw triggers.
-      const { texts } = this.#render(threadId, batch, 'seen');
+      const { texts } = this.teamLetters.render(threadId, batch, 'seen');
       for (const letter of batch) this.update(letter, 'delivered');
       return withRelations(this.#core, this.#self('').coreId, threadId, batch.map(letter => ({ ...letter, ...(texts.has(letter.id) ? { text: texts.get(letter.id)! } : {}), status: 'delivered' as const })));
     }, () => this.#ready(threadId, Infinity, from, true));
@@ -577,7 +570,7 @@ export class Coordination {
     return this.admit(threadId, letters, batch => {
       if (!batch.length) return null;
       this.#restoreProject(threadId);
-      const { prompt } = this.#render(threadId, batch, 'seen');
+      const { prompt } = this.teamLetters.render(threadId, batch, 'seen');
       this.#core.threads.noteCoordination(threadId, turnId, prompt);
       for (const letter of batch) this.update(letter, 'delivered');
       return prompt;
@@ -707,22 +700,21 @@ export class Coordination {
         const steered = this.admit(threadId, ready, batch => {
           if (!batch.length || !this.#core.threads.canSteer(threadId)) return null;
           this.#restoreProject(threadId);
-          const { prompt } = this.#render(threadId, batch, 'flight');
+          const { prompt } = this.teamLetters.render(threadId, batch, 'flight');
           for (const letter of batch) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
           return { letters: batch, prompt };
         }, local);
         if (!steered) return;
-        const { letters } = steered;
         try {
           const result = await this.#steer(threadId, steered.prompt);
           if (result === null || this.#closed || this.#core.journal.isClosed()) return;
-          for (const letter of letters) {
+          for (const letter of steered.letters) {
             const current = this.#find(letter.id, 'in');
             if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, result.submitted ? 'delivered' : 'received');
           }
         } catch (error) {
           if (this.#closed || this.#core.journal.isClosed()) return;
-          for (const letter of letters) {
+          for (const letter of steered.letters) {
             const current = this.#find(letter.id, 'in');
             if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, 'uncertain', messageOf(error));
           }
@@ -731,7 +723,7 @@ export class Coordination {
         let held: RpcFailure | null = null;
         // One transaction records the wake, message states and scheduled turn.
         const woke = this.admit(threadId, ready, batch => batch.length > 0 && this.#core.journal.db.transaction(() => {
-          const { prompt, channel } = this.#render(threadId, batch, 'flight', true);
+          const { prompt, channel } = this.teamLetters.render(threadId, batch, 'flight', true);
           for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.#core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
           // An owner's team post wakes the bot as the owner's own message would: no bot pause or budget holds it.
@@ -754,68 +746,6 @@ export class Coordination {
     }
     finally { this.#delivering.delete(threadId); }
   }
-  /**
-   * A batch's prompt: ordinary letters as they always were, team letters
-   * rendered from their posts (`teams/store.ts`). A team letter whose
-   * triggers did not all fit keeps those that did; the rest wait in a new
-   * letter. Only a batch of team letters alone can name a reply channel.
-   */
-  #render(threadId: string, batch: AgentLetter[], mode: 'seen' | 'flight', reply = false): { prompt: string; texts: Map<string, string>; channel: TeamChannel | null } {
-    const plain = batch.filter(letter => !letter.team);
-    const team = batch.filter(letter => letter.team);
-    const rendering = this.#core.teams.render(threadId, team, mode, reply && plain.length === 0);
-    for (const { letter, seqs, owner } of rendering.leftovers) {
-      const rest: AgentLetter = { ...letter, id: randomUUID(), createdAt: Date.now(), status: 'received', error: null, team: { teamId: letter.team!.teamId, triggers: seqs, owner } };
-      this.#core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: rest }, () => this.#put(rest, 'in', threadId));
-      this.#kick(threadId);
-    }
-    const parts = plain.length ? [letterPrompt(plain, senderContext(this.#core, this.#self('').coreId, threadId))] : [];
-    for (const letter of team) parts.push(rendering.texts.get(letter.id)!);
-    return { prompt: parts.join('\n\n'), texts: rendering.texts, channel: rendering.channel };
-  }
-  /**
-   * A team post for a bot (`teams/store.ts`): it joins the bot's waiting
-   * letter of that team, whose expiry moves to six hours after it, or starts
-   * one. A letter already handed over is never joined. Team letters never go
-   * through `send` or `#receive`, and their text is rendered at delivery.
-   */
-  acceptTeamLetter(team: Team, threadId: string, seq: number, owner: boolean): void {
-    const now = Date.now();
-    const waiting = this.rows("thread_id = ? AND direction = 'in' AND status = 'received' AND json_extract(data, '$.team.teamId') = ?", threadId, team.id)[0];
-    if (waiting) {
-      const letter = JSON.parse(waiting.data) as AgentLetter;
-      const joined: AgentLetter = { ...letter, expiresAt: now + RESIDENT_LETTER_TTL_MS, team: { teamId: team.id, triggers: [...letter.team!.triggers, seq], owner: letter.team!.owner || owner } };
-      this.#core.journal.append({ type: 'coordination.team', threadId, version: 1, payload: { id: letter.id, seq, owner } }, () => {
-        this.#core.journal.db.query("UPDATE coordination_letters SET data = json_set(?, '$.createdAt', created_at) WHERE id = ? AND status = 'received'").run(JSON.stringify(joined), letter.id);
-      });
-      this.#core.threads.runner.noteMail(threadId, now);
-      this.#changed(threadId);
-      this.#handToWaiter(threadId, null);
-      this.#kick(threadId);
-      return;
-    }
-    const thread = this.#core.threads.require(threadId);
-    const from: AgentContact = { ...this.#self(team.threadId), title: `Team ${team.name}`.slice(0, 200), machine: this.#core.info().hostname ?? 'Boite', resources: '', status: 'idle', mode: 'brief' };
-    this.acceptLetter({
-      id: randomUUID(), from, to: this.#self(threadId), toTitle: thread.title.slice(0, 200), toProject: projectName(this.#core, threadId), toMachine: this.#core.info().hostname ?? 'Boite',
-      text: `Posts of the team ${team.name}`, replyTo: null, createdAt: now, expiresAt: now + RESIDENT_LETTER_TTL_MS, status: 'received', error: null,
-      team: { teamId: team.id, triggers: [seq], owner },
-    });
-  }
-  /** A team archived, or a bot that left it: its waiting team letters, a queued wake's too, go nowhere. */
-  rejectTeamLetters(teamId: string, threadId: string | null, reason: string): void {
-    const stopped = new Set<string>();
-    for (const row of this.rows("direction = 'in' AND status IN ('received', 'uncertain') AND json_extract(data, '$.team.teamId') = ?", teamId)) {
-      const letter = JSON.parse(row.data) as AgentLetter;
-      if (threadId !== null && letter.to.threadId !== threadId) continue;
-      if (letter.status === 'uncertain' && letter.error !== 'Queued for provider delivery') continue;
-      if (letter.status === 'uncertain') stopped.add(letter.to.threadId);
-      this.update(letter, 'rejected', reason);
-    }
-    for (const target of stopped) this.#core.threads.stopQueuedCoordination(target);
-  }
-  /** Delivery to one thread now, not at the next sweep: a resumed team's letters. */
-  kickThread(threadId: string): void { this.#kick(threadId); }
   /** A scheduled coordination turn reached its driver; no claim that the model read it. */
   submitted(threadId: string, turnId: string): void {
     for (const row of this.rows("thread_id = ? AND direction = 'in' AND status = 'uncertain'", threadId)) {

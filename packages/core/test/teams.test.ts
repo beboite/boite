@@ -472,14 +472,14 @@ test('a post whose letters were interrupted reaches its recipients once: a retri
     const { h, team, bots: [ada, bob], post } = await setup(['Ada', 'Bob'], dataDir);
     teamDriver();
     h.core.teams.pause({ teamId: team.id, paused: true });
-    const cut = spyOn(h.core.coordination, 'acceptTeamLetter').mockImplementationOnce(() => { throw new Error('interrupted before the letter'); });
+    const cut = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementationOnce(() => { throw new Error('interrupted before the letter'); });
     expect((await failure(() => post('@Ada @Bob ping', { id: 'gap-1' }))).message).toContain('interrupted');
     cut.mockRestore();
     post('@Ada @Bob ping', { id: 'gap-1' });
     expect(teamLetters(h, ada!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
     expect(teamLetters(h, bob!.threadId).map(letter => letter.team!.triggers)).toEqual([[1]]);
     // Interrupted again, and the core stops before anyone retries.
-    spyOn(h.core.coordination, 'acceptTeamLetter').mockImplementation(() => { throw new Error('interrupted before the letter'); });
+    spyOn(h.core.coordination.teamLetters, 'accept').mockImplementation(() => { throw new Error('interrupted before the letter'); });
     await failure(() => post('@Ada again', { id: 'gap-2' }));
     await cores.pop()!.stop();
     for (const restore of restores.splice(0).reverse()) restore();

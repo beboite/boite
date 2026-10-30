@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentMove, Message, MoveEnd, MoveNotice, PendingMove, Project, ProjectId, Protocol, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
+import { requireAgent } from './agentless.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import type { PlacedWorktree } from '../worktree.ts';
@@ -95,7 +96,7 @@ export class ThreadMove {
    */
   async userMove(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
     checkStop(threadId, stopBackground);
-    const thread = this.threads.require(threadId);
+    const thread = requireAgent(this.threads, threadId);
     if (!this.#inFlight(thread)) return this.move(threadId, projectId, stopBackground, 'now', 'user');
     const target = this.check(thread, projectId, stopBackground, 'request');
     await this.requireFolder(threadId, target);

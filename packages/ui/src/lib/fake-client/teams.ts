@@ -43,7 +43,7 @@ function state(ctx: FakeContext): TeamState {
 
 type TeamMethods = Pick<FakeMethods, `teams.${string}` & keyof FakeMethods>;
 
-/** What would reach a provider on a thread: a team chat runs no agent, so each refuses there, as `ThreadStore.requireAgent` does. */
+/** What would reach a provider on a thread: a team chat runs no agent, so each refuses there, as `requireAgent` (`packages/core/src/threads/agentless.ts`) does. */
 const AGENT_METHODS = ['turns.start', 'turns.steer', 'turns.recover', 'threads.retitle', 'threads.compact', 'threads.rewind', 'threads.fork', 'threads.move',
   'threads.btw', 'threads.btw.fork', 'threads.update', 'threads.goal.track', 'threads.activity.set'] as const;
 

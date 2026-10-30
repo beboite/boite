@@ -28,7 +28,7 @@ Contracts: `packages/contracts/src/teams.ts`; core:
   and `createdBy`: the owner, or the bot whose card the owner accepted. Every
   change bumps its `version` and emits `teams.changed`.
 - The team chat is a projectless thread with `teamId` that runs no agent.
-  `ThreadStore.requireAgent` refuses there every call that would reach a
+  `requireAgent` (`threads/agentless.ts`) refuses there every call that would reach a
   provider: `turns.start`, `turns.steer`, `turns.recover`,
   `threads.retitle`, `threads.compact`, `threads.rewind`, `threads.fork`,
   `threads.move`, `threads.btw`, `threads.btw.fork`, `threads.update`,
@@ -89,7 +89,7 @@ the recipients from the roster and the brief.
 
 A post addressed to a bot puts a team letter in that bot's inbox on the
 coordination transport ([coordination](coordination.md)), through
-`Coordination.acceptTeamLetter`, never through `send`, whose 4,000-character
+`TeamLetters.accept` (`coordination-team.ts`), never through `send`, whose 4,000-character
 cap stays. The letter keeps the operation `coordination`, so a team wake has
 the whole letter lifecycle: the hook, the waiter, the steer into a running
 turn, the wake, recovery after a restart and settlement.

@@ -1,5 +1,6 @@
 import { registerJournalInspection } from './journal/integrity.ts';
 import type { Core } from './core.ts';
+import { requireAgent } from './threads/agentless.ts';
 import { registerPersistentAgents } from './agents/store.ts';
 import { createAgent } from './agents/create.ts';
 import { registerAccountMethods } from './accounts.ts';
@@ -75,10 +76,10 @@ export function registerModules(core: Core): void {
   registerTeams(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
-  // A goal starts turns: a team chat runs none (`ThreadStore.requireAgent`).
-  core.router.register('threads.activity.set', (params) => { core.threads.requireAgent(params.threadId); return core.activity.set(params); });
+  // A goal starts turns: a team chat runs none (`threads/agentless.ts`).
+  core.router.register('threads.activity.set', (params) => { requireAgent(core.threads, params.threadId); return core.activity.set(params); });
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
-  core.router.register('threads.goal.track', (params) => { core.threads.requireAgent(params.threadId); return core.activity.track(params.threadId); });
+  core.router.register('threads.goal.track', (params) => { requireAgent(core.threads, params.threadId); return core.activity.track(params.threadId); });
   // Progress is for the window that asked: every other client would drop it on its requestId.
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));
