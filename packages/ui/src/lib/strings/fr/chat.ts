@@ -152,6 +152,8 @@ export const fr: Translation = {
     deny: 'Refuser',
     allowed: 'Autorisé',
     denied: 'Refusé',
+    permissionAllowedBy: 'Autorisé par vous',
+    permissionDeniedBy: 'Refusé par vous',
     questionHeading: 'Vous demande',
     questionAsyncHeading: 'Question',
     questionAsyncHint: 'L\'agent continue. Sans réponse, il poursuit avec un choix par défaut.',

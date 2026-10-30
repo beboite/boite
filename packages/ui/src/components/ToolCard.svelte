@@ -1,7 +1,7 @@
 <script lang="ts">
   import { errorText } from '../lib/errors';
   import { secondClock } from '../lib/clock.svelte';
-  import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
+  import { Bot, ChevronRight, FilePen, FileText, Globe, Search, ShieldCheck, ShieldX, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -18,7 +18,8 @@
    * One tool call as a plain line of the timeline: what it did
    * in words or the command it ran, a clock past one second, a mark only when
    * it runs or failed, and the input, the output and what it produced one
-   * click below. A run of calls folds under `ToolGroup`.
+   * click below. A run of calls folds under `ToolGroup`. A call the user had to
+   * allow carries the answer as a shield on its line, not a second card.
    */
 
   let {
@@ -37,6 +38,7 @@
     finishedAt = null,
     background = false,
     nested = false,
+    permission = null,
     store,
     threadId
   }: {
@@ -61,6 +63,8 @@
     background?: boolean;
     /** Inside an expanded group, show the individual command rather than another summary. */
     nested?: boolean;
+    /** What the user answered when the agent asked to make this call, null when it did not ask. */
+    permission?: 'allow' | 'deny' | null;
     /** Where a thread link in a document starts from. */
     store?: Store;
     threadId?: string;
@@ -193,9 +197,15 @@
     {#if exitLabel}
       <span class="took ui-label" data-testid="tool-exit-code">{exitLabel}</span>
     {/if}
+    {#if permission}
+      {@const verdict = permission === 'allow' ? strings.chat.permissionAllowedBy : strings.chat.permissionDeniedBy}
+      <span class="verdict" class:denied={permission === 'deny'} data-testid="tool-permission" data-decision={permission} title={verdict} aria-label={verdict}>
+        {#if permission === 'allow'}<ShieldCheck size={13} strokeWidth={2} />{:else}<ShieldX size={13} strokeWidth={2} />{/if}
+      </span>
+    {/if}
     {#if status === 'running'}
       <span class="status" title={strings.chat.toolStatus.running}><span class="spinner"></span></span>
-    {:else if failed}
+    {:else if failed && permission !== 'deny'}
       <span class="status" title={strings.chat.toolStatus[status]}><X size={12} strokeWidth={2.25} /></span>
     {/if}
     <span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>
@@ -364,6 +374,15 @@
     flex: none;
     color: var(--color-subtle);
   }
+
+  /* The user's answer to the agent's ask: the shield in the answer's colour. */
+  .verdict {
+    display: inline-flex;
+    flex: none;
+    color: var(--color-success);
+  }
+
+  .verdict.denied { color: var(--color-danger); }
 
   .spinner {
     width: 11px;

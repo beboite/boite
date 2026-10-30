@@ -177,6 +177,9 @@ export const strings = {
     deny: 'Deny',
     allowed: 'Allowed',
     denied: 'Denied',
+    /** The shield on a call's line once the user answered the agent's ask for it. */
+    permissionAllowedBy: 'Allowed by you',
+    permissionDeniedBy: 'Denied by you',
     questionHeading: 'Asks you',
     questionAsyncHeading: 'Question',
     questionAsyncHint: 'The agent keeps working. Without an answer it goes on with a default.',

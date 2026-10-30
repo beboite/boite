@@ -8,7 +8,6 @@
   import { count, formatTokens, providerName } from '../lib/format';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
-  import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import Deferred, { parts } from './Deferred.svelte';
   import { openQuestionPage } from '../lib/question-page';
@@ -103,14 +102,16 @@
     {#if run.kind === 'memory'}
       <MemoryRow event={run.events[0]!} events={run.events} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
     {:else if run.kind === 'activity'}
-      {@const activity = run.indices.map((at) => message.parts[at]).filter((part): part is ActivityPart => part?.type === 'tool' || part?.type === 'thinking')}
+      {@const activity = run.indices.map((at) => message.parts[at]).filter((part): part is ActivityPart => part?.type === 'tool' || part?.type === 'thinking' || part?.type === 'permission')}
       {@const lastAt = run.indices.at(-1) ?? -1}
       {@const tail = message.parts[lastAt]}
       {@const thinkingLive = message.state === 'streaming' && lastAt === message.parts.length - 1 && tail?.type === 'thinking' && tail.finishedAt == null}
       {#if activityShown(activity, thinkingLive)}
       <div class="part" data-kind={activity.every((part) => part.type === 'thinking') ? 'thinking' : 'tool'}>
         <ToolGroup parts={activity} {thinkingLive} {isBackground} {store} {threadId}
-          loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)} />
+          loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)}
+          permissionRequest={requestId => store.permissionRequests[requestId] ?? null}
+          answerPermission={(requestId, decision) => store.answer(requestId, decision)} />
       </div>
       {/if}
     {:else if message.parts[run.index]}
@@ -138,13 +139,6 @@
         <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}
         <PlanCard {store} {threadId} plan={planOf(part.name, part.input) ?? ''} />
-      {:else if part.type === 'permission'}
-        <PermissionCard
-          toolName={part.toolName}
-          decision={part.decision}
-          request={store.permissionRequests[part.requestId] ?? null}
-          answer={(decision) => store.answer(part.requestId, decision)}
-        />
       {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>

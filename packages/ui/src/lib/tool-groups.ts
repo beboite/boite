@@ -15,8 +15,11 @@ export type ToolPart = Extract<MessagePart, { type: 'tool' }>;
 /** A reasoning step: it folds into the activity around it like a call. */
 export type ThinkingStep = Extract<MessagePart, { type: 'thinking' }>;
 
-/** What an activity run holds: the calls and the reasoning between them. */
-export type ActivityPart = ToolPart | ThinkingStep;
+/** A call the agent asked the user to allow: it folds into the run of the call it gates. */
+export type PermissionStep = Extract<MessagePart, { type: 'permission' }>;
+
+/** What an activity run holds: the calls, the reasoning between them and the permissions they asked. */
+export type ActivityPart = ToolPart | ThinkingStep | PermissionStep;
 
 /** One entry of a message's parts as the timeline draws it: a part on its own, or a run of activity. */
 export type PartRun = { kind: 'part'; index: number } | { kind: 'activity'; indices: number[] };
@@ -42,9 +45,39 @@ export function thinkingShown(part: ThinkingStep, live: boolean): boolean {
   return part.startedAt !== undefined && part.finishedAt != null && part.finishedAt - part.startedAt >= 1000;
 }
 
-/** Whether a run draws anything: any call does, reasoning only when `thinkingShown`. */
+/** Whether a run draws anything: any call or permission does, reasoning only when `thinkingShown`. */
 export function activityShown(parts: readonly ActivityPart[], thinkingLive: boolean): boolean {
-  return parts.some((part, index) => part.type === 'tool' || thinkingShown(part, thinkingLive && index === parts.length - 1));
+  return parts.some((part, index) => part.type !== 'thinking' || thinkingShown(part, thinkingLive && index === parts.length - 1));
+}
+
+/**
+ * Which call each permission of a run was asked for, as indices into `parts`:
+ * permission to call. A permission carries no call id, so it takes the closest
+ * call of its tool's name before it that no other permission took (an agent
+ * asks right after it announces the call), else the next call of that name.
+ * One without a call (an agent that asks first and calls after, or no call at
+ * all) stays unpaired and draws as its own line.
+ */
+export function pairPermissions(parts: readonly ActivityPart[]): Map<number, number> {
+  const pairs = new Map<number, number>();
+  const taken = new Set<number>();
+  parts.forEach((part, at) => {
+    if (part.type !== 'permission') return;
+    const fits = (index: number) => {
+      const call = parts[index];
+      return call?.type === 'tool' && call.name === part.toolName && !taken.has(index);
+    };
+    let found = -1;
+    for (let back = at - 1; back >= 0 && found < 0; back -= 1) if (fits(back)) found = back;
+    if (found < 0) {
+      const next = parts.findIndex((call, index) => index > at && call.type === 'tool');
+      if (next >= 0 && fits(next)) found = next;
+    }
+    if (found < 0) return;
+    pairs.set(at, found);
+    taken.add(found);
+  });
+  return pairs;
 }
 
 /**
@@ -58,23 +91,29 @@ export function activityShown(parts: readonly ActivityPart[], thinkingLive: bool
 export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.length, groupChanges = false): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'activity'; indices: number[] } | null = null;
+  // The activity just drawn, a call standing alone included: a permission joins the call it gates.
+  let last: { kind: 'activity'; indices: number[] } | null = null;
   for (let index = from; index < to; index += 1) {
     const part = parts[index];
     if (!part) continue;
     // Blank text is skipped unless it ends the message itself: that one carries the caret.
     // The index comes first, so the streaming last part's text is never read and a delta reruns nothing here.
     if (index < parts.length - 1 && part.type === 'text' && part.text.trim() === '') continue;
-    const folds = part.type === 'thinking' || (part.type === 'tool' && planOf(part.name, part.input) === null);
+    const folds = part.type === 'thinking' || part.type === 'permission' || (part.type === 'tool' && planOf(part.name, part.input) === null);
     if (!folds) {
       open = null;
+      last = null;
       runs.push({ kind: 'part', index });
     } else if (part.type === 'tool' && standsAlone(part, groupChanges)) {
       open = null;
-      runs.push({ kind: 'activity', indices: [index] });
+      last = { kind: 'activity', indices: [index] };
+      runs.push(last);
     } else if (open) {
       open.indices.push(index);
+    } else if (part.type === 'permission' && last) {
+      last.indices.push(index);
     } else {
-      open = { kind: 'activity', indices: [index] };
+      open = last = { kind: 'activity', indices: [index] };
       runs.push(open);
     }
   }
@@ -91,7 +130,7 @@ export function runSpan(parts: readonly ActivityPart[]): { start: number; end: n
   let start = Infinity;
   let end = -Infinity;
   for (const part of parts) {
-    if (part.startedAt == null) continue;
+    if (part.type === 'permission' || part.startedAt == null) continue;
     start = Math.min(start, part.startedAt);
     if (part.finishedAt != null) end = Math.max(end, part.finishedAt);
   }
