@@ -6,7 +6,18 @@ import { ServerConnection } from './connection.ts';
 import { hello } from './hello.ts';
 import { clientField, logRpcTiming } from './connection-log.ts';
 
-export async function handleFrame(core: Core, connection: ServerConnection, raw: string): Promise<void> {
+/** Answers a frame the queue refused without running it, under the frame's own id. */
+export function refuseFrame(connection: ServerConnection, raw: string, message: string): void {
+  let id: number | string = 0;
+  try {
+    const frame = JSON.parse(raw) as { id?: unknown } | null;
+    if (typeof frame?.id === 'number' || typeof frame?.id === 'string') id = frame.id;
+  } catch { /* an unreadable frame gets id 0, as its parse error would */ }
+  connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unavailable, message } });
+}
+
+/** `signal` aborts when the connection closes before the answer; the hello path has none. */
+export async function handleFrame(core: Core, connection: ServerConnection, raw: string, signal?: AbortSignal): Promise<void> {
   let frame: { id?: unknown; method?: unknown; params?: unknown; progress?: unknown };
   try {
     frame = JSON.parse(raw) as { id?: unknown; method?: unknown; params?: unknown; progress?: unknown };
@@ -43,7 +54,7 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
 
   const startedAt = performance.now();
   try {
-    const result = await core.router.dispatch(method, frame.params, { connection });
+    const result = await core.router.dispatch(method, frame.params, { connection, ...(signal ? { signal } : {}) });
     logRpcTiming(core, connection, method, String(id), performance.now() - startedAt, null);
     // A client that counts what it receives gets a long answer in slices it can count.
     connection.sendResponse({ jsonrpc: '2.0', id, result }, frame.progress === true);

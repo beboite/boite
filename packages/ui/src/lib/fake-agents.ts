@@ -1,19 +1,11 @@
-import { RpcErrorCode, AGENT_MEMORY_MAX, AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, AGENT_ROUTINES_MAX } from '@boite/contracts';
+import { nextAgentOccurrence, RpcErrorCode, AGENT_MEMORY_MAX, AGENT_ROUTINE_NAME_MAX, AGENT_ROUTINE_PROMPT_MAX, AGENT_ROUTINES_MAX } from '@boite/contracts';
 import type {
   AgentAccountGrant, AgentBrain, AgentBrainRoot, AgentEntrustment, AgentProfile, AgentRecord, AgentRoutine, AgentRuntimeConfig, AgentSchedule,
   AgentSelection, AgentSession, AgentStatus, AgentWatch, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, Thread, Turn
 } from '@boite/contracts';
 import { RpcFailure } from './client';
 
-/** The core's `nextOccurrence` in local time, without its timezone and DST search. */
-export function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
-  if (schedule.kind === 'once') return schedule.at > after ? schedule.at : null;
-  if (schedule.kind === 'interval') return after + schedule.everyMinutes * 60000;
-  const [h = 0, m = 0] = schedule.time.split(':').map(Number), next = new Date(after); next.setHours(h, m, 0, 0);
-  if (next.getTime() <= after) next.setDate(next.getDate() + 1);
-  for (let i = 0; i < 7 && schedule.days?.length && !schedule.days.includes(next.getDay()); i++) next.setDate(next.getDate() + 1);
-  return next.getTime();
-}
+export const nextOccurrence = nextAgentOccurrence;
 
 const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a verified result.';

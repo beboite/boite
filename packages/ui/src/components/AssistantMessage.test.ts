@@ -213,3 +213,55 @@ test('a thread link in reasoning or a tool document starts from the machine and 
     expect(opened.mock.calls).toEqual([[store, message.threadId, 'boite', 'thr_tkw9n9qt4100rvq2jmg1'], [store, message.threadId, null, 'thr_tkw9n9qt4100rvq2jmg2']]);
   } finally { opened.mockRestore(); store.detach(); client.close(); }
 });
+
+test('a permission is one element with its call: the card stands for the call while it waits, a shield on its line once answered', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.state = 'streaming';
+    message.parts = [
+      { type: 'tool', toolId: 'ls', name: 'Bash', input: { command: 'ls -la' }, output: null, status: 'running', startedAt: 1000 },
+      { type: 'permission', requestId: 'req-ls', toolName: 'Bash', decision: null }
+    ];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(1);
+    expect(document.querySelector('[data-testid=permission-card]')?.getAttribute('data-decision')).toBe('pending');
+    expect(document.querySelector('[data-testid=tool-card]')).toBeNull();
+
+    message.parts = [
+      { type: 'tool', toolId: 'ls', name: 'Bash', input: { command: 'ls -la' }, output: 'total 0', status: 'done', startedAt: 1000, finishedAt: 7000 },
+      { type: 'permission', requestId: 'req-ls', toolName: 'Bash', decision: 'allow' }
+    ];
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(1);
+    expect(document.querySelector('[data-testid=permission-card]')).toBeNull();
+    expect(document.querySelectorAll('[data-testid=tool-card]')).toHaveLength(1);
+    const shield = document.querySelector('[data-testid=tool-card] [data-testid=tool-permission]');
+    expect(shield?.getAttribute('data-decision')).toBe('allow');
+    expect(shield?.getAttribute('title')).toBe('Allowed by you');
+  } finally { store.detach(); client.close(); }
+});
+
+test('a permission with no call of its name stays its own line inside the run', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.state = 'complete';
+    message.parts = [
+      { type: 'tool', toolId: 'read', name: 'Read', input: { file_path: 'a.ts' }, output: '', status: 'done' },
+      { type: 'permission', requestId: 'req-x', toolName: 'fake_tool', decision: 'deny' }
+    ];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(1);
+    document.querySelector<HTMLButtonElement>('[data-testid=tool-group-toggle]')!.click();
+    flushSync();
+    expect(document.querySelector('[data-testid=permission-card]')?.getAttribute('data-decision')).toBe('deny');
+    expect(document.querySelector('[data-testid=tool-permission]')).toBeNull();
+  } finally { store.detach(); client.close(); }
+});

@@ -5,11 +5,12 @@
   import type { AgentsView } from '../../lib/agents.svelte';
   import { dateTime, describeSchedule, INTERVALS, intervalChip, localZone, previewNext, routineName, spent, WEEK, WEEKDAYS, weekdayName } from '../../lib/schedule';
   import { fill, strings } from '../../lib/strings';
+  import { formatLocale } from '../../lib/i18n.svelte';
   import Menu from '../Menu.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
 
   /**
-   * A routine as a person says it: what to do, and when, picked from four
+   * A routine as a person says it: what to do, and when, picked from
    * plain choices. The sentence under the choices says what will happen and
    * when it happens next, before anything is saved. The time zone is this
    * device's and never asked; a routine saved elsewhere keeps its own.
@@ -26,7 +27,7 @@
     oncancel?: () => void;
   } = $props();
 
-  type Mode = 'once' | 'daily' | 'days' | 'interval';
+  type Mode = AgentSchedule['kind'] | 'days';
   const initial = untrack(() => ({ routine, agentId, prompt: initialPrompt }));
   const from = initial.routine?.schedule;
   const tomorrowAt9 = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); })();
@@ -34,13 +35,17 @@
   let owner = $state(initial.routine?.agentId ?? initial.agentId ?? '');
   let prompt = $state(initial.routine?.prompt ?? initial.prompt);
   let name = $state(initial.routine?.name ?? '');
-  let mode = $state<Mode>(from?.kind === 'once' ? 'once' : from?.kind === 'interval' ? 'interval' : from?.kind === 'daily' && from.days ? 'days' : 'daily');
+  let mode = $state<Mode>(from?.kind === 'daily' && from.days ? 'days' : from?.kind ?? 'daily');
   let at = $state(local(from?.kind === 'once' ? from.at : tomorrowAt9));
-  let time = $state(from?.kind === 'daily' ? from.time : '09:00');
+  let time = $state(from && 'time' in from ? from.time : '09:00');
+  let day = $state(from?.kind === 'monthly' || from?.kind === 'yearly' ? from.day : new Date().getDate());
+  let month = $state(from?.kind === 'yearly' ? from.month : new Date().getMonth() + 1);
+  const months = $derived(Array.from({ length: 12 }, (_, i) => ({ id: String(i + 1), label: new Date(2000, i, 1).toLocaleDateString(formatLocale(), { month: 'long' }), active: month === i + 1 })));
+  const maxDay = $derived(mode === 'yearly' ? new Date(Date.UTC(2000, month, 0)).getUTCDate() : 31);
   let days = $state<number[]>(from?.kind === 'daily' && from.days ? [...from.days] : [...WEEKDAYS]);
   let every = $state(from?.kind === 'interval' ? from.everyMinutes : 60);
   /** A routine saved in another zone keeps it until its time changes. */
-  const zone = from?.kind === 'daily' ? from.timezone : localZone();
+  const zone = from && 'timezone' in from ? from.timezone : localZone();
 
   const labels = $derived(strings.agents);
   const t = $derived(strings.agents.when);
@@ -51,6 +56,8 @@
   const schedule = $derived<AgentSchedule | null>(
     mode === 'once' ? (at ? { kind: 'once', at: new Date(at).getTime() } : null)
       : mode === 'interval' ? (every >= 1 ? { kind: 'interval', everyMinutes: Math.round(every) } : null)
+        : mode === 'monthly' ? (Number.isInteger(day) && day >= 1 && day <= maxDay ? { kind: 'monthly', day, time, timezone: zone } : null)
+          : mode === 'yearly' ? (Number.isInteger(day) && day >= 1 && day <= maxDay ? { kind: 'yearly', month, day, time, timezone: zone } : null)
         : mode === 'days' ? (days.length ? { kind: 'daily', time, timezone: zone, ...(days.length < 7 ? { days: [...days].sort((a, b) => a - b) } : {}) } : null)
           : { kind: 'daily', time, timezone: zone }
   );
@@ -101,7 +108,7 @@
 
   <div class="agent-field"><span>{t.when}</span>
     <div class="segmented" role="radiogroup" aria-label={t.when}>
-      {#each (['once', 'daily', 'days', 'interval'] as const) as id (id)}
+      {#each (['once', 'daily', 'days', 'monthly', 'yearly', 'interval'] as const) as id (id)}
         <button type="button" role="radio" aria-checked={mode === id} class:on={mode === id} onclick={() => { mode = id; }} data-testid="schedule-mode-{id}">{t.modes[id]}</button>
       {/each}
     </div>
@@ -123,6 +130,13 @@
       </div>
       <label class="agent-inline muted">{t.otherInterval}<input class="agent-number" type="number" min="1" max="525600" required bind:value={every} aria-label={t.otherInterval} />{t.minutesUnit}</label>
     {:else}
+      {#if mode === 'monthly' || mode === 'yearly'}
+        <div class="agent-inline">
+          <label class="agent-inline">{t.dayOfMonth}<input class="agent-number" type="number" min="1" max={maxDay} required bind:value={day} aria-label={t.dayOfMonth} data-testid="schedule-month-day" /></label>
+          {#if mode === 'yearly'}<Menu placement="bottom" label={t.month} testid="schedule-month" items={months} onpick={id => { month = Number(id); }}>{months[month - 1]?.label}</Menu>{/if}
+        </div>
+        <p class="hint">{t.missingDate}</p>
+      {/if}
       {#if mode === 'days'}
         <div class="weekdays" role="group" aria-label={t.modes.days}>
           {#each WEEK as day (day)}

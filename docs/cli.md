@@ -509,6 +509,11 @@ Bots schedule work from their own conversation. `bot schedule` accepts `name`, `
 for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.
 Other schedules use `{"kind":"interval","everyMinutes":60}` or
 `{"kind":"once","at":1790240400000}` with a Unix timestamp in milliseconds.
+Monthly reminders use `{"kind":"monthly","day":14,"time":"09:00","timezone":"Europe/Paris"}`.
+Yearly reminders use `{"kind":"yearly","month":11,"day":14,"time":"09:00","timezone":"Europe/Paris"}`.
+Dates absent from a month or year are skipped, including February 29 in non-leap years.
+For a one-time request such as November 14, use `once` with the timestamp for
+that date, year and time in the user's timezone. Save it before confirming it.
 To edit or pause a routine, include its `id`, `expectedRevision` and `enabled`.
 The host enqueues occurrences even when clients are closed. An unfinished
 occurrence blocks overlap and missed intervals never create a catch-up burst.

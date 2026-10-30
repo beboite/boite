@@ -232,7 +232,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('windows.revoke', params => core.windows.revoke(params));
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
-  core.router.register('browser.command', params => core.browser.command(params));
+  core.router.register('browser.command', (params, { signal }) => core.browser.command(params, signal));
   core.router.register('browser.importCookies', params => core.browser.importCookies(params));
   core.router.register('browser.hostAttach', (_params, { connection }) => core.browser.hostAttach(connection));
   core.router.register('browser.hostDetach', (_params, { connection }) => core.browser.hostDetach(connection));

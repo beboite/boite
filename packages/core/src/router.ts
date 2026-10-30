@@ -32,6 +32,12 @@ export interface Connection {
 
 export interface RpcContext {
   connection: Connection;
+  /**
+   * Aborts when the caller's connection closes before the answer. The request
+   * no longer counts against the RPC admission limits by then, so a wait that
+   * serves only this caller stops; work that must finish may go on.
+   */
+  signal?: AbortSignal;
 }
 
 export type Handler<M extends RpcMethodName> = (

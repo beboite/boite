@@ -1,6 +1,6 @@
 import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync, linkSync, copyFileSync, constants, lstatSync, realpathSync } from 'node:fs';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
-import { browserActionError, browserDownloadName, type BrowserNetworkCall, type BrowserNetworkDetail, type BrowserRecipe, BROWSER_DOWNLOAD_CHUNK_BYTES, type BrowserDownload, BROWSER_PRESETS, type BrowserReply, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
+import { browserActionError, browserDownloadName, type BrowserNetworkCall, type BrowserNetworkDetail, type BrowserRecipe, BROWSER_DOWNLOAD_CHUNK_BYTES, type BrowserDownload, BROWSER_PRESETS, type BrowserReply, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserBlockingCommand, type BrowserPreset, type BrowserStuckAction, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 import { BROWSER_HEADERS } from './browser/network.ts';
@@ -405,8 +405,15 @@ interface ActionValue { ok?: boolean; url?: string; title?: string; navigated?: 
 const raw = (data: unknown) => typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
 function statusLines(_action: BrowserAction, result: BrowserReply): string[] {
-  const tabs = (result.value as { tabs?: { tabId: string; url: string; title: string; profileName?: string; active: boolean }[] })?.tabs ?? [];
-  return tabs.length ? tabs.map(tab => `${tab.active ? '*' : ' '} ${tab.tabId}  ${tab.title || '(untitled)'}  ${tab.url}${tab.profileName ? `  [${tab.profileName}]` : ''}`) : ['no browser tab; open one with boite browser open <url>'];
+  const value = result.value as { tabs?: { tabId: string; url: string; title: string; profileName?: string; active: boolean; stuck?: BrowserStuckAction }[]; blocking?: BrowserBlockingCommand } | undefined;
+  const tabs = value?.tabs ?? [];
+  const lines = tabs.length ? tabs.flatMap(tab => [
+    `${tab.active ? '*' : ' '} ${tab.tabId}  ${tab.title || '(untitled)'}  ${tab.url}${tab.profileName ? `  [${tab.profileName}]` : ''}`,
+    ...(tab.stuck ? [`  still running the ${tab.stuck.action} given up at ${new Date(tab.stuck.since).toISOString()}; only close works on this tab until it ends`] : []),
+  ]) : ['no browser tab; open one with boite browser open <url>'];
+  const blocking = value?.blocking;
+  if (blocking) lines.push(`running: ${blocking.action}${blocking.tabId ? ` on ${blocking.tabId}` : ''} since ${new Date(blocking.startedAt).toISOString()}, at its ${blocking.step} step since ${new Date(blocking.stepStartedAt).toISOString()}; later commands except reads wait for it`);
+  return lines;
 }
 
 function profileLines(_action: BrowserAction, result: BrowserReply): string[] {

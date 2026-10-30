@@ -117,6 +117,20 @@ test('this computer goes by its own name and "(you)", whatever it was called by 
   expect(query<HTMLInputElement>('[data-machine-id="source"] [data-testid="machine-rename"]').value).toBe('Desk');
 });
 
+test('a phone can wear a phone icon, and the choice is saved', async () => {
+  const { target } = await setup();
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-customize"]').click();
+  flushSync();
+  const phone = query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-icon-phone"]');
+  expect(phone.title).toBe(strings.machines.icons.phone);
+  phone.click();
+  flushSync();
+  expect(phone.getAttribute('aria-pressed')).toBe('true');
+  expect(workspace.machines.find(machine => machine.id === target.id)?.icon).toBe('phone');
+  const saved = Object.keys(localStorage).map(key => localStorage.getItem(key)).join('\n');
+  expect(saved).toContain('"icon":"phone"');
+});
+
 test('each row says where its updates stand and one button checks every machine', async () => {
   const { source, target } = await setup();
   await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="machine-updates-state"]')).toHaveLength(2); });

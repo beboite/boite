@@ -57,7 +57,14 @@ export const AGENT_ROUTINE_PROMPT_MAX = 4000;
  * A daily schedule with `days` runs only on those weekdays, numbered 0 (Sunday) to 6 in
  * its timezone. Absent means every day; the core drops a list of all seven.
  */
-export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string; days?: number[] };
+export type AgentSchedule =
+  | { kind: 'once'; at: number }
+  | { kind: 'interval'; everyMinutes: number }
+  | { kind: 'daily'; time: string; timezone: string; days?: number[] }
+  /** Months without this day are skipped. */
+  | { kind: 'monthly'; day: number; time: string; timezone: string }
+  /** Invalid dates in a year (February 29) are skipped. */
+  | { kind: 'yearly'; month: number; day: number; time: string; timezone: string };
 export interface AgentRoutine extends AgentRecord {
   agentId: string;
   name: string;

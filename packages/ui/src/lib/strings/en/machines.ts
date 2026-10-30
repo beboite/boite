@@ -3,7 +3,7 @@ export const strings = {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
     intro: 'Each machine runs its own agents on its own files.',
     details: 'Details', address: 'Address', updateFailed: 'Update failed',
-    label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Link from another machine', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
+    label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', phone: 'Phone', tablet: 'Tablet', apple: 'Mac', server: 'Server', rack: 'Server rack', nas: 'NAS', database: 'Database', cloud: 'Cloud', cpu: 'Processor', router: 'Router', terminal: 'Terminal', bot: 'Bot', gamepad: 'Game console', tv: 'TV', house: 'Home' }, link: 'Link from another machine', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On a machine of your group, open Settings, Machines, Add a device, copy the link and paste it here.',
     scan: 'Scan the code', pasteLink: 'Paste the link', scanTitle: 'Scan the code',
     linkInsecure: 'This link leads to a plain HTTP address, which the app cannot open. Add the device from a machine that has an HTTPS address.',

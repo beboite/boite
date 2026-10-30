@@ -195,10 +195,28 @@ test('a restart of the other machine keeps its step at work, and the turn it res
   const childId = onPc()[0]!.id;
   await waitFor(() => run(started.id).nodes[0]!.instances[0]!.machine?.childId === childId);
 
-  await pc.core.threads.handoff.begin(0);
-  await pc.core.delegation.remote.flush(deskId);
-  // Its cut turn is reported stopped, with the restart that resumes it: the step is not over.
-  expect(desk.core.delegation.remote.record(threadId, run(started.id).nodes[0]!.instances[0]!.machine!.requestId)?.state).toMatchObject({ lastTurn: { status: 'stopped' }, restarting: true });
+  await waitFor(() => pc.core.delegation.remote.waiting(deskId).reports === 0);
+  const sending = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const request = pc.core.coordination.request.bind(pc.core.coordination);
+  let delay = true;
+  pc.core.coordination.request = (async (peer, operation, payload) => {
+    if (operation === 'delegation.report' && delay) { delay = false; sending.resolve(); await release.promise; }
+    return request(peer, operation, payload);
+  }) as typeof pc.core.coordination.request;
+  // A running-state report is already in flight when the handoff stops the
+  // turn. Another flush cannot overtake it with the stopped-state report.
+  pc.core.delegation.remote.restate();
+  const reporting = pc.core.delegation.remote.flush(deskId);
+  await sending.promise;
+  try {
+    await pc.core.threads.handoff.begin(0);
+    await pc.core.delegation.remote.flush(deskId);
+  } finally { release.resolve(); await reporting; }
+  const state = () => desk.core.delegation.remote.record(threadId, run(started.id).nodes[0]!.instances[0]!.machine!.requestId)?.state;
+  // flush is best effort while an earlier report is in flight. Wait for the
+  // stopped-state report to arrive before checking the receiving machine.
+  await waitFor(() => state()?.lastTurn?.status === 'stopped' && state()?.restarting === true);
+  expect(state()).toMatchObject({ lastTurn: { status: 'stopped' }, restarting: true });
   expect(run(started.id)).toMatchObject({ status: 'running', nodes: [{ instances: [{ status: 'running' }] }] });
   const port = Number(new URL(pc.url).port);
   await pc.stop();

@@ -30,3 +30,16 @@ test('a folded run counts every failed or denied call even after a success', () 
   flushSync();
   expect(document.querySelector('[data-testid=tool-output]')?.textContent).toBe('command output');
 });
+
+test('a folded group with a denied call says who denied it, not only the count of failures', () => {
+  const parts = [
+    { type: 'tool' as const, toolId: 'a', name: 'Read', input: { file_path: 'a.ts' }, output: '', status: 'done' as const },
+    { type: 'tool' as const, toolId: 'b', name: 'Bash', input: { command: 'rm -rf build' }, output: null, status: 'denied' as const },
+    { type: 'permission' as const, requestId: 'p', toolName: 'Bash', decision: 'deny' as const }
+  ];
+  component = mount(ToolGroup, { target: document.body, props: { parts, isBackground: () => false } });
+  flushSync();
+  const label = document.querySelector('[data-testid=tool-group-toggle]')!.getAttribute('aria-label');
+  expect(label).toContain('Denied by you');
+  expect(label).toContain('1 unsuccessful call');
+});

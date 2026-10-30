@@ -112,15 +112,22 @@
     gap: 8px;
   }
 
-  /* Answered, it stops outranking the tool cards around it: one muted line. */
+  /* Answered with no call to carry it, it reads as one more line of the run:
+     a call's geometry, no frame. A call that has one carries the shield instead. */
   .permission.resolved {
-    border-color: var(--color-border);
+    border-color: transparent;
     background: transparent;
     box-shadow: none;
-    padding: 4px 10px;
+    padding: var(--activity-padding);
+    min-height: var(--control);
+    justify-content: center;
     gap: 2px;
     color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
   }
+
+  .resolved .head { gap: var(--activity-gap); }
+  .resolved .glyph { width: var(--activity-glyph); justify-content: center; }
 
   .head {
     display: flex;

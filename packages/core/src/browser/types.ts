@@ -1,5 +1,5 @@
 // Shared state of Chromium engines and the tabs attached to them.
-import type { BrowserDiagnostic, BrowserHistoryEntry, BrowserPreset, RemoteBrowserFrame, ThreadId } from '@boite/contracts';
+import type { BrowserAction, BrowserDiagnostic, BrowserHistoryEntry, BrowserPreset, RemoteBrowserFrame, ThreadId } from '@boite/contracts';
 import type { Cdp } from './cdp.ts';
 import type { BrowserIdentity } from './chromium.ts';
 import type { TabRecorder } from './recorder.ts';
@@ -60,6 +60,10 @@ export interface Tab {
   frames: Set<string>;
   /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
   acting: boolean;
+  /** The command `acting` belongs to: the late end of a given-up one leaves it set. */
+  actor: object | null;
+  /** An action given up past its bound whose work still runs on this tab; `by` is its command. */
+  stuck: { action: BrowserAction['kind']; since: number; by: object } | null;
   page: AgentPage;
   /** Frozen while nobody drives or watches it (`sleep.ts`). */
   sleep: SleepState;

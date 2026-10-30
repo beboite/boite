@@ -21,7 +21,7 @@ import type { EventFrames, SocketData } from './server/connection.ts';
 import { OUTBOUND_MAX_BUFFERED_BYTES, ServerConnection } from './server/connection.ts';
 import { loadRowSender } from './server/load-rows.ts';
 import { clientField, logConnectionClosed } from './server/connection-log.ts';
-import { handleFrame } from './server/frame.ts';
+import { handleFrame, refuseFrame } from './server/frame.ts';
 import { authenticateToken } from './server/hello.ts';
 import { FrameQueue } from './server/frame-queue.ts';
 import { Refusals } from './server/refusals.ts';
@@ -443,7 +443,10 @@ export function startServer(options: ServerOptions): RunningServer {
     yield* relays.waitingPeers();
   }
   const frames = new Set<Promise<void>>();
-  const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
+  const incoming = new FrameQueue((connection, raw, signal) => handleFrame(core, connection, raw, signal), {
+    refuse: refuseFrame,
+    warn: message => core.logs.record('warn', message, { source: 'rpc', event: 'rpc.detached-refused' }),
+  });
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.

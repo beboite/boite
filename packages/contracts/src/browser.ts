@@ -109,6 +109,25 @@ export interface BrowserReply {
   downloads?: BrowserDownload[];
 }
 /**
+ * Where a running browser command stands: `start` while its profile's browser
+ * starts, `attach` while a new tab is created and attached, `wake` while a
+ * sleeping tab wakes, `act` while the action runs. Each step has a bound; a
+ * step that passes it fails the command with the step named.
+ */
+export type BrowserCommandStep = 'start' | 'attach' | 'wake' | 'act';
+/**
+ * The command a conversation's other browser commands wait behind, in `status`
+ * as `blocking` while one runs: its action, its step and when each began, in
+ * ms since the epoch.
+ */
+export interface BrowserBlockingCommand {
+  action: BrowserAction['kind'];
+  tabId?: string;
+  step: BrowserCommandStep;
+  startedAt: number;
+  stepStartedAt: number;
+}
+/**
  * A file the agent browser downloaded. It lands in a quarantine folder of the
  * core under a random name with no extension, never in a project, and leaves
  * it only when an agent copies it out (`download-read`), without the execute
@@ -241,7 +260,13 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
  * set when the desktop app of this machine hosts the tab in a webview of its
  * own (`browser.hostAttach`): that app shows the page itself, by this id.
  */
-export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean; view?: string }
+/**
+ * A tab whose agent action was given up past its bound while its work still
+ * runs: until that work ends, every command on the tab but `close` is refused.
+ * `since` is when it was given up, in ms since the epoch.
+ */
+export interface BrowserStuckAction { action: BrowserAction['kind']; since: number }
+export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean; view?: string; stuck?: BrowserStuckAction }
 /**
  * What a viewer shows for a conversation: whether its agent has a browser open
  * (`live`), the tabs, and whether this machine can run one at all. `reason`
