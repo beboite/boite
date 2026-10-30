@@ -84,6 +84,10 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
         await page.settleAnimations();
         expect(await page.evaluate(`document.querySelector('${id('right-panel')}') === null`)).toBe(true);
         await capture(page, 'agent-browser-core-chat-phone.png');
+        // Let the desktop finish fitting the new tab before the phone starts
+        // its own deferred fit, so neither can overwrite the later preset.
+        await pages[0]!.waitFor(`document.querySelectorAll('${id('agent-browser-tab')}').length === 2`);
+        await pages[0]!.waitFor(frameShown(), 20_000);
         await page.click(id('phone-browser-toggle'));
       }
       await page.waitFor(`document.querySelector('${id('agent-browser-cover-text')}')?.getBoundingClientRect().width > 0`, 20_000);
@@ -95,8 +99,7 @@ real('the core runs the agent browser; desktop and phone show it covered, then l
       if (phone) {
         // A preset applied from the other device remains valid until this
         // viewer changes size. Two viewers cannot both own the tab's viewport.
-        await page.waitFor(`(() => {const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && image.naturalWidth > 100 && !image.closest('button').disabled;})()`);
-        await page.settleAnimations();
+        await page.waitFor(frameShown(), 20_000);
         await owner.call('browser.command', {threadId: thread.id, tabId, action: {kind: 'preset', preset: 'laptop-1366x768'}});
         await page.waitFor(`(() => {const image = document.querySelector('${id('remote-browser-frame')}'); return image?.complete && Math.abs(image.naturalWidth / image.naturalHeight - 1366 / 768) < .02;})()`);
       }
