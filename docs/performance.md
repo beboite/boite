@@ -188,7 +188,20 @@ disconnect also gives back at once the slots and the byte budget of its
 started requests, and aborts the `signal` their handlers get in `RpcContext`:
 a handler stuck on a gone client no longer holds one of the 48 agent slots,
 and a wait that serves only that caller stops. Work the handler must finish
-goes on outside the count, and its late end frees nothing twice
+goes on as detached: it keeps its byte budget until it really ends, and its
+late end frees nothing twice. A handler that ignores its signal could
+otherwise pile up, eight more for each reconnection, so detached work has caps
+of its own that mirror the active ones: 48 for agents and 64 in all
+(`MAX_AGENT_DETACHED`, `MAX_DETACHED`). An agent starts a request only while
+fewer than 48 of its kind run detached, which keeps active and detached agent
+handlers under 96 together, and any request under 128. Past a cap a new
+request is refused at once, never queued, with an `Unavailable` error that
+says how many requests of closed connections still run and names their
+methods with counts (`browser.command x40, threads.wait x8`); the first
+refusal of each episode logs an `rpc.detached-refused` warning with the same
+counts. Requests are admitted again as soon as the detached work drops under
+the cap. A handler that honours its signal, such as `browser.command`, leaves
+the detached count as soon as its client leaves
 (`packages/core/src/server/frame-queue.ts`).
 The prompt and its queued status commit together before its driver starts.
 The running turn and thread status share a second transaction before driver
