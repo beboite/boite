@@ -181,9 +181,15 @@ agents wait for replies. Each connection retains at most 1,024 frames or 32 MiB 
 text; the total stays below 4,096 frames or 64 MiB, including active requests.
 A sender exceeding its limit closes with a reconnect reason. At the shared
 limit, the largest queued contributor closes to leave room for other readers.
-Active work keeps its capacity until completion; when only active work fills
-the shared byte limit, a new request is refused. Disconnect and shutdown
-discard work that has not started.
+Active work keeps its capacity until completion or until its connection
+closes; when only active work fills the shared byte limit, a new request is
+refused. Disconnect and shutdown discard work that has not started. A
+disconnect also gives back at once the slots and the byte budget of its
+started requests, and aborts the `signal` their handlers get in `RpcContext`:
+a handler stuck on a gone client no longer holds one of the 48 agent slots,
+and a wait that serves only that caller stops. Work the handler must finish
+goes on outside the count, and its late end frees nothing twice
+(`packages/core/src/server/frame-queue.ts`).
 The prompt and its queued status commit together before its driver starts.
 The running turn and thread status share a second transaction before driver
 startup. The finished

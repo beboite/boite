@@ -74,6 +74,68 @@ test('long agent requests leave capacity for owner, paired client and authentica
   } finally { if (timer) clearTimeout(timer); gate.resolve(); queue.close(); }
 });
 
+test('agent requests whose client left give their slots back at once and learn it, while their work may go on', async () => {
+  const agent = () => ({ authenticated: true, identity: { principal: 'agent' }, close: () => undefined }) as unknown as ServerConnection;
+  const gone = Array.from({ length: 6 }, agent);
+  const fresh = agent();
+  const gate = Promise.withResolvers<void>(), filled = Promise.withResolvers<void>();
+  const signals: AbortSignal[] = [];
+  let stuck = 0, answered = false;
+  const queue = new FrameQueue(async (connection, _raw, signal) => {
+    if (connection === fresh) { answered = true; return; }
+    signals.push(signal);
+    if (++stuck === 48) filled.resolve();
+    await gate.promise;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const pending = gone.flatMap(connection => Array.from({ length: 8 }, () => queue.enqueue(connection, 'wait')));
+    await filled.promise;
+    for (const connection of gone) queue.drop(connection);
+    const completed = await Promise.race([
+      queue.enqueue(fresh, 'where').then(() => true),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 250); }),
+    ]);
+    expect(completed).toBe(true);
+    expect(answered).toBe(true);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    gate.resolve();
+    await Promise.all(pending);
+  } finally { if (timer) clearTimeout(timer); gate.resolve(); queue.close(); }
+});
+
+test('late completions after a disconnect never free another request\'s slot', async () => {
+  const agent = () => ({ authenticated: true, identity: { principal: 'agent' }, close: () => undefined }) as unknown as ServerConnection;
+  const gone = Array.from({ length: 6 }, agent);
+  const others = Array.from({ length: 7 }, agent);
+  const first = Promise.withResolvers<void>(), second = Promise.withResolvers<void>();
+  const filled = Promise.withResolvers<void>(), refilled = Promise.withResolvers<void>();
+  let stuck = 0, active = 0, maximum = 0;
+  const queue = new FrameQueue(async connection => {
+    if (gone.includes(connection)) { if (++stuck === 48) filled.resolve(); await first.promise; return; }
+    active++; maximum = Math.max(maximum, active);
+    if (active === 48) refilled.resolve();
+    await second.promise;
+    active--;
+  });
+  try {
+    const dropped = gone.flatMap(connection => Array.from({ length: 8 }, () => queue.enqueue(connection, 'wait')));
+    await filled.promise;
+    for (const connection of gone) queue.drop(connection);
+    // 56 requests: 48 run, 8 wait for a slot.
+    const work = others.flatMap(connection => Array.from({ length: 8 }, () => queue.enqueue(connection, 'wait')));
+    await refilled.promise;
+    // The dropped handlers end now: their slots went back at the drop, so the 8 waiting stay queued.
+    first.resolve();
+    await Promise.all(dropped);
+    await Bun.sleep(20);
+    expect(maximum).toBe(48);
+    second.resolve();
+    await Promise.all(work);
+    expect(maximum).toBe(48);
+  } finally { first.resolve(); second.resolve(); queue.close(); }
+});
+
 test('an incoming flood closes its connection and never executes its abandoned requests', async () => {
   const closed: { code: number; reason?: string }[] = [];
   const connection = { close: (code: number, reason?: string) => closed.push({ code, reason }) } as unknown as ServerConnection;

@@ -443,7 +443,7 @@ export function startServer(options: ServerOptions): RunningServer {
     yield* relays.waitingPeers();
   }
   const frames = new Set<Promise<void>>();
-  const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
+  const incoming = new FrameQueue((connection, raw, signal) => handleFrame(core, connection, raw, signal));
   const peerRequests = new Set<Promise<Response>>();
   const refusals = new Refusals();
   // A client of this machine carried to another member of its group: its key here, never an agent's, opens the way.

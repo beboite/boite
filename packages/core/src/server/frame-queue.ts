@@ -19,6 +19,11 @@ interface Frame {
   resolve(): void;
   reject(error: unknown): void;
 }
+/** A started request: `free` gives its slot and budget back once, at its end or when its client leaves. */
+interface Started {
+  controller: AbortController;
+  free(): void;
+}
 interface Pending {
   frames: Frame[];
   head: number;
@@ -30,6 +35,7 @@ export class FrameQueue {
   readonly #pending = new Map<ServerConnection, Pending>();
   readonly #disconnected = new WeakSet<ServerConnection>();
   readonly #activeByConnection = new Map<ServerConnection, number>();
+  readonly #started = new Map<ServerConnection, Set<Started>>();
   readonly #retained = new Map<ServerConnection, { count: number; bytes: number }>();
   #active = 0;
   #activeAgents = 0;
@@ -38,7 +44,11 @@ export class FrameQueue {
   private bytes = 0;
   #closed = false;
 
-  constructor(private readonly handle: (connection: ServerConnection, raw: string) => Promise<void>) {}
+  /**
+   * `signal` aborts when the request's connection closes: its slot is free
+   * again by then, and the handler stops what waits only for that caller.
+   */
+  constructor(private readonly handle: (connection: ServerConnection, raw: string, signal: AbortSignal) => Promise<void>) {}
 
   enqueue(connection: ServerConnection, raw: string): Promise<void> {
     if (this.#closed || this.#disconnected.has(connection)) return Promise.resolve();
@@ -58,7 +68,7 @@ export class FrameQueue {
         const size = byBytes ? queue.bytes : queue.frames.length - queue.head;
         if (size > largest) { largest = size; victim = candidate; }
       }
-      // Active handlers retain their budget until completion and cannot be dropped.
+      // Active handlers retain their budget until completion or disconnect and cannot be dropped.
       this.#refuse(victim ?? connection, `RPC queue exceeds ${MAX_PENDING_FRAMES} frames or ${MAX_PENDING_BYTES} bytes; reconnect`);
       if (victim === undefined || victim === connection) return Promise.resolve();
     }
@@ -77,6 +87,14 @@ export class FrameQueue {
 
   drop(connection: ServerConnection): void {
     this.#disconnected.add(connection);
+    // A started handler nobody waits for gives its slot back now, not when it resolves:
+    // handlers stuck on a gone client must not starve the next ones.
+    const started = this.#started.get(connection);
+    this.#started.delete(connection);
+    for (const request of started ?? []) {
+      request.free();
+      request.controller.abort(new Error('the client closed its connection'));
+    }
     const queue = this.#pending.get(connection);
     if (!queue) return;
     this.#pending.delete(connection);
@@ -114,16 +132,31 @@ export class FrameQueue {
       const agent = fromAgent(connection);
       if (agent) this.#activeAgents++;
       this.#activeByConnection.set(connection, (this.#activeByConnection.get(connection) ?? 0) + 1);
-      const complete = () => {
-        this.#release(connection, frame);
-        this.#active--;
-        if (agent) this.#activeAgents--;
-        const remaining = (this.#activeByConnection.get(connection) ?? 1) - 1;
-        if (remaining === 0) this.#activeByConnection.delete(connection);
-        else this.#activeByConnection.set(connection, remaining);
-        this.#schedule();
+      let freed = false;
+      const request: Started = {
+        controller: new AbortController(),
+        free: () => {
+          if (freed) return;
+          freed = true;
+          this.#release(connection, frame);
+          this.#active--;
+          if (agent) this.#activeAgents--;
+          const remaining = (this.#activeByConnection.get(connection) ?? 1) - 1;
+          if (remaining === 0) this.#activeByConnection.delete(connection);
+          else this.#activeByConnection.set(connection, remaining);
+          this.#schedule();
+        },
       };
-      try { void this.handle(connection, frame.raw).then(() => { complete(); frame.resolve(); }, error => { complete(); frame.reject(error); }); }
+      const started = this.#started.get(connection) ?? new Set<Started>();
+      started.add(request);
+      this.#started.set(connection, started);
+      const complete = () => {
+        request.free();
+        const own = this.#started.get(connection);
+        own?.delete(request);
+        if (own?.size === 0) this.#started.delete(connection);
+      };
+      try { void this.handle(connection, frame.raw, request.controller.signal).then(() => { complete(); frame.resolve(); }, error => { complete(); frame.reject(error); }); }
       catch (error) { complete(); frame.reject(error); }
     }
     if (this.#active < MAX_ACTIVE) this.#schedule();
