@@ -21,7 +21,8 @@ const control = (type: string, name: string, left: number, top: number, automati
 
 /**
  * A desktop the test edits: windows, where each lies on the screen, their
- * controls in screen pixels, the boxes drawn and the mouse.
+ * controls in screen pixels and the mouse. The boxes are what the desktop app
+ * is told to draw (`windows.pointer`).
  */
 function fakeDesktop() {
   const windows = [win('101'), win('202', { path: 'C:\\Tools\\KeePass\\KeePass.exe', process: 'KeePass.exe' })];
@@ -37,7 +38,6 @@ function fakeDesktop() {
     // Scrolled out of the window, though its provider says it is on screen.
     control('ListItem', 'Hidden asset', 1000, 900),
   ];
-  const boxes: { rect: ScreenRect | null; label: string; closed: boolean }[] = [];
   const mouse = { pressed: false, x: 0, y: 0 };
   const capture: WindowCapture = {
     list: async () => windows.map(window => ({ ...window, minimized: frames.get(window.id)?.minimized ?? window.minimized })),
@@ -53,18 +53,24 @@ function fakeDesktop() {
       const frame = frames.get(id);
       return frame ? { rect: { ...frame.rect }, minimized: frame.minimized, above: frame.above } : null;
     },
-    point: (rect, label) => {
-      const box: (typeof boxes)[number] = { rect, label, closed: false };
-      boxes.push(box);
-      return { move: next => { box.rect = next; }, close: () => { box.closed = true; } };
-    },
     mouse: () => ({ ...mouse }),
   };
-  return { windows, frames, boxes, mouse, capture, guide };
+  return { windows, frames, mouse, capture, guide };
+}
+
+/** Retries an assertion until it holds: the box events reach the desktop app's socket, not the caller's. */
+async function eventually(check: () => void, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try { check(); return; } catch (error) { if (Date.now() > deadline) throw error; }
+    await Bun.sleep(5);
+  }
 }
 
 describe('window guide', () => {
-  let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string, desk: ReturnType<typeof fakeDesktop>;
+  let harness: TestCore, owner: CoreClient, agent: CoreClient, app: CoreClient, threadId: string, desk: ReturnType<typeof fakeDesktop>;
+  /** Each box the desktop app was told about, in order: where it is now, null once hidden or taken away. */
+  let boxes: { id: string; rect: ScreenRect | null; label: string }[];
 
   beforeEach(async () => {
     harness = await startTestCore();
@@ -72,6 +78,13 @@ describe('window guide', () => {
     ({ threadId } = await echoThread(harness, owner));
     agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
     desk = fakeDesktop();
+    // The desktop app of this machine: the core sends it the boxes to draw.
+    app = await connect(harness.url, harness.token, { client: { name: 'shell', version: 'test' } });
+    boxes = [];
+    app.on('windows.pointer', box => {
+      const known = boxes.find(entry => entry.id === box.id);
+      if (known) Object.assign(known, box); else boxes.push({ ...box });
+    });
     const core = harness.core as { windows: DesktopWindows };
     core.windows.stop();
     core.windows = new DesktopWindows(harness.core, {
@@ -86,6 +99,7 @@ describe('window guide', () => {
 
   afterEach(async () => {
     agent.close();
+    app.close();
     owner.close();
     await harness.stop();
   });
@@ -124,7 +138,7 @@ describe('window guide', () => {
     await answered;
     const { pointer } = await agent.call('windows.point', { threadId, control: 3 });
     expect(pointer).toMatchObject({ windowId: '101', label: 'Play', x: 200, y: 30, width: 40, height: 20, control: { type: 'Button', name: 'Play' } });
-    expect(desk.boxes[0]).toMatchObject({ rect: { left: 1200, top: 530, width: 40, height: 20 }, label: 'Play', closed: false });
+    await eventually(() => expect(boxes).toMatchObject([{ rect: { left: 1200, top: 530, width: 40, height: 20 }, label: 'Play' }]));
     expect(await thrown(agent.call('windows.point', { threadId, control: 9 }))).toThrow('#9 is not among the 4 controls of the last read');
 
     // "Play" is exact and wins over "Play Mode Options"; "pla" matches both and is refused with their ids.
@@ -132,14 +146,14 @@ describe('window guide', () => {
     const named = await agent.call('windows.point', { threadId, target: { id: '101' }, name: 'play', label: 'Press Play' });
     await again;
     expect(named.pointer).toMatchObject({ label: 'Press Play', control: { name: 'Play' } });
-    expect(desk.boxes.map(box => box.closed)).toEqual([true, false]);
+    await eventually(() => expect(boxes.map(box => [box.label, box.rect !== null])).toEqual([['Play', false], ['Press Play', true]]));
     const ambiguous = answer('once');
     expect(await thrown(agent.call('windows.point', { threadId, target: { id: '101' }, name: 'pla' }))).toThrow('2 controls of Unity.exe match "pla"; point at one by id:\n  #3 Button "Play"\n  #4 Button "Play Mode Options"');
     await ambiguous;
     expect(await thrown(agent.call('windows.point', { threadId, control: 3, name: 'Play' }))).toThrow('exactly one of control, name or at');
 
     expect(await agent.call('windows.unpoint', { threadId })).toEqual({ cleared: true });
-    expect(desk.boxes.every(box => box.closed)).toBe(true);
+    await eventually(() => expect(boxes.every(box => box.rect === null)).toBe(true));
     expect(await agent.call('windows.unpoint', { threadId })).toEqual({ cleared: false });
   });
 
@@ -149,24 +163,21 @@ describe('window guide', () => {
     expect(cards()).toEqual([]);
     expect(pointer).toMatchObject({ x: 200, y: 0, width: 100, height: 30, label: 'Scene view' });
     expect(pointer.control).toBeUndefined();
-    expect(desk.boxes[0]!.rect).toEqual({ left: 1200, top: 500, width: 100, height: 30 });
+    await eventually(() => expect(boxes[0]!.rect).toEqual({ left: 1200, top: 500, width: 100, height: 30 }));
     expect(await thrown(agent.call('windows.point', { threadId, target: { id: '202' }, at: { x: 0, y: 0, width: 10, height: 10, unit: 'px' } }))).toThrow('KeePass.exe is never captured');
 
     desk.frames.get('101')!.rect = { left: 10, top: 20, width: 400, height: 300 };
-    await Bun.sleep(FOLLOW_MS * 6);
-    expect(desk.boxes[0]!.rect).toEqual({ left: 210, top: 20, width: 100, height: 30 });
+    await eventually(() => expect(boxes[0]!.rect).toEqual({ left: 210, top: 20, width: 100, height: 30 }));
     desk.frames.get('101')!.minimized = true;
-    await Bun.sleep(FOLLOW_MS * 6);
-    expect(desk.boxes[0]!.rect).toBeNull();
+    await eventually(() => expect(boxes[0]!.rect).toBeNull());
     desk.frames.get('101')!.minimized = false;
-    await Bun.sleep(FOLLOW_MS * 6);
-    expect(desk.boxes[0]!.rect).toEqual({ left: 210, top: 20, width: 100, height: 30 });
+    await eventually(() => expect(boxes[0]!.rect).toEqual({ left: 210, top: 20, width: 100, height: 30 }));
 
     const waiting = agent.call('windows.waitClick', { threadId, timeoutSeconds: 5 });
     await Bun.sleep(20);
     desk.frames.delete('101');
     expect(await waiting).toEqual({ clicked: false, reason: 'gone' });
-    expect(desk.boxes[0]!.closed).toBe(true);
+    await eventually(() => expect(boxes[0]!.rect).toBeNull());
   });
 
   test('wait-click ends on a press inside the box, not on one outside or a button already held', async () => {
@@ -175,24 +186,25 @@ describe('window guide', () => {
     Object.assign(desk.mouse, { pressed: true, x: 1120, y: 620 });
     const waiting = agent.call('windows.waitClick', { threadId, timeoutSeconds: 5 });
     await Bun.sleep(80);
-    expect(desk.boxes[0]!.closed).toBe(false);
+    expect(boxes[0]!.rect).not.toBeNull();
     Object.assign(desk.mouse, { pressed: false });
     await Bun.sleep(80);
     Object.assign(desk.mouse, { pressed: true, x: 900, y: 620 });
     await Bun.sleep(80);
     Object.assign(desk.mouse, { pressed: false });
     await Bun.sleep(80);
-    expect(desk.boxes[0]!.closed).toBe(false);
+    expect(boxes[0]!.rect).not.toBeNull();
     Object.assign(desk.mouse, { pressed: true, x: 1149, y: 649 });
     expect(await waiting).toMatchObject({ clicked: true, pointer: { windowId: '101', x: 100, y: 100 } });
-    expect(desk.boxes[0]!.closed).toBe(true);
+    await eventually(() => expect(boxes[0]!.rect).toBeNull());
     expect(await thrown(agent.call('windows.waitClick', { threadId }))).toThrow('nothing is pointed at in this conversation');
 
     // No click in time leaves the box up for the next try, even past the time it was drawn for; unpoint ends a wait.
     Object.assign(desk.mouse, { pressed: false });
     await agent.call('windows.point', { threadId, target: { id: '101' }, at: { x: 0, y: 0, width: 10, height: 10, unit: 'px' }, seconds: 1 });
     expect(await agent.call('windows.waitClick', { threadId, timeoutSeconds: 1 })).toEqual({ clicked: false, reason: 'timeout' });
-    expect(desk.boxes[1]!.closed).toBe(false);
+    await Bun.sleep(50);
+    expect(boxes[1]!.rect).not.toBeNull();
     const cleared = agent.call('windows.waitClick', { threadId, timeoutSeconds: 5 });
     await Bun.sleep(20);
     await agent.call('windows.unpoint', { threadId });
@@ -202,7 +214,25 @@ describe('window guide', () => {
   test('an archived conversation takes its box away', async () => {
     await agent.call('windows.point', { threadId, target: { id: '101' }, at: { x: 0, y: 0, width: 10, height: 10, unit: 'px' } });
     await owner.call('threads.archive', { threadId });
-    expect(desk.boxes[0]!.closed).toBe(true);
+    await eventually(() => expect(boxes.map(box => box.rect)).toEqual([null]));
+  });
+
+  test('only a desktop app of this machine draws the box, so without one point is refused', async () => {
+    app.close();
+    // A browser tab or a phone of the owner has no screen of this computer's.
+    const tab = await connect(harness.url, harness.token, { client: { name: 'pwa', version: 'test' } });
+    const heard: unknown[] = [];
+    tab.on('windows.pointer', box => heard.push(box));
+    owner.on('windows.pointer', box => heard.push(box));
+    try {
+      await eventually(() => expect(harness.core.subscribers.pointer({ id: 'probe', rect: null, label: '' })).toBe(0));
+      const refusal = await thrown(agent.call('windows.point', { threadId, target: { id: '101' }, at: { x: 0, y: 0, width: 10, height: 10, unit: 'px' } }));
+      expect(refusal).toThrow('the box is drawn by the Boite desktop app of this computer, and none is open');
+      expect(await agent.call('windows.unpoint', { threadId })).toEqual({ cleared: false });
+      expect(heard).toEqual([]);
+    } finally {
+      tab.close();
+    }
   });
 
   test('boite window read, point, wait-click and unpoint', async () => {

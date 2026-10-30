@@ -10,8 +10,8 @@ go through [`boite device`](devices.md) instead: that command can also drive
 them.
 
 Capture is read-only. Boite never restores, raises or focuses a window, never
-sends it input and never draws the cursor. The guide's box is a window of its
-own above the others, which lets every click through.
+sends it input and never draws the cursor. The guide's box is a window of the
+desktop app above the others, which lets every click through.
 
 ## Commands
 
@@ -178,10 +178,14 @@ boite window unpoint
     from 0 to 1, as `--crop` takes it. For an app with no accessibility tree,
     such as a game or a Unity scene view: the agent finds the place in a small
     screenshot first.
-- The box is click-through, takes no focus and has no taskbar button. It
-  follows its window when the window moves, hides while it is minimized, and
-  goes away with it, after `--seconds` (120 by default, 600 at most), on
-  `unpoint`, or when the conversation is archived.
+- The box is drawn by the Boite desktop app of the machine that runs the
+  core, in the app's look: a ring in the user's accent with a label tab on its
+  corner, one entrance and a slow echo, none with reduced motion. It is
+  click-through, takes no focus and has no taskbar button. With no desktop app
+  of that machine open, `point` is refused and asks for one.
+- The box follows its window when the window moves, hides while it is
+  minimized, and goes away with it, after `--seconds` (120 by default, 600 at
+  most), on `unpoint`, or when the conversation is archived.
 - `wait-click` returns once the user presses the primary mouse button inside
   the box, then takes the box away. A button already held when the wait starts
   does not count. Without a click within `--timeout` (120 s by default, 600 at
@@ -249,9 +253,8 @@ before any pixels came back.
 
 `ProcessPlatform.windowGuide()` loads `platform/windows/window-guide.ts` the
 first time `read` or `point` runs. It runs on the core's thread, as captures
-do, and belongs to the core: a window an agent's process opened would be sent
-to the bottom by the focus guard as soon as it took the foreground, losing its
-place above the others.
+do. The core reads the controls, follows the window and watches the mouse;
+the desktop app draws the box.
 
 - `read` is one UI Automation `FindAllBuildCache` from the window
   (`window-controls.ts`): a condition on the interactive control types and a
@@ -260,12 +263,24 @@ place above the others.
   refused before the call; UI Automation's connection and transaction timeouts
   (2 s and 5 s) bound a slow one. `AutoSetFocus` is off and no pattern is
   asked for, so nothing in the window changes.
-- The box is a layered popup with `WS_EX_TRANSPARENT | WS_EX_TOPMOST |
-  WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` and `DefWindowProcW` as its procedure,
-  drawn once into a premultiplied DIB for `UpdateLayeredWindow`. A 250 ms
-  timer pumps its messages and puts it back above the taskbar, which raises
-  itself when clicked. It stays on the control's monitor, scaled to that
-  monitor's DPI.
+- The core sends `windows.pointer` (an id, the control's rectangle in
+  physical screen pixels and the label, or no rectangle to take the box away)
+  to owner connections named `shell` on the loopback only: a phone, a browser
+  tab or a desktop app following this core from another computer has no screen
+  of this one's. The main UI hands each event to the shell's `pointer_show` and
+  `pointer_hide` (`lib/pointer-layout.ts`), and only for its own machine's
+  core.
+- The shell (`pointer_window.rs`) shows the box in a transparent window of its
+  own, `index.html?view=pointer` (`PointerApp.svelte`), drawn with `app.css`.
+  The window is undecorated, topmost, click-through
+  (`WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`), sized to the
+  control plus room for the ring's echo and the label, in the control
+  monitor's DPI. A thread puts it back above the taskbar every 250 ms while a
+  box shows, since the taskbar raises itself when clicked. A box that goes away
+  leaves its window hidden for the next one; a window unused for 45 s closes.
+  The window belongs to the shell, never to an agent: the focus guard sends a
+  window of an agent's process that takes the foreground to the bottom, out of
+  the topmost band.
 - Every rectangle is in physical pixels: the thread is per-monitor aware (V2)
   for each call.
 - `wait-click` reads the primary button with `GetAsyncKeyState` and the cursor
@@ -282,12 +297,15 @@ Measured on 2026-10-30 (Windows 11, Bun 1.4.3, `bun bench/window-guide.ts
 | Taskbar, 1920×48 | 16 | 54 ms | 29 ms |
 | Boite, 1920×1032 (WebView2) | 102 | 212 ms | 97 ms |
 
-The Start menu read in 207 ms with 19 controls. Drawing the first box takes
-11 ms, moving it 0.5 ms. RSS grows by 3 MB over 200 reads of the taskbar.
+The Start menu read in 207 ms with 19 controls. Reading where a window lies,
+which a box following its window does every 250 ms, takes under 0.1 ms. RSS
+grows by 3 MB over 200 reads of the taskbar.
 
 `packages/core/test/window-guide-windows.test.ts` opens a WinForms window that
-never takes the focus, reads its two buttons and its field but not its disabled
-button, draws a box over a button and finds the box's colour on the screen.
+never takes the focus and reads its two buttons and its field but not its
+disabled button. `PointerApp.test.ts` checks the ring and the label, and
+`pointer_window.rs`'s tests the window's place at 100 % and 150 %, on a
+monitor's edge and on a monitor left of the primary.
 
 ### Linux
 

@@ -2,12 +2,13 @@
  * What `boite window read` and `point` cost through `bun:ffi` on the core's
  * thread. Windows only. Measures the module's import and load, the first read
  * of a window's controls (COM and UI Automation's setup included), the median
- * of `warm` reads, the first box drawn and the median of `warm` moves of it,
- * and the RSS growth over `leak` reads.
+ * of `warm` reads, the median of `warm` reads of where the window lies (what
+ * a box following its window costs every 250 ms), and the RSS growth over
+ * `leak` reads. The box itself is the desktop app's.
  *
  * The window is the largest one not minimized whose process contains `match`,
  * or the taskbar when `match` is `taskbar`. Nothing is focused, raised or
- * restored; the box sits over the window's top-left corner for the run.
+ * restored.
  *
  *   bun bench/window-guide.ts [match='taskbar'] [warm=20] [leak=200]
  */
@@ -47,12 +48,8 @@ const [first, firstMs] = await timed(() => loaded.controls(target.id, 2000));
 const reads: number[] = [];
 for (let index = 0; index < warm; index += 1) reads.push((await timed(() => loaded.controls(target.id, 2000)))[1]);
 
-const frame = loaded.frame(target.id)!.rect;
-const box = { left: frame.left + 8, top: frame.top + 8, width: 120, height: 32 };
-const [drawn, drawMs] = await timed(() => loaded.point(box, 'Benchmark'));
-const moves: number[] = [];
-for (let index = 0; index < warm; index += 1) moves.push((await timed(() => drawn.move({ ...box, left: box.left + (index % 2) })))[1]);
-drawn.close();
+const frames: number[] = [];
+for (let index = 0; index < warm; index += 1) frames.push((await timed(() => loaded.frame(target.id)))[1]);
 
 Bun.gc(true);
 const rssBefore = process.memoryUsage().rss;
@@ -63,5 +60,5 @@ const rssAfter = process.memoryUsage().rss;
 console.log(`window: ${target.process} ${target.width}x${target.height}, ${first.total} controls`);
 console.log(`import ${ms(importMs)}, load ${ms(loadMs)}`);
 console.log(`first read ${ms(firstMs)}, later read (median of ${warm}) ${ms(median(reads))}`);
-console.log(`first box ${ms(drawMs)}, move (median of ${warm}) ${ms(median(moves))}`);
+console.log(`where the window lies (median of ${warm}) ${ms(median(frames))}`);
 console.log(`RSS over ${leak} reads: ${mb(rssAfter - rssBefore)}`);

@@ -1,14 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Subprocess } from 'bun';
-import { dlopen, FFIType, ptr, toArrayBuffer } from 'bun:ffi';
-import type { Pointer } from 'bun:ffi';
-import type { NativeWindow, ScreenRect, WindowCapture, WindowGuide } from '../src/platform/types.ts';
+import type { NativeWindow, WindowCapture, WindowGuide } from '../src/platform/types.ts';
 
 /**
  * A WinForms form this file owns, in its own powershell.exe, that never takes
- * the focus: two enabled buttons, a disabled one and a text field. The box is
- * checked on the screen itself, read back with `CAPTUREBLT` so layered
- * windows are in the picture.
+ * the focus: two enabled buttons, a disabled one and a text field.
  */
 const FORM = `
 using System;
@@ -18,7 +14,8 @@ public class BoiteGuideWindow : Form {
   public BoiteGuideWindow(string title) {
     Text = title;
     StartPosition = FormStartPosition.Manual;
-    Location = new Point(120, 120);
+    // Away from the windows window-capture-windows.test.ts opens at the same time near the top-left corner.
+    Location = new Point(760, 420);
     Size = new Size(420, 260);
     TopMost = true;
     Controls.Add(new Button { Text = "Open project", Name = "openProject", Location = new Point(20, 20), Size = new Size(140, 40) });
@@ -41,53 +38,6 @@ function openWindow(title: string): Subprocess {
   ].join('\n');
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   return Bun.spawn(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { stdout: 'ignore', stderr: 'pipe', windowsHide: true });
-}
-
-/** The screen's pixels in `rect`, BGRA, layered windows included. */
-function screenPixels(rect: ScreenRect): Uint8Array {
-  const user32 = dlopen('user32.dll', {
-    GetDC: { args: [FFIType.u64], returns: FFIType.u64 },
-    ReleaseDC: { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 },
-    SetThreadDpiAwarenessContext: { args: [FFIType.i64], returns: FFIType.i64 },
-  }).symbols;
-  const gdi32 = dlopen('gdi32.dll', {
-    CreateCompatibleDC: { args: [FFIType.u64], returns: FFIType.u64 },
-    CreateDIBSection: { args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.u64 },
-    SelectObject: { args: [FFIType.u64, FFIType.u64], returns: FFIType.u64 },
-    BitBlt: { args: [FFIType.u64, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.u64, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.i32 },
-    DeleteObject: { args: [FFIType.u64], returns: FFIType.i32 },
-    DeleteDC: { args: [FFIType.u64], returns: FFIType.i32 },
-  }).symbols;
-  const previous = user32.SetThreadDpiAwarenessContext(-4n);
-  const screen = user32.GetDC(0n);
-  const memory = gdi32.CreateCompatibleDC(screen);
-  const info = new DataView(new ArrayBuffer(44));
-  info.setUint32(0, 40, true);
-  info.setInt32(4, rect.width, true);
-  info.setInt32(8, -rect.height, true);
-  info.setUint16(12, 1, true);
-  info.setUint16(14, 32, true);
-  const bits = new BigUint64Array(1);
-  const bitmap = gdi32.CreateDIBSection(memory, ptr(info), 0, ptr(bits), 0n, 0);
-  const old = gdi32.SelectObject(memory, bitmap);
-  try {
-    // SRCCOPY | CAPTUREBLT
-    gdi32.BitBlt(memory, 0, 0, rect.width, rect.height, screen, rect.left, rect.top, 0x00cc0020 | 0x40000000);
-    return new Uint8Array(toArrayBuffer(Number(bits[0]) as unknown as Pointer, 0, rect.width * rect.height * 4)).slice();
-  } finally {
-    gdi32.SelectObject(memory, old);
-    gdi32.DeleteObject(bitmap);
-    gdi32.DeleteDC(memory);
-    user32.ReleaseDC(0n, screen);
-    if (previous !== 0n) user32.SetThreadDpiAwarenessContext(previous);
-  }
-}
-
-/** Pixels of the pointer's orange (B 0, G 0x5a, R 0xff) in a strip. */
-function orange(bgra: Uint8Array): number {
-  let count = 0;
-  for (let at = 0; at < bgra.length; at += 4) if (bgra[at]! < 40 && Math.abs(bgra[at + 1]! - 0x5a) < 40 && bgra[at + 2]! > 215) count += 1;
-  return count;
 }
 
 describe.skipIf(process.platform !== 'win32')('window guide on Windows', () => {
@@ -144,25 +94,6 @@ describe.skipIf(process.platform !== 'win32')('window guide on Windows', () => {
       expect(control.rect.left + control.rect.width).toBeLessThanOrEqual(frame.rect.left + frame.rect.width);
     }
     expect(await guide.controls(form.id, 1)).toMatchObject({ total });
-  });
-
-  test('draws a box above the window around the control, and takes it away', async () => {
-    const { controls } = await guide.controls(form.id, 50);
-    const build = controls.find(control => control.name === 'Build')!;
-    // The strip right above the button: the box's top edge lies there, the label above it.
-    const strip = { left: build.rect.left, top: build.rect.top - 12, width: build.rect.width, height: 12 };
-    const before = orange(screenPixels(strip));
-    const drawn = guide.point(build.rect, 'Click Build');
-    try {
-      await Bun.sleep(300);
-      expect(orange(screenPixels(strip))).toBeGreaterThan(before + build.rect.width);
-      drawn.move(null);
-      await Bun.sleep(300);
-      expect(orange(screenPixels(strip))).toBeLessThanOrEqual(before);
-    } finally {
-      drawn.close();
-      drawn.close();
-    }
   });
 
   test('a window that is gone has no frame and no controls', async () => {

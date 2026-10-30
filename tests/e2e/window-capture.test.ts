@@ -88,6 +88,7 @@ for (const [label, viewport] of [['desktop', DESKTOP], ['phone', PHONE]] as cons
     await page.waitFor(`!!${card}`, 10000);
     await page.evaluate(`${card}.scrollIntoView({ block: 'center' })`);
     expect(await page.evaluate(`${card}.textContent`)).toContain('The names of its buttons and menus, to show you where to click');
+    expect(await page.evaluate(`${card}.textContent`)).toContain('The read waits until');
     await capture(`consent-read-${label}.png`);
     await page.evaluate(`${card}.querySelector('[data-testid="window-consent-once"]').click()`);
     await page.waitFor(`window.__guideRead?.windowId === '198722'`, 10000);

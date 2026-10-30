@@ -3,7 +3,9 @@
  * the person at the machine instead of acting for them. It reads the controls
  * of a window as a few lines of text, draws a click-through box with a label
  * over the one to press, and waits for the person's click there. The OS half
- * is `ProcessPlatform.windowGuide`, loaded by the first call.
+ * is `ProcessPlatform.windowGuide`, loaded by the first call. The box is the
+ * desktop app's to draw: the core sends it `windows.pointer` events with where
+ * the control is, and refuses when no desktop app of this machine is open.
  *
  * Reading a window's controls is consented like a capture of it (`read` on the
  * card); a box drawn over a rectangle of a window reads nothing and asks
@@ -28,7 +30,8 @@ import {
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
-import type { DrawnPointer, NativeWindow, ScreenRect, WindowGuide } from '../platform/types.ts';
+import { newId } from '../ids.ts';
+import type { NativeWindow, ScreenRect, WindowGuide } from '../platform/types.ts';
 import type { Connection } from '../router.ts';
 import { cropRect } from './image.ts';
 
@@ -61,7 +64,8 @@ interface Snapshot {
 interface Shown {
   pointer: WindowPointer;
   window: NativeWindow;
-  drawn: DrawnPointer;
+  /** The id of its `windows.pointer` events. */
+  boxId: string;
   /** On the screen now; null while the window is minimized. */
   screen: ScreenRect | null;
   follow: ReturnType<typeof setInterval>;
@@ -116,8 +120,8 @@ export class WindowGuides {
       throw invalidParams(`label must be at most ${WINDOW_POINT_LABEL_MAX} characters with no control characters`, { field: 'label' });
     }
     const seconds = this.#seconds(params.seconds, 'seconds');
-    const guide = await this.#load();
 
+    // Every check that needs no OS comes first: a machine without the guide refuses the same bad call the same way.
     let window: NativeWindow;
     let box: { x: number; y: number; width: number; height: number };
     let control: WindowControl | undefined;
@@ -138,6 +142,7 @@ export class WindowGuides {
       if (typeof name !== 'string' || name.trim() === '' || name.length > 260 || /\p{Cc}/u.test(name)) {
         throw invalidParams('name must be 1 to 260 characters with no control characters', { field: 'name' });
       }
+      const guide = await this.#load();
       window = await this.#host.grantedWindow(thread, target, 'read', connection);
       const snapshot = await this.#read(thread, guide, window);
       control = this.#named(snapshot, name.trim());
@@ -150,18 +155,17 @@ export class WindowGuides {
       box = this.#rectangle(window, at!);
     }
 
+    const guide = await this.#load();
     const frame = guide.frame(window.id);
     if (frame === null) throw refused(`window ${window.id} of ${window.process} is gone`, { windowId: window.id, code: 'gone' });
-    this.#remove(thread.id, 'cleared');
     const screen = { left: frame.rect.left + box.x, top: frame.rect.top + box.y, width: box.width, height: box.height };
     // Without a label, a control's box says its name.
     const shownLabel = label === '' && control ? control.name.slice(0, WINDOW_POINT_LABEL_MAX) : label;
-    let drawn: DrawnPointer;
-    try {
-      drawn = guide.point(screen, shownLabel);
-    } catch (error) {
-      throw refused(`drawing the box failed: ${messageOf(error)}`);
+    const boxId = newId('box_');
+    if (this.#core.subscribers.pointer({ id: boxId, rect: frame.minimized ? null : screen, label: shownLabel }) === 0) {
+      throw refused('the box is drawn by the Boite desktop app of this computer, and none is open: ask the user to open Boite', { code: 'no-app' });
     }
+    this.#remove(thread.id, 'cleared');
     const pointer: WindowPointer = {
       windowId: window.id, process: window.process, label: shownLabel,
       x: box.x, y: box.y, width: box.width, height: box.height, expiresAt: Date.now() + seconds * 1000,
@@ -169,13 +173,12 @@ export class WindowGuides {
       ...(frame.above ? { behind: true as const } : {}),
     };
     const shown: Shown = {
-      pointer, window, drawn, screen: frame.minimized ? null : screen, waiters: new Set(),
+      pointer, window, boxId, screen: frame.minimized ? null : screen, waiters: new Set(),
       follow: setInterval(() => this.#follow(thread.id, shown, guide), this.#followMs),
       expiry: setTimeout(() => this.#remove(thread.id, 'timeout', shown), seconds * 1000),
     };
     shown.follow.unref?.();
     shown.expiry.unref?.();
-    if (frame.minimized) drawn.move(null);
     this.#shown.set(thread.id, shown);
     this.#core.logs.info(`Pointed at a ${control?.type ?? 'rectangle'} of window ${window.id} of ${window.process}`, { source: 'windows', event: 'window.point', threadId: thread.id, data: { windowId: window.id, process: window.process, width: box.width, height: box.height } });
     return { pointer: { ...pointer } };
@@ -311,7 +314,7 @@ export class WindowGuides {
     const screen = frame.minimized ? null : { left: frame.rect.left + shown.pointer.x, top: frame.rect.top + shown.pointer.y, width: shown.pointer.width, height: shown.pointer.height };
     if (sameRect(screen, shown.screen)) return;
     shown.screen = screen;
-    try { shown.drawn.move(screen); } catch { this.#remove(threadId, 'gone', shown); }
+    this.#core.subscribers.pointer({ id: shown.boxId, rect: screen, label: shown.pointer.label });
   }
 
   /** Takes the conversation's box away, or only `only` when given, and ends the waits on it. */
@@ -321,7 +324,7 @@ export class WindowGuides {
     this.#shown.delete(threadId);
     clearInterval(shown.follow);
     clearTimeout(shown.expiry);
-    try { shown.drawn.close(); } catch { /* the window is gone with the box */ }
+    this.#core.subscribers.pointer({ id: shown.boxId, rect: null, label: shown.pointer.label });
     for (const finish of [...shown.waiters]) finish(why);
     this.#core.logs.info(`Box over window ${shown.window.id} of ${shown.window.process} taken away: ${why}`, { source: 'windows', event: 'window.unpoint', threadId, data: { windowId: shown.window.id, process: shown.window.process, why } });
     return true;

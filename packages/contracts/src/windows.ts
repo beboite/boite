@@ -160,6 +160,19 @@ export interface WindowPointer {
   behind?: true;
 }
 
+/**
+ * One box for the desktop app of the core's machine to draw above every
+ * window, click-through, as `windows.point` asks: the app owns the window and
+ * its look, the core where it goes and when it goes away.
+ */
+export interface WindowPointerBox {
+  /** The box's own id: a later event with the same id moves it or takes it away. */
+  id: string;
+  /** Where the control is on the screen, in physical pixels; null takes the box away. */
+  rect: { left: number; top: number; width: number; height: number } | null;
+  label: string;
+}
+
 /** Why `windows.waitClick` ended without a click. */
 export type WindowWaitEnd = 'timeout' | 'cleared' | 'gone';
 
@@ -250,6 +263,8 @@ export interface WindowsRpcMethods {
 export interface WindowsRpcEvents {
   /** For the clients subscribed to the conversation: what its Window panel shows now. */
   'windows.changed': { threadId: string; watch: WindowWatch | null };
+  /** Only to the desktop app of the core's own machine (`clientName` `shell` on the loopback): a box to draw, move or take away. */
+  'windows.pointer': WindowPointerBox;
 }
 
 /** A window id as `windows.list` gives it. The core still acts only on a window it lists. */

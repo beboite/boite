@@ -31,6 +31,8 @@ pub(crate) mod watch;
 #[cfg(windows)]
 pub(crate) mod dwm;
 #[cfg(windows)]
+pub(crate) mod overlay;
+#[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
 pub(crate) use windows::{alert, before_webview, foreground, idle_ms, memory_level, notify, prepare_command, suspend};

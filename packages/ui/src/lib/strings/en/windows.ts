@@ -18,7 +18,7 @@ export const strings = {
       asks: '{agent} wants to capture {process}', asksRead: '{agent} wants to read {process}', anAgent: 'An agent',
       screenshot: 'A screenshot', clip: 'A short clip', stream: 'A live view in the Window panel',
       read: 'The names of its buttons and menus, to show you where to click',
-      waits: 'The capture waits until {time}.',
+      waits: 'The capture waits until {time}.', readWaits: 'The read waits until {time}.',
       once: 'Allow once', always: 'Always for this project', refuse: 'Refuse',
       allowedOnce: 'Allowed once: {process}', allowedAlways: 'Always allowed in this project: {process}',
       refused: 'Refused: {process}', expired: 'Not answered in time: {process}'

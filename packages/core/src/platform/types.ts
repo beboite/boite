@@ -146,18 +146,11 @@ export interface NativeControl {
   rect: ScreenRect;
 }
 
-/** A box `WindowGuide.point` keeps drawn above every window until `close`. */
-export interface DrawnPointer {
-  /** Moves the box and its label, or hides them with null. */
-  move(rect: ScreenRect | null): void;
-  close(): void;
-}
-
 /**
  * The OS half of `boite window read`, `point` and `wait-click`: the controls
- * of a window, a click-through box drawn above everything, and the state of
- * the mouse. Like `WindowCapture`, never focuses, raises or sends input to the
- * window it reads. Loaded on first use.
+ * of a window, where it lies, and the state of the mouse. The box itself is the
+ * desktop app's (`windows.pointer`). Like `WindowCapture`, never focuses,
+ * raises or sends input to the window it reads. Loaded on first use.
  */
 export interface WindowGuide {
   /** At most `limit` enabled controls on screen, in the tree's order, and how many there were. */
@@ -168,7 +161,6 @@ export interface WindowGuide {
    * the Start menu, so a box drawn on it stays behind it.
    */
   frame(id: string): { rect: ScreenRect; minimized: boolean; above: boolean } | null;
-  point(rect: ScreenRect, label: string): DrawnPointer;
   /** The primary button's state and the cursor, in physical pixels. */
   mouse(): { pressed: boolean; x: number; y: number };
 }

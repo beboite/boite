@@ -29,6 +29,12 @@
         color: var(--color-foreground, #1c1c21);
       }
 
+      /* The pointer's page is a transparent window above the user's apps: it paints no ground at all. */
+      html[data-view='pointer'],
+      html[data-view='pointer'] body {
+        background: transparent !important;
+      }
+
       /* Grain paints its fade from the stylesheet; the mid tone stands in until then. */
       html[data-theme='grain'],
       html[data-theme='grain'] body {
@@ -38,7 +44,8 @@
     </style>
     <!-- The same rule as lib/theme.ts, run before the first paint: dark stamps nothing. -->
     <script>
-      if (new URLSearchParams(location.search).get('view') === 'quotas') document.documentElement.dataset.view = 'quotas';
+      var shellView = new URLSearchParams(location.search).get('view');
+      if (shellView === 'quotas' || shellView === 'pointer') document.documentElement.dataset.view = shellView;
       try {
         // The face picked under Appearance (lib/fonts.ts), stamped and preloaded
         // before the stylesheet so the first frame is drawn in it. The sans face

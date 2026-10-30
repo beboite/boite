@@ -19,7 +19,7 @@ export const fr: Translation = {
       asks: '{agent} veut capturer {process}', asksRead: '{agent} veut lire {process}', anAgent: 'Un agent',
       screenshot: "Une capture d'écran", clip: 'Une courte séquence', stream: 'Une vue en direct dans le panneau Fenêtre',
       read: 'Les noms de ses boutons et menus, pour vous montrer où cliquer',
-      waits: "La capture attend votre réponse jusqu'à {time}.",
+      waits: "La capture attend votre réponse jusqu'à {time}.", readWaits: "La lecture attend votre réponse jusqu'à {time}.",
       once: 'Autoriser une fois', always: 'Toujours pour ce projet', refuse: 'Refuser',
       allowedOnce: 'Autorisé une fois : {process}', allowedAlways: 'Toujours autorisé dans ce projet : {process}',
       refused: 'Refusé : {process}', expired: 'Délai de réponse dépassé : {process}'

@@ -1,10 +1,11 @@
 import {
-  WINDOW_CAPTURE_EXCLUDED, WINDOW_CLIP_LIMITS, WINDOW_CONSENT_ANSWERS, WINDOW_CONSENT_TIMEOUT_MS, WINDOW_POINT_LABEL_MAX, WINDOW_POINT_SECONDS,
+  RpcErrorCode, WINDOW_CAPTURE_EXCLUDED, WINDOW_CLIP_LIMITS, WINDOW_CONSENT_ANSWERS, WINDOW_CONSENT_TIMEOUT_MS, WINDOW_POINT_LABEL_MAX, WINDOW_POINT_SECONDS,
   WINDOW_READ_LIMIT, WINDOW_SHOT_MAX, WINDOW_THUMBNAIL_MAX,
   windowCropError, windowIdError, windowTargetError,
   type AllowedWindowApp, type DesktopWindow, type Message, type MessagePart, type Thread, type WindowConsentAnswer, type WindowConsentKind,
   type WindowControl, type WindowPointer, type WindowTarget, type WindowWatch
 } from '@boite/contracts';
+import { RpcFailure } from '../client';
 import { fakeWindowPicture } from './window-screen';
 import { DATA_DIR, refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -61,6 +62,9 @@ const demos = new WeakMap<FakeContext, () => void>();
 export function seedWindowsDemo(ctx: FakeContext): void {
   demos.get(ctx)?.();
 }
+
+/** The core's `invalidParams`: a bad field, refused before anything is looked up. */
+const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
 
 const fileName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 const sameText = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -317,7 +321,7 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     'windows.read': async ({ threadId, target, filter, limit }) => {
       const thread = active(threadId);
       const max = limit ?? WINDOW_READ_LIMIT.default;
-      if (!(Number.isInteger(max) && max >= 1 && max <= WINDOW_READ_LIMIT.max)) throw refusal(`limit must be a whole number from 1 to ${WINDOW_READ_LIMIT.max}`, { field: 'limit' });
+      if (!(Number.isInteger(max) && max >= 1 && max <= WINDOW_READ_LIMIT.max)) throw invalid(`limit must be a whole number from 1 to ${WINDOW_READ_LIMIT.max}`, 'limit');
       const window = resolve(thread, target);
       if (window.minimized) throw refusal('window minimized: restore it first', { windowId: window.id });
       await consent(thread, window, 'read');
@@ -329,9 +333,9 @@ export function windowsMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     },
     'windows.point': async ({ threadId, control: id, target, name, at, label = '', seconds = WINDOW_POINT_SECONDS.default }) => {
       const thread = active(threadId);
-      if ([id, name, at].filter(value => value !== undefined).length !== 1) throw refusal('point needs exactly one of control, name or at', { field: 'control' });
-      if (label.length > WINDOW_POINT_LABEL_MAX) throw refusal(`label must be at most ${WINDOW_POINT_LABEL_MAX} characters with no control characters`, { field: 'label' });
-      if (!(seconds >= 1 && seconds <= WINDOW_POINT_SECONDS.max)) throw refusal(`seconds must lie between 1 and ${WINDOW_POINT_SECONDS.max}`, { field: 'seconds' });
+      if ([id, name, at].filter(value => value !== undefined).length !== 1) throw invalid('point needs exactly one of control, name or at', 'control');
+      if (label.length > WINDOW_POINT_LABEL_MAX) throw invalid(`label must be at most ${WINDOW_POINT_LABEL_MAX} characters with no control characters`, 'label');
+      if (!(seconds >= 1 && seconds <= WINDOW_POINT_SECONDS.max)) throw invalid(`seconds must lie between 1 and ${WINDOW_POINT_SECONDS.max}`, 'seconds');
       let window: FakeWindow;
       let box: { x: number; y: number; width: number; height: number };
       let control: WindowControl | undefined;

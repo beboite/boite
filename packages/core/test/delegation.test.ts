@@ -325,7 +325,8 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   // captures a window with no `--max` or `--crop` spends thousands of tokens on every look (4401 measured with all three lines, 2026-10-25).
   // Then 78 for naming the Mermaid headers chat draws, so a chart or a schema needs no `boite view help` (8 KB) before it (4479 measured 2026-10-26).
   // Then 130 for the ```view fence: an interactive or animated piece is drawn from the answer, with no command and no help (4609 measured 2026-10-26).
-  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4610);
+  // Then 32 for ", or point the user at a control": an agent asked to teach an app guides the user through it instead of driving it (4629 measured 2026-10-30).
+  expect(Buffer.byteLength(prompt.replaceAll(h.dataDir, '<data>'))).toBeLessThan(4630);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });

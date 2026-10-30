@@ -61,7 +61,7 @@
       <span>{what}</span>
       <code class="path" title={part.path}>{part.path}</code>
     </div>
-    <p class="hint">{fill(s.waits, { time: dayClock(part.expiresAt) })}</p>
+    <p class="hint">{fill(part.kind === 'read' ? s.readWaits : s.waits, { time: dayClock(part.expiresAt) })}</p>
     {#if error}<p class="error" role="status" data-testid="window-consent-error">{error}</p>{/if}
     <div class="actions">
       <button type="button" class="primary" data-testid="window-consent-once" disabled={busy} onmousedown={keepFocus} onclick={() => answer('once')}><span class="ui-label">{s.once}</span></button>

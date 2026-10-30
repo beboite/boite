@@ -20,6 +20,7 @@ mod local_core;
 mod local_files;
 mod material;
 mod platform;
+mod pointer_window;
 mod presence;
 mod quota_window;
 mod resident;
@@ -224,6 +225,9 @@ pub fn run() {
         updater::app_update_install_quietly,
         updater::app_update_cancel_install,
         quota_window::quota_window,
+        pointer_window::pointer_show,
+        pointer_window::pointer_hide,
+        pointer_window::pointer_layout,
         material::window_material,
         material::window_material_supported,
         tray::tray_labels,
@@ -256,6 +260,7 @@ pub fn run() {
         .manage(dropped::Dropped::default())
         .manage(whip::WhipState::default())
         .manage(quota_window::HoverState::default())
+        .manage(pointer_window::PointerState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
         .invoke_handler(move |invoke| {
             // A synchronous command runs inside this call, on the main thread.

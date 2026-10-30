@@ -6,6 +6,7 @@ import { finishNotifies } from '../notify';
 import { upkeepOf } from '../agent-upkeep';
 import { resetPullRequestSupport } from '../pull-request';
 import { revealRequested } from '../reveal';
+import { pointerRequested } from '../pointer-layout';
 import { appUpdateRequested } from '../desktop-update.svelte';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
@@ -400,6 +401,8 @@ export function listen(ctx: StoreContext, client: Client): void {
     void ctx.projects.dropProject(projectId);
   });
   on('ui.reveal', ({ target }) => revealRequested(s, target));
+  // `boite window point`'s box: the shell of this computer draws it.
+  on('windows.pointer', (box) => { void pointerRequested(s, box); });
   on('core.log', (entry) => {
     if (entry.level !== 'error') return;
     s.error = entry.threadId
