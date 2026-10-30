@@ -241,5 +241,9 @@ test('a permission folds into the run of the call it gates, a call standing alon
   expect([...pairPermissions([bash('a'), bash('b'), asked('p', 'Bash')])]).toEqual([[2, 1]]);
   expect([...pairPermissions([bash('a'), asked('p', 'Bash'), bash('b'), asked('q', 'Bash')])]).toEqual([[1, 0], [3, 2]]);
   expect([...pairPermissions([asked('p', 'Bash'), bash('a')])]).toEqual([[0, 1]]);
+  expect([...pairPermissions([asked('p', 'Bash'), edit, bash('a')])]).toEqual([[0, 2]]);
+  // Calls that stand alone still take their permission, asked before or after them.
+  expect(partRuns([asked('p', 'Edit'), edit])).toEqual([{ kind: 'activity', indices: [1, 0] }]);
+  expect(partRuns([edit, bash('a'), asked('p', 'Edit')])).toEqual([{ kind: 'activity', indices: [0, 2] }, { kind: 'activity', indices: [1] }]);
   expect([...pairPermissions([bash('a'), asked('p', 'fake_tool')])]).toEqual([]);
 });

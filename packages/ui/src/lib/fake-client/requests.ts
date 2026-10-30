@@ -9,12 +9,6 @@ import type { FakeContext, FakeMethods } from './context';
 export async function askPermission(ctx: FakeContext, thread: Thread, turn: Turn, message: Message): Promise<void> {
   if (thread.permissionMode === 'yolo') return;
   const requestId = `req-${++ctx.seq}`;
-  const input = { path: `${thread.cwd}\\notes.md`, contents: 'the thing you asked for' };
-  // An agent announces the call, then asks for it: the card folds into that call.
-  const callIndex = message.parts.length;
-  const call: Extract<MessagePart, { type: 'tool' }> = { type: 'tool', toolId: `tool-${requestId}`, name: 'Write', input, output: null, status: 'running', startedAt: ctx.now() };
-  message.parts.push(call);
-  ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: callIndex, part: structuredClone(call) });
   const partIndex = message.parts.length;
   const part: MessagePart = {
     type: 'permission',
@@ -35,7 +29,7 @@ export async function askPermission(ctx: FakeContext, thread: Thread, turn: Turn
     threadId: thread.id,
     turnId: turn.id,
     toolName: 'Write',
-    input,
+    input: { path: `${thread.cwd}\\notes.md`, contents: 'the thing you asked for' },
     description: 'Write a file inside the working directory',
     createdAt: ctx.now()
   };
@@ -48,8 +42,6 @@ export async function askPermission(ctx: FakeContext, thread: Thread, turn: Turn
   });
 
   settlePermission(ctx, thread, message, partIndex, request, decision);
-  Object.assign(call, decision === 'allow' ? { status: 'done', output: 'Wrote notes.md' } : { status: 'denied', output: 'Denied by the user' }, { finishedAt: ctx.now() });
-  ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: callIndex, part: structuredClone(call) });
   thread.status = 'running';
   ctx.touch(thread);
 }

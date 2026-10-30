@@ -51,32 +51,31 @@ export function activityShown(parts: readonly ActivityPart[], thinkingLive: bool
 }
 
 /**
- * Which call each permission of a run was asked for, as indices into `parts`:
+ * Which call each permission was asked for, as indices into `parts`:
  * permission to call. A permission carries no call id, so it takes the closest
  * call of its tool's name before it that no other permission took (an agent
- * asks right after it announces the call), else the next call of that name.
- * One without a call (an agent that asks first and calls after, or no call at
- * all) stays unpaired and draws as its own line.
+ * asks right after it announces the call), else the first such call after it
+ * (one that asks before it calls). One with no call of its name stays
+ * unpaired and draws as its own line. `from` and `to` bound the search.
  */
-export function pairPermissions(parts: readonly ActivityPart[]): Map<number, number> {
+export function pairPermissions(parts: readonly MessagePart[], from = 0, to = parts.length): Map<number, number> {
   const pairs = new Map<number, number>();
   const taken = new Set<number>();
-  parts.forEach((part, at) => {
-    if (part.type !== 'permission') return;
+  for (let at = from; at < to; at += 1) {
+    const part = parts[at];
+    if (part?.type !== 'permission') continue;
     const fits = (index: number) => {
       const call = parts[index];
-      return call?.type === 'tool' && call.name === part.toolName && !taken.has(index);
+      // A proposed plan is its own card, never in a run: its permission keeps its own line.
+      return call?.type === 'tool' && call.name === part.toolName && !taken.has(index) && planOf(call.name, call.input) === null;
     };
     let found = -1;
-    for (let back = at - 1; back >= 0 && found < 0; back -= 1) if (fits(back)) found = back;
-    if (found < 0) {
-      const next = parts.findIndex((call, index) => index > at && call.type === 'tool');
-      if (next >= 0 && fits(next)) found = next;
-    }
-    if (found < 0) return;
+    for (let back = at - 1; back >= from && found < 0; back -= 1) if (fits(back)) found = back;
+    for (let next = at + 1; next < to && found < 0; next += 1) if (fits(next)) found = next;
+    if (found < 0) continue;
     pairs.set(at, found);
     taken.add(found);
-  });
+  }
   return pairs;
 }
 
@@ -84,38 +83,54 @@ export function pairPermissions(parts: readonly ActivityPart[]): Map<number, num
  * Splits the parts into runs. Calls and reasoning with nothing written between
  * them are one run, drawn as one line that opens on its steps; blank text does
  * not break it. Answer text, a call that made something and a proposed plan
- * each keep their own place in the timeline. `from` and `to` read a stretch of
- * the message only, its runs indexed as in the whole message: what one row of
- * a long message draws, and what a memory notice cuts a message into.
+ * each keep their own place in the timeline. A permission goes in the run of
+ * the call it was asked for (`pairPermissions`), wherever that call stands.
+ * `from` and `to` read a stretch of the message only, its runs indexed as in
+ * the whole message: what one row of a long message draws, and what a memory
+ * notice cuts a message into.
  */
 export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.length, groupChanges = false): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'activity'; indices: number[] } | null = null;
-  // The activity just drawn, a call standing alone included: a permission joins the call it gates.
-  let last: { kind: 'activity'; indices: number[] } | null = null;
+  const pairs = pairPermissions(parts, from, to);
+  const askedFor = new Map([...pairs].map(([permission, call]) => [call, permission]));
+  /** The run each folded call landed in, for a permission asked after it. */
+  const runOf = new Map<number, { kind: 'activity'; indices: number[] }>();
   for (let index = from; index < to; index += 1) {
     const part = parts[index];
     if (!part) continue;
     // Blank text is skipped unless it ends the message itself: that one carries the caret.
     // The index comes first, so the streaming last part's text is never read and a delta reruns nothing here.
     if (index < parts.length - 1 && part.type === 'text' && part.text.trim() === '') continue;
+    const call = part.type === 'permission' ? pairs.get(index) : undefined;
+    if (call !== undefined) {
+      // Asked after its call: it joins that call's run. Asked before: it waits for its call.
+      const run = runOf.get(call);
+      if (run || call > index) {
+        run?.indices.push(index);
+        continue;
+      }
+    }
     const folds = part.type === 'thinking' || part.type === 'permission' || (part.type === 'tool' && planOf(part.name, part.input) === null);
+    let run: { kind: 'activity'; indices: number[] } | null = null;
     if (!folds) {
       open = null;
-      last = null;
       runs.push({ kind: 'part', index });
     } else if (part.type === 'tool' && standsAlone(part, groupChanges)) {
       open = null;
-      last = { kind: 'activity', indices: [index] };
-      runs.push(last);
+      run = { kind: 'activity', indices: [index] };
+      runs.push(run);
     } else if (open) {
       open.indices.push(index);
-    } else if (part.type === 'permission' && last) {
-      last.indices.push(index);
+      run = open;
     } else {
-      open = last = { kind: 'activity', indices: [index] };
+      open = run = { kind: 'activity', indices: [index] };
       runs.push(open);
     }
+    if (run === null || part.type !== 'tool') continue;
+    runOf.set(index, run);
+    const asked = askedFor.get(index);
+    if (asked !== undefined && asked < index) run.indices.push(asked);
   }
   return runs;
 }
