@@ -66,8 +66,8 @@ export function listen(ctx: StoreContext, client: Client): void {
           ctx.serverUpdater.reset();
           if (s.owner && !s.localCore) { void ctx.serverUpdater.freshen(); void ctx.serverUpdater.loadDesktop(); }
           void s.reload();
-          // A reconnect lists the composer records again; the first connection does once the journal is read.
-          void ctx.sync.resync();
+          // A reconnect also hydrates after a first hello that never reached connect()'s startup path.
+          void ctx.connection.syncComposer(client, generation).catch(error => { if (current()) ctx.fail(error); });
           ctx.shared.reconnected();
           ctx.terminals.reconnected(client);
           if (!s.owner) layout.checkPushKinds(client);

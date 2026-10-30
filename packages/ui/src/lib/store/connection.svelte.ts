@@ -79,6 +79,7 @@ export class Connection {
   booted = $state(false);
   /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
   reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
+  #composerSync: { client: Client; generation: number; promise: Promise<void> } | null = null;
   #readEpoch = 0;
   /**
    * Where the last thread list applied here left this client: the next load
@@ -461,7 +462,7 @@ export class Connection {
       this.pairingRequired = false;
       void this.#handOverKey(client, core);
       void s.reload();
-      await Promise.all([this.ctx.drafts.start().then(() => this.ctx.currentClient(client, generation) ? this.ctx.sync.resync() : undefined), this.reloading?.essential]);
+      await Promise.all([this.syncComposer(client, generation), this.reloading?.essential]);
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
@@ -470,6 +471,16 @@ export class Connection {
       }
       else this.ctx.fail(error);
     }
+  }
+
+  /** A first hello can fail before hydration: an automatic reconnect must start the journal too. */
+  syncComposer(client: Client, generation: number): Promise<void> {
+    if (this.#composerSync?.client === client && this.#composerSync.generation === generation) return this.#composerSync.promise;
+    const promise = this.ctx.drafts.start().then(() => this.ctx.currentClient(client, generation) ? this.ctx.sync.resync() : undefined).finally(() => {
+      if (this.#composerSync?.promise === promise) this.#composerSync = null;
+    });
+    this.#composerSync = { client, generation, promise };
+    return promise;
   }
 
   /**

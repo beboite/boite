@@ -100,6 +100,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test('a failed first hello still starts composer sync when the transport reconnects by itself', async () => {
+  const desk = await device('desk', new FakeClient({ delayMs: 0 }), { connect: false });
+  vi.spyOn(desk.client, 'connect').mockRejectedValueOnce(new Error('connection closed'));
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  await desk.store.connect();
+  expect(called(desk, 'composer.list')).toHaveLength(0);
+
+  // The transport retries without calling Store.connect again.
+  await desk.client.restore();
+  expect(desk.store.connection).toBe('ready');
+  queue(desk.store, 't-trace', 'Follow up after startup recovered');
+  // An idle thread has no Send now button: its queue must leave automatically.
+  await vi.waitFor(async () => expect(await userTexts(desk.client, 't-trace')).toContain('Follow up after startup recovered'));
+  expect(called(desk, 'composer.list')).toHaveLength(1);
+  expect(putsOf(desk, 't-trace')).not.toHaveLength(0);
+});
+
 test('typing on one device reaches the other in place, in one put for a burst, and clearing it clears both', async () => {
   const desk = await device('desk', new FakeClient({ delayMs: 0 }));
   const phone = await device('phone', desk.client.composerPeer({ delayMs: 0, principal: 'session' }));
