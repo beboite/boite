@@ -309,8 +309,12 @@ export class TeamStore {
     if (!member) throw refused(`botId: ${JSON.stringify(wanted)} is no member of ${team.name}`, { field: 'botId' });
     const saved = this.#save(team, { members: team.members.filter(entry => entry.key !== member.key) });
     const threadId = this.#threadOf(member);
-    if (threadId !== null) this.#core.coordination.teamLetters.reject(team.id, threadId, `${member.name} left the team ${team.name}`);
+    const reason = `${member.name} left the team ${team.name}`;
+    if (threadId !== null) this.#core.coordination.teamLetters.reject(team.id, threadId, reason);
     this.#core.journal.append({ type: 'teams.member.removed', threadId: team.threadId, version: 1, payload: { teamId: team.id, member: member.key } }, db => {
+      // A post interrupted before its letter has none to reject: its delivery ends with the membership too.
+      db.query("UPDATE team_deliveries SET state = 'rejected', reason = ?, at = ? WHERE member = ? AND state = 'waiting' AND post_id IN (SELECT id FROM team_posts WHERE team_id = ?)")
+        .run(reason, Date.now(), member.key, team.id);
       db.query('DELETE FROM team_cursors WHERE team_id = ? AND member = ?').run(team.id, member.key);
       db.query('DELETE FROM team_seen WHERE team_id = ? AND member = ?').run(team.id, member.key);
     });
@@ -426,7 +430,8 @@ export class TeamStore {
   /**
    * A post committed before its letters: a recipient still `waiting` with no
    * letter of that team carrying the post gets one now. Letters live six
-   * hours, so older posts are left as they are.
+   * hours, so older posts are left as they are, and so is a post from before
+   * the member's current membership.
    */
   #repair(postId?: string): void {
     const rows = this.#db.query(`SELECT p.team_id, p.seq, p.author, d.member FROM team_deliveries d JOIN team_posts p ON p.id = d.post_id
@@ -435,7 +440,7 @@ export class TeamStore {
       const team = this.get(row.team_id);
       const member = team?.archived === false ? team.members.find(entry => entry.key === row.member) : undefined;
       const threadId = member ? this.#threadOf(member) : null;
-      if (!team || threadId === null) continue;
+      if (!team || !member || threadId === null || row.seq <= member.joinedSeq) continue;
       const carried = this.#db.query(`SELECT 1 FROM coordination_letters l, json_each(l.data, '$.team.triggers') t WHERE l.thread_id = ? AND l.direction = 'in'
         AND l.status IN ('received', 'uncertain') AND json_extract(l.data, '$.team.teamId') = ? AND t.value = ? LIMIT 1`).get(threadId, team.id, row.seq);
       if (!carried) this.#core.coordination.teamLetters.accept(team, threadId, row.seq, row.author === TEAM_OWNER);

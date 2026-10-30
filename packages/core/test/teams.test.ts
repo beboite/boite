@@ -495,6 +495,36 @@ test('a post whose letters were interrupted reaches its recipients once: a retri
   } finally { await removeDir(dataDir); }
 }, 30_000);
 
+test('an interrupted post to a member the owner removed stays with the old membership: no retry or restart revives it after a rejoin', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
+  try {
+    const { h, team, bots: [, bob], post } = await setup(['Ada', 'Bob'], dataDir);
+    teamDriver();
+    h.core.teams.pause({ teamId: team.id, paused: true });
+    const cut = spyOn(h.core.coordination.teamLetters, 'accept').mockImplementation(() => { throw new Error('interrupted before the letter'); });
+    await failure(() => post('@Bob OLD_MEMBERSHIP_REQUEST', { id: 'old-1' }));
+    cut.mockRestore();
+    h.core.teams.removeMember({ teamId: team.id, botId: bob!.agent.id });
+    const delivery = (core: typeof h) => core.core.journal.db.query("SELECT state FROM team_deliveries WHERE post_id = 'old-1'").all();
+    expect(delivery(h)).toEqual([{ state: 'rejected' }]);
+    h.core.teams.addMember({ teamId: team.id, botId: bob!.agent.id });
+    post('@Bob OLD_MEMBERSHIP_REQUEST', { id: 'old-1' });
+    expect(teamLetters(h, bob!.threadId)).toEqual([]);
+    post('@Bob fresh request');
+    await cores.pop()!.stop();
+    for (const restore of restores.splice(0).reverse()) restore();
+    const again = await startTestCore({ dataDir }); cores.push(again);
+    await experiment(await again.connect());
+    const driver = teamDriver();
+    expect(teamLetters(again, bob!.threadId).map(letter => letter.team!.triggers)).toEqual([[2]]);
+    again.core.teams.pause({ teamId: team.id, paused: false });
+    await waitFor(() => wakes(again, bob!.threadId).length === 1 && settledWakes(again, bob!.threadId));
+    expect(driver.of(bob!.threadId)[0]).toContain('fresh request');
+    expect(driver.of(bob!.threadId)[0]).not.toContain('OLD_MEMBERSHIP_REQUEST');
+    await cores.pop()!.stop();
+  } finally { await removeDir(dataDir); }
+}, 30_000);
+
 test('a steer left unacknowledged by a restart releases its posts: the next delivery renders them', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-teams-'));
   try {
