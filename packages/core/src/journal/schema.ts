@@ -11,8 +11,9 @@ import { createSharedBoard } from '../contacts/board-journal.ts';
 import { createSharedCompute } from '../contacts/compute-journal.ts';
 import { createSharedAccess } from '../contacts/access-journal.ts';
 import { createSharedReview } from '../contacts/review-journal.ts';
+import { createTeams } from '../teams/journal.ts';
 
-export const SCHEMA_VERSION = 45;
+export const SCHEMA_VERSION = 46;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -473,6 +474,12 @@ export function migrate(db: Database, file: string): { from: number; to: number 
     // A new journal has no events to read; reading them anyway marks `events` for ANALYZE on SQLite before 3.46.
     createPendingQuestions(db, (row?.user_version ?? 0) > 0);
     version = 45;
+  }
+  // Teams of bots (`docs/teams.md`): the teams, their posts, what each member saw and each delivery.
+  if (version < 46) {
+    if (!hasColumn('threads', 'team_id')) db.exec('ALTER TABLE threads ADD COLUMN team_id TEXT');
+    createTeams(db);
+    version = 46;
   }
   createSharedProjects(db);
   createSharedBoard(db);

@@ -2,6 +2,7 @@ import type { AgentSettingAsk } from './agent-setting-requests.ts';
 import type { ProviderId, RequestId, ThreadId, Timestamp, TurnId } from './ids';
 import type { Attachment } from './messages';
 import type { SettingAsk } from './setting-requests.ts';
+import type { TeamAsk } from './teams';
 import type { ThreadStatus, ThreadSummary } from './threads';
 import type { Turn } from './turns';
 import { threadActive } from './turns';
@@ -68,6 +69,13 @@ export interface QuestionRequest {
    * `text` is its reason. Always asynchronous.
    */
   agentSetting?: AgentSettingAsk;
+  /**
+   * A bot proposes a team, an invitation or its leaving (`teams.propose`,
+   * `invite`, `leave`). `text` is the proposal. The only option is Refuse:
+   * Apply is the owner's `teams.create`, `teams.members.add` or `remove` with
+   * this card. Always asynchronous.
+   */
+  team?: TeamAsk;
   /** A page the card opens in the thread's browser (`boite ask --open`), as for a sign-in. */
   open?: { url: string };
   createdAt: Timestamp;
