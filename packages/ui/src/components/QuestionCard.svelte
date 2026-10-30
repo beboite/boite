@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, MessageCircleQuestionMark, Paperclip } from '@lucide/svelte';
+  import { Check, ChevronRight, MessageCircleQuestionMark, Paperclip } from '@lucide/svelte';
   import type { QuestionAnswer, QuestionOption } from '@boite/contracts';
   import { keepFocus } from '../lib/focus';
   import { fill, strings } from '../lib/strings';
@@ -152,7 +152,11 @@
             onmousedown={keepFocus}
             onclick={() => toggle(option.id)}
           >
-            <span class="box" class:round={!multiple}></span>
+            <span class="box" class:round={!multiple} aria-hidden="true">
+              {#if multiple && picked.includes(option.id)}
+                <Check size={10} strokeWidth={3} />
+              {/if}
+            </span>
             <span class="labels">
               <span class="label">{option.label}</span>
               {#if option.description}
@@ -342,12 +346,16 @@
   }
 
   .box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 12px;
     height: 12px;
     margin-top: 3px;
     flex: none;
     border: 1px solid var(--color-edge);
-    border-radius: var(--radius-sm);
+    border-radius: calc(var(--radius-sm) / 3);
+    color: var(--color-accent-ink);
   }
 
   .box.round {

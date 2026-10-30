@@ -164,12 +164,22 @@ test('several options are kept at once when the question takes several', () => {
   });
   flushSync();
 
+  expect(options().every(option => option.getAttribute('role') === 'checkbox')).toBe(true);
+  expect(document.querySelector('.box svg')).toBeNull();
   options()[0]?.click();
   options()[1]?.click();
   flushSync();
+  expect(document.querySelectorAll('[aria-checked=true] .box svg')).toHaveLength(2);
+  options()[0]?.click();
+  flushSync();
+  expect(options()[0]?.getAttribute('aria-checked')).toBe('false');
+  expect(options()[0]?.querySelector('.box svg')).toBeNull();
+  expect(options()[1]?.querySelector('.box svg')).not.toBeNull();
+  options()[0]?.click();
+  flushSync();
   submit().click();
   flushSync();
-  expect(sent).toEqual([['short', 'long']]);
+  expect(sent).toEqual([['long', 'short']]);
 });
 
 test('an answered card folds to one line and asks nothing more', () => {

@@ -397,3 +397,42 @@ test('a run of calls reads as the agent\'s own summaries, and a step of reasonin
   await update(`delete thread.messages.at(-1).parts[3].summary;`);
   await page.waitFor(`${label} === 'Read 2 files and ran 1 command'`);
 });
+
+test('multiple-choice questions show checkboxes and single-choice questions keep round indicators', async () => {
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  const card = `${id('message')} ${id('question-card')}`;
+  const option = (index: number) => `${card} ${id('question-option')}:nth-child(${index})`;
+  for (const multiple of [true, false]) {
+    await update(`
+      const turn = thread.turns[0];
+      turn.status = 'running'; thread.status = 'waiting';
+      const request = { id: 'indicator-' + ${multiple}, threadId: thread.id, turnId: turn.id,
+        text: 'When should cutscenes play?', options: [{id:'start',label:'Start of a run'},
+          {id:'age',label:'Age transition'}, {id:'leader',label:'Arrival of a war chief'}],
+        allowText: false, multiple: ${multiple}, createdAt: Date.now() };
+      store.pendingQuestions = [request];
+      thread.messages.at(-1).parts = [{type:'question', questionId:request.id,
+        text:request.text, options:request.options, allowText:false, multiple:request.multiple, answer:null}];
+    `);
+    await page.waitFor(`document.querySelector('${option(1)}')?.getAttribute('role') === '${multiple ? 'checkbox' : 'radio'}'`);
+    for (const [width, height] of [[1300, 850], [390, 844]]) {
+      await page.send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor:1, mobile:width === 390});
+      const shape = await page.evaluate<{radius: number; width: number}>(`(() => {
+        const box = document.querySelector('${option(1)} .box');
+        return {radius:parseFloat(getComputedStyle(box).borderTopLeftRadius), width:box.getBoundingClientRect().width};
+      })()`);
+      if (multiple) expect(shape.radius).toBeLessThan(shape.width / 2);
+      else expect(shape.radius).toBeGreaterThanOrEqual(shape.width / 2);
+      await page.click(option(1));
+      await page.click(option(2));
+      expect(await page.evaluate(`document.querySelector('${option(1)}').getAttribute('aria-checked')`)).toBe(String(multiple));
+      expect(await page.evaluate(`document.querySelector('${option(2)}').getAttribute('aria-checked')`)).toBe('true');
+      expect(await page.evaluate(`document.querySelectorAll('${card} .box svg').length`)).toBe(multiple ? 2 : 0);
+      await capture(`question-${multiple ? 'checkboxes' : 'radios'}-${width}`);
+      await page.click(option(2));
+      expect(await page.evaluate(`document.querySelector('${option(2)} .box svg') === null`)).toBe(true);
+      if (multiple) await page.click(option(1));
+    }
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', {width:1300, height:850, deviceScaleFactor:1, mobile:false});
+}, 30_000);
