@@ -96,7 +96,10 @@ export const PRIMARY_PATIENCE_MS = 2000;
 /** How long the window keeps its loading screen while another machine may still answer in place of the one it opened on. */
 export const STAND_IN_WAIT_MS = 6000;
 
-export const machineIcons = ['desktop', 'laptop', 'server', 'rack', 'cloud', 'cpu'] as const;
+export const machineIcons = [
+  'desktop', 'laptop', 'phone', 'tablet', 'apple', 'server', 'rack', 'nas',
+  'database', 'cloud', 'cpu', 'router', 'terminal', 'bot', 'gamepad', 'tv', 'house',
+] as const;
 export type MachineIconName = typeof machineIcons[number];
 const PROFILE_KEY = 'boite.machine-profiles';
 function profileKey(machine: Machine): string {
