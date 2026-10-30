@@ -42,9 +42,11 @@ export class Cdp {
     this.#write = write; this.#stop = stop;
     let settle!: () => void;
     this.closed = new Promise(resolve => { settle = resolve; });
+    this.#settle = settle;
     this.#ended = () => { this.#fail(new CdpError('the browser closed its DevTools pipe')); settle(); };
   }
   #ended: () => void;
+  #settle: () => void;
 
   /**
    * `commands` is this side of the browser's descriptor 3, which it reads;
@@ -145,9 +147,15 @@ export class Cdp {
     return () => { set.delete(listener); };
   }
 
+  /**
+   * `closed` settles here too: a relay's carrier never reports the end of a
+   * connection the core closed itself, and a hosted engine's `exited` is that
+   * promise, so its profile stayed taken for good (`BrowserEngines.get`).
+   */
   close(): void {
     this.#fail(new CdpError('the browser connection was closed'));
     this.#stop();
+    this.#settle();
   }
 
   #receive(text: string): void {
