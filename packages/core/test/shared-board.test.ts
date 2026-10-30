@@ -82,16 +82,28 @@ test.each([null, 'updated text'])('a Todo hidden by a queued removal refuses upd
   } finally {b.h.core.coordination.request = request;}
 }, 30000);
 
-test('an acknowledged board edit reports local receipt storage exhaustion instead of a queued receipt', async () => {
+test.each([0, 150])('an acknowledged board edit reports local receipt storage exhaustion after a %i ms acknowledgement', async delay => {
   const {a, b, scope} = await board();
   await a.client.call('sharedBoard.apply', {...scope, command: command('add', 'receipt-card', 'shared')});
   await cards(b.client, scope);
+  const request = b.h.core.sharedProjects.request.bind(b.h.core.sharedProjects);
+  b.h.core.sharedProjects.request = async (...args) => {
+    const result = await request(...args);
+    if (args[1] === 'board.apply' && delay) await Bun.sleep(delay);
+    return result;
+  };
   const full = Object.assign(new Error('local receipt storage is full'), {code: 'SQLITE_FULL'});
   const settle = spyOn(b.h.core.sharedBoard.journal, 'settle').mockImplementation(() => {throw full;});
   try {
-    expect(await thrown(b.h.core.sharedBoard.apply({...scope, command: command('update', 'disk-edit', 'accepted remotely')}))).toThrow(full);
+    expect(await thrown((async () => {
+      const receipt = await b.h.core.sharedBoard.apply({...scope, command: command('update', 'disk-edit', 'accepted remotely')});
+      // An edit may return queued before the remote acknowledgement. A read
+      // drains that same durable queue, so it must still report the disk error.
+      if (receipt.outcome === 'queued') await b.h.core.sharedBoard.get(scope);
+    })())).toThrow(full);
+    expect(b.h.core.sharedBoard.journal.pending(scope.sharedProjectId)).toHaveLength(1);
     expect((await cards(a.client, scope))[0]!.text).toBe('accepted remotely');
-  } finally {settle.mockRestore();}
+  } finally {settle.mockRestore(); b.h.core.sharedProjects.request = request;}
 }, 30000);
 
 test('two simultaneous canonical claims reserve one worker and retries start exactly one goal', async () => {

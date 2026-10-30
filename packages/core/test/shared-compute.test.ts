@@ -8,6 +8,7 @@ import { connect } from '../src/client.ts';
 import { unavailable } from '../src/errors.ts';
 import { sharedPermissionSupport } from '../src/contacts/compute-policy.ts';
 import { thrown } from './settle.ts';
+import { waitForComputeJob } from './shared-compute-fixture.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnResult } from '../src/drivers/types.ts';
 
@@ -64,18 +65,37 @@ async function pair() {
   return { a, b, scope, baseCommit, enable };
 }
 async function done(s: Awaited<ReturnType<typeof side>>, scope: { threadId: string; sharedProjectId: string }, job: SharedComputeJob) {
-  let current = job;
-  const until = Date.now() + 12000;
-  while (!['done', 'failed', 'cancelled', 'revoked', 'uncertain'].includes(current.status) && Date.now() < until) {
-    await new Promise(r => setTimeout(r, 30));
-    // The host notifies this core's durable projection. Repeated peer reads can
-    // spend its entire minute's allowance while a slow checkout is still queued.
-    current = s.h.core.sharedCompute.journal.get(job.id, 'source')?.job ?? s.h.core.sharedCompute.journal.get(job.id, 'host')!.job;
-  }
-  current = await s.client.call('sharedCompute.get', { ...scope, jobId: job.id });
+  await waitForComputeJob(s.h, job.id, ['done']);
+  const current = await s.client.call('sharedCompute.get', { ...scope, jobId: job.id });
   expect(current.error).toBeNull(); expect(current.status).toBe('done');
   return current;
 }
+// A completed turn can still be verifying Git provenance after the checkout
+// settles. Advance the wall clock while publication is held, without slowing CI.
+test.each(['local', 'remote'] as const)('completion waits for verified %s provenance rather than a helper clock cutoff', async route => {
+  const {a, b, scope, baseCommit, enable} = await pair();
+  const host = route === 'local' ? a : b;
+  await enable(host);
+  let entered!: () => void, release!: () => void;
+  const publishing = new Promise<void>(resolve => {entered = resolve;});
+  const held = new Promise<void>(resolve => {release = resolve;});
+  host.h.core.sharedCompute.publishText = async (_record, text) => {entered(); await held; return text;};
+  const job = await a.client.call('sharedCompute.start', {...scope, requestId: 'slow-provenance', host: host.ref,
+    profileId: 'conversation', baseCommit, task: 'Verify the held result'});
+  await publishing;
+  expect(host.h.core.journal.lastTurn(job.worker!.threadId)?.status).toBe('done');
+  expect(host.h.core.sharedCompute.journal.get(job.id, 'host')!.job.status).toBe('running');
+  const result = done(a, scope, job);
+  // Observe rejection immediately so the old helper fails this test, not its successor.
+  const settled = result.then(value => ({value, error: null}), error => ({value: null, error}));
+  const now = Date.now.bind(Date), clock = spyOn(Date, 'now').mockImplementation(() => now() + 13_000);
+  try {await Bun.sleep(60);}
+  finally {clock.mockRestore(); release();}
+  const received = await settled;
+  expect(received.error).toBeNull();
+  expect(received.value?.result?.baseCommit).toBe(baseCommit);
+}, 30000);
+
 test.each(['done', 'failed'] as const)('late cancellation preserves %s local and remote history while revocation still fences it', async status => {
   const {a, b, scope, baseCommit, enable} = await pair(); await enable(a); await enable(b);
   if (status === 'failed') for (const side of [a, b]) side.h.core.sharedCompute.guardStart = () => {throw new Error('fixture admission refused');};
