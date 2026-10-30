@@ -187,6 +187,8 @@ test('browser output is agent-browser text: a check, the page reached and the di
   expect(lines({ kind: 'get', what: 'text', selector: '@e1' }, 'plain words')).toEqual(['plain words']);
   expect(lines({ kind: 'get', what: 'checked', selector: '@e1' }, false)).toEqual(['false']);
   expect(lines({ kind: 'status' }, { tabs: [{ tabId: 'browser:t', url: 'https://x.test/', title: 'X', profileName: 'Privé', active: true }] })).toEqual(['* browser:t  X  https://x.test/  [Privé]']);
+  expect(lines({ kind: 'status' }, { tabs: [], blocking: { action: 'open', step: 'start', startedAt: Date.UTC(2026, 9, 30, 10), stepStartedAt: Date.UTC(2026, 9, 30, 10, 0, 1) } })[1])
+    .toBe('running: open since 2026-10-30T10:00:00.000Z, at its start step since 2026-10-30T10:00:01.000Z; later commands wait for it');
 });
 
 test('browser run sends a script\'s steps in order in one call, prints what they did and what it returns, and stops at a failed step with the page it left', async () => {
