@@ -266,6 +266,43 @@ are not counted as work under way. The update closes them, the cookies are
 saved first, and the tabs themselves are not reopened.
 
 The agent's commands of one conversation run one after the other, in order.
+The reads that only report state (`status`, `profiles`, `downloads`,
+`recipes`, `recipe-get`) answer at once instead of waiting their turn. While a
+command runs, `status` names it in `blocking`: its action, its tab, its step and
+when the command and the step began (`BrowserBlockingCommand`); the CLI prints
+it as a `running:` line.
+
+Each step of a running command has a bound (`BROWSER_STEP_MS` in
+`packages/core/src/browser.ts`): `start`, while the profile's browser starts,
+90 seconds (the 60 seconds a browser gets to answer its start, then up to 30
+to restore its cookies); `attach`, while a new tab is created and attached, 60
+seconds; `wake`, while a sleeping tab wakes, 30 seconds; `act`, the action
+itself, 60 seconds, twice a DevTools call's own 30 seconds, which covers a
+navigation, an evaluate and the 15 seconds an agent may wait. The commands of a
+recording get 110 seconds for their `act` step, under the 120 seconds the
+agent's CLI waits; the recording itself runs between them and no bound touches
+it. A step past its bound fails the command with its action and step named, and
+the next command of the conversation runs. The work it waited on is not
+stopped: a browser that starts late still serves the next `open`. A
+`browser.command-stalled` warning, which `boite logs problems` lists, names the
+thread, the tab, the action, the step, how long the step waited and how long the
+command had run.
+
+A command given up this way never reaches its next step, since the commands
+after it already ran. An `open` given up while its browser started creates no
+tab once the browser answers; one given up while its tab attached closes that
+tab before the conversation sees it, so the page is never loaded and the active
+tab does not change. An action given up in its `act` step may still change its
+page: until its work ends, its tab refuses every command but `close` at once,
+with a message that names the tab and the action and says to close the tab or
+open another. `status` shows that tab's `stuck` field (`BrowserStuckAction`: the
+action and when it was given up), and the CLI prints it under the tab. The mark
+goes when the work ends, and that late end leaves the dialog handling of the
+command after it alone.
+
+A command whose caller closed its connection before the command's turn came
+never runs; one already running finishes, since it may be changing the page.
+
 `open` and `navigate` wait up to 10 seconds for the next page's DOM, never for
 the load event, which an image or a script that never finishes can hold back;
 a page still loading by then is returned with `loading: true` rather than an
@@ -645,7 +682,7 @@ profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, a page that sleeps
 once nobody uses it and meets the next command and viewer awake and focused
 (its page busy 400 ms each time it is hidden, so each freeze lands late),
-a background tab whose screenshot answers once it wakes, one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-sleep.test.ts` checks, with the page
+a background tab whose screenshot answers once it wakes, one kept awake by `browser.remoteWatch`, and a machine without a browser. `browser-stuck.test.ts`, with no browser and a desktop app that never answers, checks that `status` answers and names the command stuck at its `start` step, that a step past its bound fails with the step named, logs `browser.command-stalled` and lets the next command run, and that a command whose caller left before its turn never runs. `browser-abandoned.test.ts` checks, with a real browser, that an `open` given up while a held desktop app started its browser leaves no tab, no request for its page and no change of active tab once the browser answers and the next `open` ran, and that an `evaluate` given up in its `act` step marks its tab: a `snapshot` on it is refused at once, `status` shows the mark until the evaluate ends, and `close` works while it runs. `browser-sleep.test.ts` checks, with the page
 stubbed, that a command arriving during a freeze runs after the wake, and that
 a held or closed tab never sleeps, that a running turn holds an unused
 tab only 5 minutes, and that a wake call that misses its time fails at once and then names who stalled. `AgentBrowserSurface.test.ts` checks that the desktop app

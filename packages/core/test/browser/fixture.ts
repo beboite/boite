@@ -193,8 +193,9 @@ export function createBrowserFixture() {
    * DevTools message verbatim to a Chromium of its own over a WebSocket, which
    * answers as the app's webviews would. The app's own translation (one webview
    * per target) is tested in the UI; this is the core's side of the relay.
+   * With `hold`, the core's messages reach Chromium, in order, only once it settles.
    */
-  async function fakeHost(name = 'shell', extraArgs: string[] = []) {
+  async function fakeHost(name = 'shell', extraArgs: string[] = [], hold?: Promise<void>) {
     const dir = mkdtempSync(join(tmpdir(), 'boite-host-'));
     let browser: Bun.Subprocess | undefined, socket: TextSocket | undefined, app: CoreClient | undefined;
     let closing: Promise<void> | undefined;
@@ -233,7 +234,11 @@ export function createBrowserFixture() {
         .catch((error: unknown) => { throw new Error(`could not open the desktop browser DevTools socket: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); });
       const connectedApp = app = await connect(harness.url, harness.token, { client: { name, version: 'test' } });
       const relayed: string[] = [];
-      connectedApp.on('browser.hostMessage', ({ profile, message }) => { relayed.push(profile); connectedSocket.send(message); });
+      connectedApp.on('browser.hostMessage', ({ profile, message }) => {
+        relayed.push(profile);
+        if (hold) void hold.then(() => connectedSocket.send(message));
+        else connectedSocket.send(message);
+      });
       connectedSocket.onMessage(text => void connectedApp.call('browser.hostReply', { profile: 'default', messages: [text] }).catch(() => {}));
       return { app: connectedApp, relayed, close };
     } catch (error) {

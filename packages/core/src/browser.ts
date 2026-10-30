@@ -24,6 +24,8 @@ import {
   type AgentBrowserStatus,
   type AgentBrowserTab,
   type BrowserAction,
+  type BrowserBlockingCommand,
+  type BrowserCommandStep,
   type BrowserReply,
   type RemoteBrowserFrame,
   type RemoteBrowserUnchanged,
@@ -71,7 +73,49 @@ const DOWNLOAD_BEGIN_MS = 2000;
 const SCREEN_TURN_MS = 5000;
 const HISTORY_MAX = 100;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
+/**
+ * What each step of a queued command may take before the command fails and
+ * the conversation's next command runs; the work itself goes on unwatched.
+ * `start`: a browser gets 60 s to answer its start (`START_TIMEOUT_MS` in
+ * `browser/engines.ts`), then up to 30 s to restore its cookies.
+ * `attach`: a few DevTools calls, each failing after 30 s (`browser/cdp.ts`).
+ * `wake`: three sleep steps of 5 s, after a freeze of three more (`browser/sleep.ts`).
+ * `act`: twice a DevTools call's 30 s, which covers a navigation (30 s, then 10 s
+ * for the DOM), an evaluate (30 s and 5 s) and the longest wait an agent asks (15 s).
+ */
+export const BROWSER_STEP_MS: Readonly<Record<BrowserCommandStep, number>> = { start: 90_000, attach: 60_000, wake: 30_000, act: 60_000 };
+/**
+ * A recording runs between its commands, under no bound; its own commands
+ * evaluate in the recorder's page with 60 s each (`browser/recorder.ts`), and a
+ * stop waits for the encoder. They get what the agent's CLI still waits (120 s),
+ * less a margin, so the agent hears which step failed.
+ */
+const RECORDING_ACT_MS = 110_000;
+/** Commands that only report state: they answer at once, never behind the conversation's queue. */
+const READS: ReadonlySet<BrowserAction['kind']> = new Set(['status', 'profiles', 'downloads', 'recipes', 'recipe-get']);
 export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
+
+/** The late work of a command given up past a bound stops at its next step. */
+function abandoned(running: Running): Error {
+  return refused(`browser ${running.action} was given up at its ${running.step} step; its late work stops here`);
+}
+
+/** A queued command while it runs: `status` reports it, and `enter` starts a step's bound. */
+interface Running {
+  action: BrowserAction['kind'];
+  tabId?: string;
+  step: BrowserCommandStep;
+  startedAt: number;
+  stepStartedAt: number;
+  /** Ended or given up: the work still running in the background moves no step. */
+  done: boolean;
+  /** Given up past a bound: its late work must not reach its next step. */
+  abandoned: boolean;
+  /** The tab its `act` step runs on, until that step settles. */
+  acting?: Tab;
+  /** Starts a step's bound; throws once the command was given up. */
+  enter(step: BrowserCommandStep): void;
+}
 
 export class AgentBrowser {
   readonly #core: Core;
@@ -86,6 +130,10 @@ export class AgentBrowser {
   #threads = new Map<ThreadId, { order: string[]; active: string | null }>();
   /** Commands of one conversation run one at a time, in order. */
   #queues = new Map<ThreadId, Promise<unknown>>();
+  /** The command each conversation's queue waits on, and where it stands. */
+  #running = new Map<ThreadId, Running>();
+  /** Each step's bound (`BROWSER_STEP_MS`); tests shorten them. */
+  stepMs: Record<BrowserCommandStep, number> = { ...BROWSER_STEP_MS };
   /** Tabs being attached, by conversation and in all: attaching takes several round trips, and the limits count them. */
   #attaching = new Map<ThreadId, number>();
   #attachingAll = 0;
@@ -171,7 +219,7 @@ export class AgentBrowser {
     if (!state) return [];
     return state.order.flatMap(id => {
       const tab = this.#tabs.get(id);
-      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active, ...(tab.engine.hosted ? { view: tab.targetId } : {}) }] : [];
+      return tab ? [{ tabId: id, url: tab.url, title: tab.title, profile: tab.engine.profile, active: id === state.active, ...(tab.engine.hosted ? { view: tab.targetId } : {}), ...(tab.stuck ? { stuck: { action: tab.stuck.action, since: tab.stuck.since } } : {}) }] : [];
     });
   }
 
@@ -220,12 +268,12 @@ export class AgentBrowser {
 
   // ---------- tabs ----------
 
-  async #attach(engine: Engine, threadId: ThreadId, targetId: string, url: string): Promise<Tab> {
+  async #attach(engine: Engine, threadId: ThreadId, targetId: string, url: string, running: Running | null = null): Promise<Tab> {
     const { sessionId } = await engine.cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(), network: null,
-      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, sleep: sleepState(!engine.hosted),
+      recorder: null, discarded: false, frame: null, screen: screenTurns(), off: [], frames: new Set(), acting: false, actor: null, stuck: null, sleep: sleepState(!engine.hosted),
       page: {
         session: sessionId,
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
@@ -255,6 +303,11 @@ export class AgentBrowser {
     if (current) { tab.url = current.targetInfo.url || tab.url; tab.title = current.targetInfo.title.slice(0, 200); }
     // Every tab counts as focused, so a page waiting for focus or visibility runs.
     await engine.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId).catch(() => {});
+    // Given up while it attached: the tab is never the conversation's, and the caller closes its target.
+    if (running?.abandoned) {
+      for (const off of tab.off) off();
+      throw abandoned(running);
+    }
     this.#tabs.set(tab.id, tab);
     engine.tabs.add(tab.id); clearTimeout(engine.idle);
     this.#sleep.schedule(tab);
@@ -360,8 +413,13 @@ export class AgentBrowser {
 
   // ---------- agent commands ----------
 
-  /** The agent's entry. Commands of one conversation run in order. */
-  command(params: RpcParams<'browser.command'>): Promise<BrowserReply> {
+  /**
+   * The agent's entry. Commands of one conversation run in order, except the
+   * reads of `READS`, which answer at once. `signal` aborts when the caller
+   * left: a command still waiting its turn is skipped, one already running
+   * finishes, since it may be changing the page.
+   */
+  command(params: RpcParams<'browser.command'>, signal?: AbortSignal): Promise<BrowserReply> {
     const { threadId, action } = params;
     this.#require(threadId);
     const problem = browserActionError(action);
@@ -369,13 +427,76 @@ export class AgentBrowser {
     if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !TAB_ID.test(params.tabId))) throw refused('browser tabId must come from browser status or open');
     if (this.#closed) throw refused('the core is shutting down');
     this.#watch();
+    if (READS.has(action.kind)) return Promise.resolve().then(() => this.#run(threadId, params.tabId, action, null));
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
     let at = performance.now(); // Reset when the command runs: the wait behind the thread's previous one is not its time.
-    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#withDownloads(threadId, action, () => this.#run(threadId, params.tabId, action)); });
+    const run = previous.catch(() => {}).then(() => {
+      signal?.throwIfAborted();
+      at = performance.now();
+      return this.#bounded(threadId, params.tabId, action);
+    });
     run.catch(() => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
-    return run;
+    if (!signal) return run;
+    // The caller is gone: its answer is not waited for, whatever the command still does.
+    return new Promise<BrowserReply>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      void run.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+  }
+
+  /**
+   * Runs a queued command with a bound on each of its steps. A step past its
+   * bound fails the command, logs where it stood, and frees the queue; the work
+   * it waited on goes on, and its end changes nothing here.
+   */
+  async #bounded(threadId: ThreadId, tabId: string | undefined, action: BrowserAction): Promise<BrowserReply> {
+    const now = Date.now();
+    const stalled = Promise.withResolvers<never>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const running: Running = {
+      action: action.kind, ...(tabId ? { tabId } : {}), step: 'act', startedAt: now, stepStartedAt: now, done: false, abandoned: false,
+      enter: (step) => {
+        if (running.abandoned) throw abandoned(running);
+        if (running.done) return;
+        running.step = step;
+        running.stepStartedAt = Date.now();
+        clearTimeout(timer);
+        const bound = step === 'act' && action.kind.startsWith('recording-') ? Math.max(this.stepMs.act, RECORDING_ACT_MS) : this.stepMs[step];
+        timer = setTimeout(() => stalled.reject(this.#stalled(threadId, running, bound)), bound);
+      },
+    };
+    this.#running.set(threadId, running);
+    running.enter('act');
+    const work = this.#withDownloads(threadId, action, () => this.#run(threadId, tabId, action, running));
+    work.catch(() => {});
+    try { return await Promise.race([work, stalled.promise]); }
+    finally {
+      running.done = true;
+      clearTimeout(timer);
+      if (this.#running.get(threadId) === running) this.#running.delete(threadId);
+    }
+  }
+
+  /** The failure of a command whose step passed its bound, logged as a problem that names where it stood. */
+  #stalled(threadId: ThreadId, running: Running, bound: number): Error {
+    const at = Date.now();
+    running.abandoned = true;
+    // An action stuck on its tab may still change the page: until it ends, the tab refuses the next ones but `close`.
+    const tab = running.acting;
+    if (tab && !tab.stuck) {
+      tab.stuck = { action: running.action, since: at, by: running };
+      this.#changed(threadId);
+    }
+    const where = running.tabId ? ` on tab ${running.tabId}` : '';
+    this.#core.logs.record('warn', `Browser ${running.action} of thread ${threadId}${where} stalled at its ${running.step} step for ${at - running.stepStartedAt} ms, ${at - running.startedAt} ms after it started; its queue moved on`, {
+      source: 'browser', event: 'browser.command-stalled', threadId, durationMs: at - running.stepStartedAt,
+      data: { action: running.action, step: running.step, tabId: running.tabId ?? null, waitedMs: at - running.stepStartedAt, runningMs: at - running.startedAt },
+    });
+    return refused(`browser ${running.action} gave up after its ${running.step} step took ${bound / 1000} s; the conversation's next browser command runs now`);
   }
 
   /** A reply names the downloads that began while its command ran, so the agent learns of a file it did not ask for. */
@@ -387,7 +508,7 @@ export class AgentBrowser {
     return begun.length ? { ...reply, downloads: begun } : reply;
   }
 
-  async #run(threadId: ThreadId, tabId: string | undefined, action: BrowserAction): Promise<BrowserReply> {
+  async #run(threadId: ThreadId, tabId: string | undefined, action: BrowserAction, running: Running | null): Promise<BrowserReply> {
     this.#require(threadId);
     switch (action.kind) {
       case 'downloads': return { value: { downloads: this.#downloads.list(threadId) } };
@@ -397,7 +518,11 @@ export class AgentBrowser {
       case 'status': {
         const found = this.findBrowser();
         const available = found.path !== null || this.#host.attached;
-        return { value: { available, hosted: this.#host.attached, machine: this.#machine, ...(available ? {} : { reason: found.reason }), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })) } };
+        const current = this.#running.get(threadId);
+        const blocking: BrowserBlockingCommand | null = current
+          ? { action: current.action, ...(current.tabId ? { tabId: current.tabId } : {}), step: current.step, startedAt: current.startedAt, stepStartedAt: current.stepStartedAt }
+          : null;
+        return { value: { available, hosted: this.#host.attached, machine: this.#machine, ...(available ? {} : { reason: found.reason }), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })), ...(blocking ? { blocking } : {}) } };
       }
       case 'profiles': {
         const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
@@ -414,22 +539,40 @@ export class AgentBrowser {
         // agent-browser's `open` drives the current tab; a named profile opens a tab of its own.
         const current = action.reuse && action.profile === undefined ? this.#threads.get(threadId)?.active : null;
         const tab = current ? this.#tabs.get(current) : undefined;
-        if (!tab) return this.#open(threadId, action);
-        return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile: tab.engine.profile };
+        if (!tab) return this.#open(threadId, action, running);
+        return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url), running), profile: tab.engine.profile };
       }
       default: break;
     }
     const tab = this.#tabOf(threadId, tabId);
     const state = this.#thread(threadId);
     if (state.active !== tab.id) { state.active = tab.id; this.#changed(threadId); }
-    return this.#command(tab, action, () => this.#act(tab, action));
+    return this.#command(tab, action, () => this.#act(tab, action), running);
   }
 
   /** An agent command on a tab: on an awake page, recorded, and the dialogs it raises are its own. */
-  async #command<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>): Promise<T> {
-    tab.acting = true;
-    try { return await this.#sleep.use(tab, () => this.#track(tab, action, run)); }
-    finally { tab.acting = false; }
+  async #command<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>, running: Running | null): Promise<T> {
+    if (tab.stuck && action.kind !== 'close') {
+      throw refused(`browser tab ${tab.id} is still running the ${tab.stuck.action} given up ${Math.round((Date.now() - tab.stuck.since) / 1000)} s ago, which may still change its page; close it with browser close, or open another tab`);
+    }
+    if (running && !running.done) running.tabId = tab.id;
+    running?.enter('wake');
+    return this.#sleep.use(tab, async () => {
+      running?.enter('act');
+      if (running) running.acting = tab;
+      const actor = {};
+      tab.acting = true; tab.actor = actor;
+      try { return await this.#track(tab, action, run); }
+      finally {
+        // A late end of a given-up action leaves the dialogs of the command after it alone.
+        if (tab.actor === actor) { tab.acting = false; tab.actor = null; }
+        if (running) running.acting = undefined;
+        if (running && tab.stuck?.by === running) {
+          tab.stuck = null;
+          this.#changed(tab.threadId);
+        }
+      }
+    });
   }
 
   #profileName(id: string): string {
@@ -458,7 +601,7 @@ export class AgentBrowser {
     return { id, name, created: true };
   }
 
-  async #open(threadId: ThreadId, action: Extract<BrowserAction, { kind: 'open' }>): Promise<BrowserReply> {
+  async #open(threadId: ThreadId, action: Extract<BrowserAction, { kind: 'open' }>, running: Running | null): Promise<BrowserReply> {
     const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
     const profile = action.profile === undefined ? defaultId : findBrowserProfile(profiles, action.profile);
     if (profile === null) throw refused(`no browser profile is named ${action.profile}; browser profiles lists them`);
@@ -468,13 +611,17 @@ export class AgentBrowser {
     const release = this.#reserve(threadId);
     let tab: Tab;
     try {
+      running?.enter('start');
       const engine = await this.#engines.get(profile);
+      // Given up while the browser started: it serves the next open, this one creates nothing.
+      try { running?.enter('attach'); }
+      catch (error) { this.#engines.idle(engine); throw error; }
       clearTimeout(engine.idle);
       const { targetId } = await engine.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
-      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
+      try { tab = await this.#attach(engine, threadId, targetId, 'about:blank', running); }
       catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#engines.idle(engine); throw error; }
     } finally { release(); }
-    return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile };
+    return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url), running), profile };
   }
 
   /** Keeps operation names only: typed values and evaluated code can hold passwords. */
