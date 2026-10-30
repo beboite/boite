@@ -209,7 +209,6 @@
   "threads.btw.fork",
   "threads.capabilities",
   "threads.compact",
-  "threads.focus",
   "threads.fork",
   "threads.goal.track",
   "threads.linkPullRequest",
