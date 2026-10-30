@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
 import { chromiumArgs, drawsWithGpu, findChromium, trimProfile } from '../src/browser/chromium.ts';
 import { BrowserEngines } from '../src/browser/engines.ts';
-import type { BrowserHost } from '../src/browser/host.ts';
+import { BrowserHost } from '../src/browser/host.ts';
 import type { Cdp } from '../src/browser/cdp.ts';
+import type { Connection } from '../src/router.ts';
 import type { Engine } from '../src/browser/types.ts';
 import { createBrowserFixture } from './browser/fixture.ts';
 import { thrown } from './settle.ts';
@@ -144,6 +145,48 @@ test('a profile whose browser failed while starting opens again only once that b
   await engines.get('default');
   expect(exits).toHaveLength(2);
 });
+
+test('a profile the desktop app hosted opens again after its idle browser closed', async () => {
+  const { harness } = browserFixture;
+  const host = new BrowserHost();
+  // The app answers every DevTools message, and keeps its webviews when told Browser.close (`packages/ui/src/lib/browser-host.ts`).
+  const app = {
+    identity: { principal: 'owner' }, sentFrom: { client: 'shell' }, remote: false, onClose: () => () => {},
+    sendEvent(_name: string, { profile, message }: { profile: string; message: string }) {
+      const { id } = JSON.parse(message) as { id: number };
+      queueMicrotask(() => host.reply(app, profile, [JSON.stringify({ id, result: { cookies: [] } })]));
+    },
+  } as unknown as Connection;
+  host.attach(app);
+  const engines = new BrowserEngines(harness.core, host, () => ({ path: 'chromium' }), 'test', 'browser:test', () => {}, () => {}, { prepare: () => harness.dataDir, lost() {} });
+  const first = await engines.get('default');
+  expect(first.hosted).toBe(true);
+  // What the idle timer does once the profile's last tab closed.
+  await engines.shut(first);
+  const again = await Promise.race([engines.get('default'), Bun.sleep(2000).then(() => null)]);
+  expect(again).not.toBeNull();
+  expect(again).not.toBe(first);
+  await engines.shut(again!);
+}, 20_000);
+
+test('a browser command that never answers fails at its deadline and lets the conversation use the browser again', async () => {
+  const { harness, threadId } = browserFixture;
+  const browser = harness.core.browser;
+  // A desktop app that takes the DevTools messages and answers none: the agent's open waits on it.
+  const app = { identity: { principal: 'owner' }, sentFrom: { client: 'shell' }, remote: false, onClose: () => () => {}, sendEvent() {} } as unknown as Connection;
+  browser.hostAttach(app);
+  browser.commandDeadlineMs = 300;
+  try {
+    const opening = thrown(browser.command({ threadId, action: { kind: 'open', url: url() } }));
+    const listed = browser.command({ threadId, action: { kind: 'profiles' } });
+    expect(await opening).toThrow('did not finish within');
+    expect((await Promise.race([listed, Bun.sleep(2000).then(() => null)]))?.value).toMatchObject({ default: 'default' });
+  } finally {
+    browser.commandDeadlineMs = 120_000;
+    // The app leaving ends the start still waiting on it.
+    browser.hostDetach(app);
+  }
+}, 20_000);
 
 test('a deleted profile loses its folder even when its browser had already closed', async () => {
   const { harness, owner, agent, threadId } = browserFixture;

@@ -171,7 +171,8 @@ export class BrowserEngines {
     await this.saveCookies(engine);
     // A clean close lets the browser write its own files; the kill is for one that does not end.
     await engine.cdp.send('Browser.close', {}, undefined, 3000).catch(() => {});
-    await Promise.race([engine.exited, Bun.sleep(5000)]);
+    // The desktop app keeps its webviews: no process of its own to wait for.
+    if (!engine.hosted) await Promise.race([engine.exited, Bun.sleep(5000)]);
     this.lost(engine);
   }
 

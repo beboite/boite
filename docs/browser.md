@@ -266,6 +266,10 @@ are not counted as work under way. The update closes them, the cookies are
 saved first, and the tabs themselves are not reopened.
 
 The agent's commands of one conversation run one after the other, in order.
+One still running after 120 seconds, the CLI's own wait, fails with
+`did not finish within 120 s` and the next one runs without it, so a command
+stuck in the browser never holds the conversation's browser or the core's
+agent request slots.
 `open` and `navigate` wait up to 10 seconds for the next page's DOM, never for
 the load event, which an image or a script that never finishes can hold back;
 a page still loading by then is returned with `loading: true` rather than an

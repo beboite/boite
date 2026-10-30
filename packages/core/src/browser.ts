@@ -70,6 +70,12 @@ const DOWNLOAD_BEGIN_MS = 2000;
 /** A capture still running after this long lets the next capture of its tab go: one stuck in the browser never freezes the tab's frames. */
 const SCREEN_TURN_MS = 5000;
 const HISTORY_MAX = 100;
+/**
+ * A command still running after this long answers so, and its conversation's
+ * next command stops waiting for it. Its caller stopped waiting at the CLI's
+ * 120 s, but the queue and the core's agent request slots waited for good.
+ */
+const COMMAND_DEADLINE_MS = 120_000;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
 export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
 
@@ -121,6 +127,9 @@ export class AgentBrowser {
       use: (tab, run) => this.#sleep.use(tab, run),
     });
   }
+
+  /** How long one agent command may run (`COMMAND_DEADLINE_MS`); tests shorten it. */
+  commandDeadlineMs = COMMAND_DEADLINE_MS;
 
   /** How long a tab nobody drives or watches stays awake; tests shorten it. */
   get sleepAfterMs(): number { return this.#sleep.afterMs; }
@@ -371,11 +380,25 @@ export class AgentBrowser {
     this.#watch();
     const previous = this.#queues.get(threadId) ?? Promise.resolve();
     let at = performance.now(); // Reset when the command runs: the wait behind the thread's previous one is not its time.
-    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#withDownloads(threadId, action, () => this.#run(threadId, params.tabId, action)); });
+    const run = previous.catch(() => {}).then(() => { at = performance.now(); return this.#bounded(threadId, action, this.#withDownloads(threadId, action, () => this.#run(threadId, params.tabId, action))); });
     run.catch(() => this.#core.logs.debug(`browser ${action.kind} failed after ${Math.round(performance.now() - at)} ms`, { source: 'browser', event: 'browser.command-failed', threadId, durationMs: performance.now() - at, data: { action: action.kind } }));
     this.#queues.set(threadId, run);
     void run.finally(() => { if (this.#queues.get(threadId) === run) this.#queues.delete(threadId); }).catch(() => {});
     return run;
+  }
+
+  /** A command that never settles fails at the deadline; what it still does later answers nobody. */
+  #bounded<T>(threadId: ThreadId, action: BrowserAction, work: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const seconds = Math.round(this.commandDeadlineMs / 1000);
+    const stuck = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        this.#core.logs.record('warn', `browser ${action.kind} still ran after ${seconds} s; the conversation's next browser command no longer waits for it`, { source: 'browser', event: 'browser.command-stuck', threadId, data: { action: action.kind } });
+        reject(refused(`browser ${action.kind} did not finish within ${seconds} s; the next browser command of this conversation runs without waiting for it`));
+      }, this.commandDeadlineMs);
+    });
+    work.catch(() => {});
+    return Promise.race([work, stuck]).finally(() => clearTimeout(timer));
   }
 
   /** A reply names the downloads that began while its command ran, so the agent learns of a file it did not ask for. */
