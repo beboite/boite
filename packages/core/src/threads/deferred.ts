@@ -79,8 +79,12 @@ export class DeferredInput {
     const answers = this.deferredAnswers;
     const runner = this.#threads.runner;
     const handle = runner.handles.get(threadId);
-    if (!handle?.steer || this.#uncertain.has(handle) || runner.steering.has(threadId) || !answers.get(threadId)?.length) return;
-    const turnId = core.journal.runningTurn(threadId)?.id;
+    // Answers are user input; Claude keeps system coordination on a separate tool hook.
+    const submit = handle?.steerUser?.bind(handle) ?? handle?.steer?.bind(handle);
+    if (!handle || !submit || this.#uncertain.has(handle) || runner.steering.has(threadId) || !answers.get(threadId)?.length) return;
+    const turn = core.journal.runningTurn(threadId);
+    if (turn?.execution?.operation === 'compact' || turn?.execution?.operation === 'keepalive') return;
+    const turnId = turn?.id;
     runner.steering.add(threadId);
     let recorded = false;
     try {
@@ -98,7 +102,7 @@ export class DeferredInput {
           recorded = true;
           this.#changed(threadId);
         };
-        if (await handle.steer(text, undefined, accepted)) accepted();
+        if (await submit(text, undefined, accepted)) accepted();
         if (!recorded) break;
       }
     } catch (error) {
@@ -165,9 +169,9 @@ export class DeferredInput {
   }
 
   /**
-   * The held answers for the running turn to read at a tool boundary. A driver
-   * with no steer (Claude) pulls them from its PostToolUse hook, so an answer
-   * given mid-turn does not wait for the turn to end.
+   * The held answers for the running turn to read at a tool boundary. While
+   * native input is unavailable, PostToolUse supplies the answer so it does
+   * not wait for the turn to end.
    */
   takeForRunningTurn(threadId: ThreadId): string | null {
     const memory = this.memory.take(threadId);

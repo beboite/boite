@@ -105,9 +105,10 @@ export function toolGate(host: GateHost): ToolGate {
 
   /**
    * Only the context the turn takes in mid-way: other agents' messages and the
-   * user's asynchronous answers, since Claude has no steer. The tool's result is the `tool_result` the
-   * CLI sends next, with its own text and error flag; `tool_response` here is
-   * the raw object, a whole `originalFile` for an Edit, that no card shows.
+   * user's asynchronous answers that native input has not accepted. The tool's
+   * result is the `tool_result` the CLI sends next, with its own text and error
+   * flag; `tool_response` here is the raw object, a whole `originalFile` for an
+   * Edit, that no card shows.
    */
   const postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     // A subagent's tool call is its own conversation: what it took, the main agent would never read.
