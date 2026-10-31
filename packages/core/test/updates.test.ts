@@ -10,6 +10,7 @@ import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { npmInstallOf } from '../src/providers/npm.ts';
 import { resolveCommand } from '../src/providers/resolve.ts';
+import { AptPackages } from '../src/providers/termux.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
@@ -419,6 +420,29 @@ describe('harness updates', () => {
       process.env['PATH'] = saved;
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('two agents of one Termux prefix run apt one at a time, and one check fetches its index once', async () => {
+    const apt = new AptPackages();
+    const pkg = (name: string) => ({ prefix: '/termux/usr', name, aptGet: '/termux/usr/bin/apt-get', aptCache: '/termux/usr/bin/apt-cache' });
+    let active = 0, most = 0;
+    const calls: string[] = [];
+    const run = async (args: string[]): Promise<string> => {
+      most = Math.max(most, ++active);
+      calls.push(args.join(' '));
+      await Bun.sleep(5);
+      active -= 1;
+      return args[0] === 'policy' ? 'x:\n  Installed: 1.0.0\n  Candidate: 1.4.0-1\n' : '';
+    };
+    // A check reads two agents at once; apt refuses a second command while its lock is held.
+    const read = await Promise.all([apt.latest(pkg('one'), '/termux/usr/bin/one', 0, 1000, run), apt.latest(pkg('two'), '/termux/usr/bin/two', 0, 1000, run)]);
+    expect(read).toEqual(['1.4.0', '1.4.0']);
+    expect(most).toBe(1);
+    expect(calls).toEqual(['update', 'policy one', 'policy two']);
+    calls.length = 0;
+    await Promise.all([apt.upgrade(pkg('one'), '/termux/usr/bin/one', 1000, 1000, run), apt.upgrade(pkg('two'), '/termux/usr/bin/two', 1000, 1000, run)]);
+    expect(most).toBe(1);
+    expect(calls.filter((call) => call.startsWith('install')).length).toBe(2);
   });
 
   test.skipIf(process.platform === 'win32')('a copy Termux packaged is read and updated through its apt, not its own updater', async () => {

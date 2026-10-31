@@ -133,16 +133,37 @@ type AptRun = (args: string[], timeoutMs: number, via: Via) => Promise<string>;
 
 /**
  * Reads and upgrades prefix packages, each run traced as the agent's through
- * `run`. It remembers when it fetched each prefix's index, so the read right
- * after an upgrade does not fetch it again.
+ * `run`. apt holds one lock per prefix and refuses a second command while it
+ * is taken, so the runs of one prefix go one at a time: a check reads two
+ * agents at once, and two of them can share Termux. It remembers when it
+ * fetched each prefix's index, so the read right after an upgrade, or the
+ * second agent of the same check, does not fetch it again.
  */
 export class AptPackages {
   readonly #fetchedAt = new Map<string, number>();
+  readonly #queues = new Map<string, Promise<unknown>>();
 
   /** The upstream version apt would install, its index fetched again unless that was within `maxAgeMs`. */
-  async latest(pkg: PrefixPackage, program: string, maxAgeMs: number, timeoutMs: number, run: AptRun): Promise<string> {
+  latest(pkg: PrefixPackage, program: string, maxAgeMs: number, timeoutMs: number, run: AptRun): Promise<string> {
+    const asked = Date.now();
+    return this.#serial(pkg.prefix, () => this.#latest(pkg, program, asked, maxAgeMs, timeoutMs, run));
+  }
+
+  /** Upgrades that package alone, never the rest of the prefix, and returns what apt printed. */
+  upgrade(pkg: PrefixPackage, program: string, timeoutMs: number, upgradeTimeoutMs: number, run: AptRun): Promise<string> {
+    const asked = Date.now();
+    return this.#serial(pkg.prefix, async () => {
+      // The index a check read may be hours old, and a mirror drops the files an old index names.
+      await this.#latest(pkg, program, asked, 0, timeoutMs, run);
+      const args = ['install', '--only-upgrade', '-y', ...APT_KEEP_CONFIG, pkg.name];
+      return run(args, upgradeTimeoutMs, aptVia(program, pkg.aptGet, args));
+    });
+  }
+
+  async #latest(pkg: PrefixPackage, program: string, asked: number, maxAgeMs: number, timeoutMs: number, run: AptRun): Promise<string> {
     const fetchedAt = this.#fetchedAt.get(pkg.prefix);
-    if (fetchedAt === undefined || Date.now() - fetchedAt > maxAgeMs) {
+    // An index fetched since this was asked is as fresh as one fetched now.
+    if (fetchedAt === undefined || (fetchedAt < asked && Date.now() - fetchedAt > maxAgeMs)) {
       const failure = indexFailure(await run(['update'], INDEX_TIMEOUT_MS, aptVia(program, pkg.aptGet, ['update'])));
       if (failure !== null) throw new Error(`\`apt-get update\` could not read the package index: ${failure}`);
       this.#fetchedAt.set(pkg.prefix, Date.now());
@@ -154,11 +175,13 @@ export class AptPackages {
     return latest;
   }
 
-  /** Upgrades that package alone, never the rest of the prefix, and returns what apt printed. */
-  async upgrade(pkg: PrefixPackage, program: string, timeoutMs: number, upgradeTimeoutMs: number, run: AptRun): Promise<string> {
-    // The index a check read may be hours old, and a mirror drops the files an old index names.
-    await this.latest(pkg, program, 0, timeoutMs, run);
-    const args = ['install', '--only-upgrade', '-y', ...APT_KEEP_CONFIG, pkg.name];
-    return run(args, upgradeTimeoutMs, aptVia(program, pkg.aptGet, args));
+  /** Runs `job` once every earlier job of that prefix has settled, failed ones included. */
+  #serial<T>(prefix: string, job: () => Promise<T>): Promise<T> {
+    const next = (this.#queues.get(prefix) ?? Promise.resolve()).catch(() => {}).then(job);
+    this.#queues.set(prefix, next);
+    void next.finally(() => {
+      if (this.#queues.get(prefix) === next) this.#queues.delete(prefix);
+    }).catch(() => {});
+    return next;
   }
 }
