@@ -27,7 +27,6 @@ import { browserRun } from './browser-run.ts';
 import { browserRecipe } from './browser-recipe.ts';
 import { deviceCommand } from './device-cli.ts';
 import { WINDOW_REQUEST_TIMEOUT_MS, windowCommand } from './window-cli.ts';
-import { desktopCommand } from './desktop-cli.ts';
 import { secretCommand } from './secret-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import type { RpcParams } from '@boite/contracts';
@@ -467,7 +466,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await windowCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
-    desktop: async () => childOutput(await desktopCommand(rest, io, client, threadId), parsed.json, io, print),
+    desktop: async () => childOutput(await (await import('./desktop-cli.ts')).desktopCommand(rest, io, client, threadId), parsed.json, io, print),
     secret: async () => childOutput(await secretCommand(rest, io, client, threadId), parsed.json, io, print),
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
     // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
