@@ -18,12 +18,15 @@ registerServiceWorker();
 // The stored column width, before the first frame lays the chat out.
 applyChatWidth(readChatWidth());
 
-const quotas = new URLSearchParams(location.search).get('view') === 'quotas';
+const view = new URLSearchParams(location.search).get('view');
+const quotas = view === 'quotas';
+// The box `boite window point` shows, in a transparent window of the shell's (`pointer_window.rs`).
+const pointer = view === 'pointer';
 
 // The stored interface zoom, asked of the shell beside the language: the
 // window stays hidden until both have landed, so it never shows at 100 % and
 // jumps. The quota popup is its own webview and keeps its size.
-const zoomed = quotas ? Promise.resolve() : startZoom();
+const zoomed = quotas || pointer ? Promise.resolve() : startZoom();
 
 // The language before the first frame, so nothing is drawn in English and
 // swapped a tick later, and `<html lang>` is right for the first paint. Every
@@ -32,9 +35,9 @@ const zoomed = quotas ? Promise.resolve() : startZoom();
 // entry into twice as many startup files. The quota window is a chunk of its own.
 function boot(): Promise<void> {
   return startLocale().then(async () => {
-    mount(quotas ? (await import('./QuotaApp.svelte')).default : App, { target });
+    mount(pointer ? (await import('./PointerApp.svelte')).default : quotas ? (await import('./QuotaApp.svelte')).default : App, { target });
     // Edge scrollbars and load on press follow their switches for the page's life.
-    if (!quotas) void import('./lib/interactions').then(({ startInteractions }) => startInteractions());
+    if (!quotas && !pointer) void import('./lib/interactions').then(({ startInteractions }) => startInteractions());
     revealShell();
   });
 }
@@ -52,7 +55,7 @@ boot().catch(() => {
  * mount is laid out, the second when it has reached the screen.
  */
 function revealShell(): void {
-  if (quotas || window.__TAURI_INTERNALS__ === undefined) return;
+  if (quotas || pointer || window.__TAURI_INTERNALS__ === undefined) return;
   void zoomed.then(() => {
     let sent = false;
     const ready = () => {

@@ -239,6 +239,15 @@ the window id. An app the project has not allowed waits up to 10 minutes for
 the owner's consent card, so window requests time out after 11 minutes. Details
 and limits are in [windows.md](windows.md).
 
+On Windows, the same command guides the user instead of acting for them.
+`read <target>` lists the window's enabled controls, one line each:
+`#3 Button "Play" 912,58 32x24`. `point 3 --label "Press Play"` draws a
+click-through box with that label above every window; `point <target> --name
+<name>` finds the control itself and `point <target> --at x,y,w,h` takes a
+rectangle for an app with no accessibility tree. `wait-click` returns once the
+user clicks inside the box, and `unpoint` takes the box away. See
+[guiding the user](windows.md#guiding-the-user).
+
 ## Pull requests linked to a conversation
 
 `boite pr link <url>` verifies a GitHub pull request and saves its link in the

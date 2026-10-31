@@ -783,6 +783,16 @@ export function startServer(options: ServerOptions): RunningServer {
       }
       return delivered;
     },
+    pointer(box): number {
+      // Only the desktop app of this machine draws on its screen: a phone, a browser tab, a
+      // shell following this core from another computer or a plugin has no screen of this one's.
+      let delivered = 0;
+      for (const connection of connections) {
+        if (!connection.authenticated || connection.identity.principal !== 'owner' || connection.clientName !== 'shell' || connection.remote) continue;
+        try { connection.sendEvent('windows.pointer', box); delivered += 1; } catch { /* closing */ }
+      }
+      return delivered;
+    },
   };
 
   const broadcast = (name: RpcEventName, payload: EventPayload): void => {

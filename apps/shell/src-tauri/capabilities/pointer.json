@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pointer",
+  "description": "A pointer window may read the box it draws and hear when it moves. It connects to no core and invokes nothing else.",
+  "webviews": ["pointer-*"],
+  "permissions": ["allow-pointer-ui", "core:event:default"]
+}

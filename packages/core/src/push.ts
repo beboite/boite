@@ -128,7 +128,7 @@ export class PushStore {
         // A capture waiting on the owner's consent card, which no question or permission event announces.
         const message = payload as RpcEvents['message.started'];
         const consent = message.parts.find(part => part.type === 'window_consent');
-        if (consent?.type === 'window_consent') this.notify(message.threadId, { body: `Wants to capture ${consent.process}`, kind: 'approvals' }, `request-${consent.requestId}`, true);
+        if (consent?.type === 'window_consent') this.notify(message.threadId, { body: `Wants to ${consent.kind === 'read' ? 'read' : 'capture'} ${consent.process}`, kind: 'approvals' }, `request-${consent.requestId}`, true);
       } else if (name === 'secret.requested') {
         // Only that the user is needed: the push service is a third party, and a value never comes this way.
         const request = payload as RpcEvents['secret.requested'];

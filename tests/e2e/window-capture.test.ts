@@ -80,4 +80,18 @@ for (const [label, viewport] of [['desktop', DESKTOP], ['phone', PHONE]] as cons
     await reveal('#settings-window-exclusions');
     await capture(`exclusions-${label}.png`);
   }, 90_000);
+
+  test(`a request to read an app's controls says so on its card, and the read goes on once allowed (${label})`, async () => {
+    await openTrace(viewport);
+    await page.evaluate(`void ${STORE}.client.call('windows.read', { threadId: 't-trace', target: { process: 'blender' } }).then(read => { window.__guideRead = read; })`);
+    const card = `[...document.querySelectorAll('[data-testid="window-consent"][data-state="pending"]')].find(node => node.textContent.includes('wants to read blender.exe'))`;
+    await page.waitFor(`!!${card}`, 10000);
+    await page.evaluate(`${card}.scrollIntoView({ block: 'center' })`);
+    expect(await page.evaluate(`${card}.textContent`)).toContain('The names of its buttons and menus, to show you where to click');
+    expect(await page.evaluate(`${card}.textContent`)).toContain('The read waits until');
+    await capture(`consent-read-${label}.png`);
+    await page.evaluate(`${card}.querySelector('[data-testid="window-consent-once"]').click()`);
+    await page.waitFor(`window.__guideRead?.windowId === '198722'`, 10000);
+    expect(await page.evaluate(`window.__guideRead.controls.map(control => control.name)`)).toContain('Render');
+  }, 90_000);
 }

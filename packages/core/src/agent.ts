@@ -230,6 +230,10 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('windows.consent', (params, { connection }) => core.windows.consent(params, connection));
   core.router.register('windows.allowlist', params => core.windows.allowlist(params));
   core.router.register('windows.revoke', params => core.windows.revoke(params));
+  core.router.register('windows.read', (params, { connection }) => core.windows.read(params, connection));
+  core.router.register('windows.point', (params, { connection }) => core.windows.point(params, connection));
+  core.router.register('windows.waitClick', (params, { connection }) => core.windows.waitClick(params, connection));
+  core.router.register('windows.unpoint', (params, { connection }) => core.windows.unpoint(params, connection));
   core.router.register('browser.remoteWatch', (params, { connection }) => core.browser.remoteWatch(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', (params, { signal }) => core.browser.command(params, signal));

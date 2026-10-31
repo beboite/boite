@@ -24,7 +24,8 @@
 
   let busy = $state(false), error = $state(''), now = $state(Date.now());
   const outcome = $derived(part.answer ?? (now >= part.expiresAt ? 'expired' : null));
-  const what = $derived(part.kind === 'clip' ? s.clip : part.kind === 'stream' ? s.stream : s.screenshot);
+  const what = $derived(part.kind === 'clip' ? s.clip : part.kind === 'stream' ? s.stream : part.kind === 'read' ? s.read : s.screenshot);
+  const asks = $derived(fill(part.kind === 'read' ? s.asksRead : s.asks, { agent, process: part.process }));
   const verdict = $derived(outcome === 'once' ? s.allowedOnce : outcome === 'always' ? s.allowedAlways : outcome === 'refuse' ? s.refused : s.expired);
 
   // The card turns itself over when the wait ends, without waiting for the core's word.
@@ -51,16 +52,16 @@
     <span class="verdict ui-label" data-testid="window-consent-verdict">{fill(verdict, { process: part.process })}</span>
   </div>
 {:else}
-  <div class="consent" data-testid="window-consent" data-state="pending" role="group" aria-label={fill(s.asks, { agent, process: part.process })}>
+  <div class="consent" data-testid="window-consent" data-state="pending" role="group" aria-label={asks}>
     <div class="head">
       <span class="glyph"><AppWindow size={15} strokeWidth={1.75} /></span>
-      <span class="reason" data-testid="window-consent-asks">{fill(s.asks, { agent, process: part.process })}</span>
+      <span class="reason" data-testid="window-consent-asks">{asks}</span>
     </div>
     <div class="delta">
       <span>{what}</span>
       <code class="path" title={part.path}>{part.path}</code>
     </div>
-    <p class="hint">{fill(s.waits, { time: dayClock(part.expiresAt) })}</p>
+    <p class="hint">{fill(part.kind === 'read' ? s.readWaits : s.waits, { time: dayClock(part.expiresAt) })}</p>
     {#if error}<p class="error" role="status" data-testid="window-consent-error">{error}</p>{/if}
     <div class="actions">
       <button type="button" class="primary" data-testid="window-consent-once" disabled={busy} onmousedown={keepFocus} onclick={() => answer('once')}><span class="ui-label">{s.once}</span></button>

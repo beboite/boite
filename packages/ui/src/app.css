@@ -184,6 +184,9 @@
   --color-accent: oklch(68% 0.19 var(--accent-hue));
   --color-accent-soft: color-mix(in oklch, var(--color-accent) 18%, transparent);
   --color-accent-ink: #101013;
+  /* The on-screen pointer's hairlines: dark outside the ring and light inside, so it reads over any app. */
+  --pointer-halo: rgb(0 0 0 / 0.55);
+  --pointer-inner: rgb(255 255 255 / 0.7);
   --color-reasoning: var(--color-accent);
   /* What the agent looking after a project sends: the accent turned away round the wheel, so its letters never read as the user's own. */
   --color-resident: oklch(66% 0.15 calc(var(--accent-hue) + 150));

@@ -6,7 +6,7 @@ import { PullRequestWatches, type WatchTiming } from './pull-request-watch.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
-import type { Channel, CoreInfo, CoreLogContext, ThreadId, UiRevealTarget } from '@boite/contracts';
+import type { Channel, CoreInfo, CoreLogContext, ThreadId, UiRevealTarget, WindowPointerBox } from '@boite/contracts';
 import { CORE_VERSION } from './version.ts';
 import { AccountStore } from './accounts.ts';
 import { AgentStore } from './agents/store.ts';
@@ -90,6 +90,8 @@ export interface SubscriptionSink {
   closeAgents(threadId: ThreadId): void;
   /** Sends `ui.reveal` to every owner connection; returns how many it reached. */
   reveal(target: UiRevealTarget): number;
+  /** Sends `windows.pointer` to the desktop apps of this machine; returns how many it reached. */
+  pointer(box: WindowPointerBox): number;
 }
 
 export interface CoreOptions {
@@ -237,6 +239,7 @@ export class Core {
     closeSession: () => undefined,
     closeAgents: () => undefined,
     reveal: () => 0,
+    pointer: () => 0,
   };
 
   /** The server answers on one more address when a group asks; a core with no server answers on none. */

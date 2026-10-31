@@ -1,11 +1,15 @@
 /**
  * `boite window`: an agent's captures of the machine's desktop windows (a
- * Unity editor, a game, Blender) and the conversation's Window panel. The core
- * captures and writes the PNG; an app the project does not allow waits for the
- * owner's answer on a consent card. See docs/windows.md.
+ * Unity editor, a game, Blender), the conversation's Window panel, and the
+ * on-screen guide: a window's controls as text and a box showing the user where
+ * to click. The core captures, reads and draws; an app the project does not
+ * allow waits for the owner's answer on a consent card. See docs/windows.md.
  */
 import { resolve } from 'node:path';
-import { parseWindowCrop, WINDOW_CLIP_LIMITS, WINDOW_SHOT_MAX, type DesktopWindow, type WindowShot, type WindowTarget } from '@boite/contracts';
+import {
+  parseWindowCrop, WINDOW_CLIP_LIMITS, WINDOW_POINT_LABEL_MAX, WINDOW_POINT_SECONDS, WINDOW_READ_LIMIT, WINDOW_SHOT_MAX,
+  type DesktopWindow, type RpcParams, type WindowControl, type WindowPointer, type WindowShot, type WindowTarget,
+} from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 import { Usage } from './cli-args.ts';
@@ -26,8 +30,28 @@ export const WINDOW_HELP = `boite window <command> [args] [--json]
                                  (2 by default), as one PNG
   watch <target>                 show the window live in the user's Window panel
   close                          empty the Window panel
+  read <target> [--filter <text>] [--limit <n>]
+                                 the window's enabled controls on screen, one line
+                                 each: #id, type, "name", x,y wxh in window pixels.
+                                 Up to ${WINDOW_READ_LIMIT.default} by default, ${WINDOW_READ_LIMIT.max} at most
+  point <id> [--label <text>] [--seconds <s>]
+  point <target> --name <name> [--label <text>] [--seconds <s>]
+  point <target> --at x,y,w,h [--label <text>] [--seconds <s>]
+                                 draw a box with a label (${WINDOW_POINT_LABEL_MAX} characters at most) above
+                                 every window to show the user what to click: a
+                                 control of the last read (3 for #3), the one control with that
+                                 name, or a rectangle in pixels or fractions as --crop
+                                 takes it. Click-through, one box per conversation,
+                                 gone after ${WINDOW_POINT_SECONDS.default} s by default (${WINDOW_POINT_SECONDS.max} at most)
+  wait-click [--timeout <s>]     wait until the user clicks inside the box, then take
+                                 it away; ${WINDOW_POINT_SECONDS.default} s by default
+  unpoint                        take the box away
 <target> is --id <id>, --process <name> or --title <part of the title>. Several
-matches are refused with the candidates: pick one by --id.
+matches are refused with the candidates: pick one by --id. The taskbar is the
+explorer.exe window with no title.
+To teach the user an app, guide instead of acting: read, point, wait-click, then
+read again for the next step. An app with no accessibility tree (a game, a Unity
+scene view) lists few controls: take a small screenshot and point --at it.
 An app the project has not allowed waits up to 10 minutes for the owner's answer
 on a consent card. Password managers and the sign-in screen are never captured;
 a minimized window is refused (restore it first: boite never restores or focuses).
@@ -66,6 +90,19 @@ function target(rest: string[]): WindowTarget {
 
 function done(rest: string[]): void {
   if (rest.length > 0) throw new Usage(`window does not take ${rest[0]}\n${WINDOW_HELP}`);
+}
+
+function controlLine(control: WindowControl): string {
+  return `#${control.id} ${control.type} "${control.name}" ${control.x},${control.y} ${control.width}x${control.height}`;
+}
+
+function pointerLine(pointer: WindowPointer): string {
+  const what = pointer.control ? `${pointer.control.type} "${pointer.control.name}"` : `${pointer.x},${pointer.y} ${pointer.width}x${pointer.height}`;
+  const label = pointer.label ? ` with "${pointer.label}"` : '';
+  const line = `pointing at ${what} of window ${pointer.windowId} (${pointer.process})${label} for ${Math.round((pointer.expiresAt - Date.now()) / 1000)} s`;
+  // The Start menu and the system's other flyouts lie above every app's window, the box included.
+  return pointer.behind ? `${line}
+the system draws this window above the box, so the user cannot see it: say where to click; wait-click still works` : line;
 }
 
 function windowLine(window: DesktopWindow): string {
@@ -139,6 +176,53 @@ export async function windowCommand(args: string[], io: CliIo, client: CoreClien
       done(rest);
       const { closed } = await client.call('windows.close', { threadId });
       return { lines: [closed ? 'Window panel closed' : 'the Window panel was already empty'], value: { closed } };
+    }
+    case 'read': {
+      const filter = flag(rest, '--filter');
+      const limit = number(rest, '--limit', true);
+      const named = target(rest);
+      done(rest);
+      const read = await client.call('windows.read', { threadId, target: named, ...(filter === undefined ? {} : { filter }), ...(limit === undefined ? {} : { limit }) });
+      const lines = [`window: ${read.windowId} (${read.process})`, ...read.controls.map(controlLine)];
+      if (read.total === 0) lines.push('controls: none on screen; for an app with no accessibility tree, take a screenshot and point --at');
+      else if (read.total > read.controls.length) lines.push(`${read.total - read.controls.length} more: narrow with --filter or raise --limit`);
+      return { lines, value: read };
+    }
+    case 'point': {
+      const label = flag(rest, '--label');
+      const seconds = number(rest, '--seconds', false);
+      const name = flag(rest, '--name');
+      const atText = flag(rest, '--at');
+      const at = atText === undefined ? undefined : parseWindowCrop(atText);
+      if (at === null) throw new Usage('window point --at takes x,y,w,h in pixels, or in fractions from 0 to 1');
+      const common = { threadId, ...(label === undefined ? {} : { label }), ...(seconds === undefined ? {} : { seconds }) };
+      const id = /^#?\d+$/.test(rest[0] ?? '') ? Number(rest.shift()!.replace('#', '')) : undefined;
+      let params: RpcParams<'windows.point'>;
+      if (id !== undefined) {
+        if (name !== undefined || at !== undefined) throw new Usage('window point takes an id such as 3, or a target with --name or --at');
+        params = { ...common, control: id };
+      } else {
+        if ((name === undefined) === (at === undefined)) throw new Usage('window point needs an id from window read (3 for #3), or a target with exactly one of --name or --at');
+        params = { ...common, target: target(rest), ...(name === undefined ? { at: at! } : { name }) };
+      }
+      done(rest);
+      const { pointer } = await client.call('windows.point', params);
+      return { lines: [pointerLine(pointer)], value: { pointer } };
+    }
+    case 'wait-click': {
+      const timeoutSeconds = number(rest, '--timeout', false);
+      done(rest);
+      const result = await client.call('windows.waitClick', { threadId, ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }) });
+      const line = result.clicked ? 'clicked: the user pressed inside the box, which is gone now'
+        : result.reason === 'timeout' ? 'not clicked in time: the box is still shown'
+        : result.reason === 'gone' ? 'the window closed: the box is gone'
+        : 'the box was taken away before a click';
+      return { lines: [line], value: result };
+    }
+    case 'unpoint': {
+      done(rest);
+      const { cleared } = await client.call('windows.unpoint', { threadId });
+      return { lines: [cleared ? 'box taken away' : 'no box was shown'], value: { cleared } };
     }
     default: throw new Usage(`unknown window command ${command}\n${WINDOW_HELP}`);
   }

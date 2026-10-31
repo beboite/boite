@@ -26,6 +26,9 @@ commands.allow = [
   "app_update_install_quietly",
   "app_update_cancel_install",
   "quota_window",
+  "pointer_show",
+  "pointer_hide",
+  "pointer_layout",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -47,6 +50,11 @@ commands.allow = [
   "browser_screencast_start",
   "browser_screencast_stop",
 ]
+
+[[permission]]
+identifier = "allow-pointer-ui"
+description = "Allows a pointer window to read the box it draws."
+commands.allow = ["pointer_layout"]
 
 [[permission]]
 identifier = "allow-quota-ui"

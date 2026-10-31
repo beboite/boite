@@ -356,6 +356,10 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['windows.clip', 'a contact sheet of a few seconds of such a window, on the same terms as windows.screenshot'],
   ['windows.watch', 'showing such a window in its own conversation\'s Window panel; nothing is captured until the person watching presses Show'],
   ['windows.close', 'emptying its own conversation\'s Window panel'],
+  ['windows.read', 'the names, types and places of the controls of such a window, on the same terms as windows.screenshot: text a screenshot of it would show'],
+  ['windows.point', 'one click-through box with a label above a control or part of such a window, so the person sees where to click; it sends the window nothing and takes no focus'],
+  ['windows.waitClick', 'waiting until the person clicks inside its own conversation\'s box; it learns only that the click happened'],
+  ['windows.unpoint', 'taking its own conversation\'s box off the screen'],
   // windows.frame stays with the owner and paired devices: the stream is for the person watching, a screenshot gives
   // the agent the window. windows.consent, windows.allowlist and windows.revoke are the owner's: the agent asks, never answers.
   // devices.stream and devices.clipboard stay with the owner and paired devices: the video is for the person

@@ -128,6 +128,43 @@ export interface WindowCapture {
   frames(id: string): WindowFrames;
 }
 
+/** A rectangle of the screen in physical pixels: the virtual screen's, so it can lie on any monitor. */
+export interface ScreenRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** One control of a window a person can act on, as the OS accessibility tree names it. */
+export interface NativeControl {
+  /** UI Automation's control type in English: `Button`, `MenuItem`, `Edit`. */
+  type: string;
+  name: string;
+  /** The app's own identifier for the control, '' when it gives none. */
+  automationId: string;
+  rect: ScreenRect;
+}
+
+/**
+ * The OS half of `boite window read`, `point` and `wait-click`: the controls
+ * of a window, where it lies, and the state of the mouse. The box itself is the
+ * desktop app's (`windows.pointer`). Like `WindowCapture`, never focuses,
+ * raises or sends input to the window it reads. Loaded on first use.
+ */
+export interface WindowGuide {
+  /** At most `limit` enabled controls on screen, in the tree's order, and how many there were. */
+  controls(id: string, limit: number): Promise<{ controls: NativeControl[]; total: number }>;
+  /**
+   * Where the window lies, or null once it is gone. Throws nothing. `above`:
+   * the system keeps the window in a layer over every app's window, as it does
+   * the Start menu, so a box drawn on it stays behind it.
+   */
+  frame(id: string): { rect: ScreenRect; minimized: boolean; above: boolean } | null;
+  /** The primary button's state and the cursor, in physical pixels. */
+  mouse(): { pressed: boolean; x: number; y: number };
+}
+
 /** Delete-only access to vaults used by older Boite releases. Never read or store a value. */
 export interface SecretVault {
   readonly kind: 'dpapi' | 'keychain' | 'libsecret' | 'memory';
@@ -166,6 +203,8 @@ export interface ProcessPlatform {
    * Wayland, no display, macOS. Absent reads as unavailable.
    */
   windowCapture?(): Promise<WindowCapture | { unavailable: string }>;
+  /** The controls of a window and an on-screen pointer, loaded on first call, or why this machine has none. Windows only. */
+  windowGuide?(): Promise<WindowGuide | { unavailable: string }>;
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
   /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
   release(): Promise<void>;
