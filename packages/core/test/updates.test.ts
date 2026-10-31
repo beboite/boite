@@ -10,6 +10,7 @@ import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { npmInstallOf } from '../src/providers/npm.ts';
 import { resolveCommand } from '../src/providers/resolve.ts';
+import { AptPackages } from '../src/providers/termux.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import type { ServerUpdatePlatform } from '../src/server-update/types.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
@@ -89,6 +90,39 @@ function npmLayout(dataDir: string): { prefix: string; scope: string; link: stri
 
 /** Unix permissions decide the writability tests; root writes through them. */
 const unixUser = process.platform !== 'win32' && process.getuid?.() !== 0;
+
+/**
+ * Termux's layout under `<dataDir>/termux/usr`: the fixture installed by the
+ * package `fake-agent`, as dpkg lists it, and an apt whose repository holds
+ * 1.4.0. Each apt run is written to `log`; `apt-get install` installs 1.4.0.
+ */
+function termuxLayout(dataDir: string): { program: string; log: string; offline: string } {
+  const prefix = join(dataDir, 'termux', 'usr');
+  const bin = join(prefix, 'bin');
+  const info = join(prefix, 'var', 'lib', 'dpkg', 'info');
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(info, { recursive: true });
+  const log = join(dataDir, 'apt.log');
+  const state = join(dataDir, 'fake-version.txt');
+  const offline = join(dataDir, 'offline');
+  const script = (name: string, body: string): string => {
+    const path = join(bin, name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const program = script('fake-agent', `exec '${process.execPath}' "$@"`);
+  // Offline, apt-get update warns, keeps the old index and still exits with zero.
+  script('apt-get', [
+    `if [ "$1" = install ]; then echo "apt-get $* $DEBIAN_FRONTEND" >> '${log}'; printf 1.4.0 > '${state}'; exit 0; fi`,
+    `echo "apt-get $*" >> '${log}'`,
+    `if [ -e '${offline}' ]; then echo "W: Failed to fetch https://packages-cf.termux.dev/apt/termux-main/dists/stable/InRelease  Something wicked happened resolving 'packages-cf.termux.dev:https' (7 - No address associated with hostname)" >&2; echo 'W: Some index files failed to download. They have been ignored, or old ones used instead.' >&2; fi`,
+  ].join('\n'));
+  script('apt-cache', `echo "apt-cache $*" >> '${log}'\nprintf 'fake-agent:\\n  Installed: 1.0.0\\n  Candidate: 1:1.4.0-2\\n  Version table:\\n'`);
+  writeFileSync(join(info, 'other.list'), `/.\n${prefix}\n${bin}\n${join(bin, 'other')}\n`);
+  writeFileSync(join(info, 'fake-agent.list'), `/.\n${prefix}\n${bin}\n${realpathSync(program)}\n`);
+  return { program, log, offline };
+}
 
 async function start(
   source: 'command' | 'npm' | 'none',
@@ -386,6 +420,65 @@ describe('harness updates', () => {
       process.env['PATH'] = saved;
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('two agents of one Termux prefix run apt one at a time, and one check fetches its index once', async () => {
+    const apt = new AptPackages();
+    const pkg = (name: string) => ({ prefix: '/termux/usr', name, aptGet: '/termux/usr/bin/apt-get', aptCache: '/termux/usr/bin/apt-cache' });
+    let active = 0, most = 0;
+    const calls: string[] = [];
+    const run = async (args: string[]): Promise<string> => {
+      most = Math.max(most, ++active);
+      calls.push(args.join(' '));
+      await Bun.sleep(5);
+      active -= 1;
+      return args[0] === 'policy' ? 'x:\n  Installed: 1.0.0\n  Candidate: 1.4.0-1\n' : '';
+    };
+    // A check reads two agents at once; apt refuses a second command while its lock is held.
+    const read = await Promise.all([apt.latest(pkg('one'), '/termux/usr/bin/one', 0, 1000, run), apt.latest(pkg('two'), '/termux/usr/bin/two', 0, 1000, run)]);
+    expect(read).toEqual(['1.4.0', '1.4.0']);
+    expect(most).toBe(1);
+    expect(calls).toEqual(['update', 'policy one', 'policy two']);
+    calls.length = 0;
+    await Promise.all([apt.upgrade(pkg('one'), '/termux/usr/bin/one', 1000, 1000, run), apt.upgrade(pkg('two'), '/termux/usr/bin/two', 1000, 1000, run)]);
+    expect(most).toBe(1);
+    expect(calls.filter((call) => call.startsWith('install')).length).toBe(2);
+  });
+
+  test.skipIf(process.platform === 'win32')('a copy Termux packaged is read and updated through its apt, not its own updater', async () => {
+    let layout!: ReturnType<typeof termuxLayout>;
+    // `update-launched` fails as `codex update` does on Termux's own package.
+    const { client, state } = await start('npm', 'update-launched', undefined, (dataDir) => {
+      layout = termuxLayout(dataDir);
+      return { kind: 'file', value: layout.program };
+    });
+    // The repository trails npm: its release is the one offered.
+    harness!.core.updates.npmLatest = async () => {
+      throw new Error('the npm registry is not what installed this copy');
+    };
+    // An index apt could not fetch is no answer: the old one would say nothing is newer.
+    writeFileSync(layout.offline, '');
+    const offline = only(await client.call('providers.updates', { refresh: true }));
+    expect(offline.state).toBe('failed');
+    expect(offline.message).toContain("could not read the package index: W: Failed to fetch");
+    rmSync(layout.offline);
+    expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ route: 'self', current: '1.0.0', latest: '1.4.0', pending: true, state: 'idle' });
+
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state !== 'updating' && list[0]?.state !== 'checking' && list[0]?.checkedAt !== null, 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    expect(only(await changed)).toMatchObject({ state: 'idle', current: '1.4.0', latest: '1.4.0', pending: false, message: null });
+    expect(readFileSync(state, 'utf8')).toBe('1.4.0');
+    const calls = readFileSync(layout.log, 'utf8').trim().split('\n');
+    expect(calls).toEqual([
+      'apt-get update',
+      'apt-get update',
+      'apt-cache policy fake-agent',
+      'apt-get update',
+      'apt-cache policy fake-agent',
+      'apt-get install --only-upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold fake-agent noninteractive',
+      'apt-cache policy fake-agent',
+    ]);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
   test.skipIf(!unixUser)('an npm install is updated into its own prefix, and one this user cannot write is refused before its updater runs', async () => {
