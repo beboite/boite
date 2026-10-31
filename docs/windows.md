@@ -5,6 +5,8 @@ that runs the core, such as a Unity editor, a game or Blender. It can save the
 window as a PNG or as a contact sheet of a few seconds, or show the window live
 in the conversation's Window panel. iOS Simulators and Android emulators go
 through [`boite device`](devices.md) instead: that command can also drive them.
+An app the agent itself should run and drive goes on a
+[virtual desktop](desktop.md).
 
 Capture is read-only. Boite never restores, raises or focuses a window, never
 sends it input and never draws the cursor.

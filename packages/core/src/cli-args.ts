@@ -71,6 +71,8 @@ const OWNED: { owns: (positional: string[]) => boolean; help: boolean; text?: (p
   { owns: ([command]) => command === 'logs' || command === 'issue', help: true },
   // window-cli.ts: its --title names a window, not a thread.
   { owns: ([command, action]) => command === 'window' && action !== undefined, help: true },
+  // desktop-cli.ts: after its command every word is its own, `run`'s program and agent-desktop's flags alike.
+  { owns: ([command, action]) => command === 'desktop' && action !== undefined, help: false, text: positional => positional.length >= 2, terminator: true },
   // view-cli.ts: the script and scheme flags of `view check`.
   { owns: ([command, action]) => command === 'view' && action === 'check', help: true },
   // secret-cli.ts; after `--` every word is the child command's.

@@ -61,7 +61,8 @@ export function agentGuide(asyncQuestions: boolean, logAccess = false, skills: r
       : `\`boite help\` lists commands; \`boite where\` shows cwd/project/branch. Stay in the checkout. \`boite browser|device help\`: agent-browser/emulators; batch browser steps: \`&&\` or \`boite browser run -\`. ${pullRequests}`,
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel. `boite preview <file.html>` previews HTML/assets; `boite attach <file>` sends files (512 MB max).',
     'Inline `path:line` opens this checkout\'s files. Use `boite attach` for media across machines.',
-    '`boite window help`: desktop windows (Unity, a game) as PNG; emulators: `boite device`. A picture costs ~w×h/750 tokens: use `--max`/`--crop`.',
+    // Only Linux has a virtual desktop (docs/desktop.md): elsewhere the line would point at a refusal.
+    `\`boite window help\`: desktop windows (Unity, a game) as PNG; emulators: \`boite device\`${process.platform === 'linux' ? '; run and click GUI apps: `boite desktop help`' : ''}. A picture costs ~w×h/750 tokens: use \`--max\`/\`--crop\`.`,
     CHAT_VISUALS,
     VIEW_GUIDE_LINE,
     ...(asyncQuestions ? ['`boite ask [--open <url>] "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval. Login wall: `--open <url>`, the site and why, options "Signed in" Skip; never in chat.'] : []),

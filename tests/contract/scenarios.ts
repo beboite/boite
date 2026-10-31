@@ -344,6 +344,17 @@ export const SCENARIOS: Record<string, Scenario> = {
     await refusedWith(env.call('browser.remoteFrame', { threadId }), RpcErrorCode.Refused);
     await refusedWith(env.call('browser.remoteInput', { threadId, frameId: 'none', input: { kind: 'key', key: 'Enter' } }), RpcErrorCode.Refused);
   },
+  'the virtual desktop refuses bad input before starting anything and has nothing to stop': async env => {
+    const setup = await echo(env);
+    const { id: threadId } = await thread(env, setup);
+    // Nothing here starts a desktop: every call is refused or answered before one would.
+    const status = await env.call('desktop.status', { threadId });
+    same([status.session, typeof status.support.available], [null, 'boolean'], 'a conversation with no desktop');
+    await refusedWith(env.call('desktop.start', { threadId, width: 10 }), RpcErrorCode.InvalidParams);
+    await refusedWith(env.call('desktop.run', { threadId, command: [], cwd: setup.projectPath }), RpcErrorCode.InvalidParams);
+    await refusedWith(env.call('desktop.run', { threadId, command: ['true'], cwd: 'relative' }), RpcErrorCode.InvalidParams);
+    same(await env.call('desktop.stop', { threadId }), { stopped: false }, 'a stop with no desktop');
+  },
   'YOLO keeps permission requests out of the core and fake conversation': async env => {
     const setup = await echo(env);
     const created = await thread(env, setup);
