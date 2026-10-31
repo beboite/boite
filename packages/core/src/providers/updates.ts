@@ -13,6 +13,7 @@ import { profileFor, resolveCommand, type ResolvedCommand } from './resolve.ts';
 import { BACKGROUND_LIMIT_MS, backgroundHolders, resumeCut, withCut } from './update-background.ts';
 import { readReadings, readSkips, writeReadings, writeSkips, type Entry } from './update-readings.ts';
 import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
+import { AptPackages, prefixPackageOf, type Via } from './termux.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
 import { compareVersions, INSTALL_LATEST_MAX_AGE_MS, upToDate } from './install-latest.ts';
@@ -160,6 +161,7 @@ export class HarnessUpdates {
   npmCli: () => NpmCommand | null = npmCli;
   only: ReadonlySet<ProviderId> | null = null;
   versionTimeoutMs = VERSION_TIMEOUT_MS;
+  readonly #apt = new AptPackages();
   pauseLimitMs = PAUSE_LIMIT_MS;
   backgroundLimitMs = BACKGROUND_LIMIT_MS;
 
@@ -503,7 +505,10 @@ export class HarnessUpdates {
     const current = readVersion(await this.#run(target, spec.versionArgs ?? ['--version'], this.versionTimeoutMs));
     if (current === null) throw new Error(`${target.descriptor.name} printed no version`);
     let latest: string | null = null;
-    if (spec.latestNpm !== undefined) latest = await this.npmLatest(spec.latestNpm);
+    // A copy a prefix package manager installed gets that manager's release, whatever the descriptor reads.
+    const pkg = prefixPackageOf(target.program);
+    if (pkg !== null) latest = await this.#apt.latest(pkg, target.program, maxAgeMs, this.versionTimeoutMs, (...run) => this.#run(target, ...run));
+    else if (spec.latestNpm !== undefined) latest = await this.npmLatest(spec.latestNpm);
     else if (spec.latestArgs !== undefined) {
       const output = await this.#run(target, spec.latestArgs, this.versionTimeoutMs);
       const start = output.indexOf('{');
@@ -533,13 +538,12 @@ export class HarnessUpdates {
     return { current, latest: install !== undefined && upToDate(current, install) ? current : latest };
   }
 
-  /** One short run of the agent's own program, traced like every process of an agent. */
   /**
    * Runs the agent's program with `args`, or with `via` another program in its
    * name (npm installing it), and returns what it printed. `label` names the
    * command in a failure.
    */
-  async #run(target: Target, args: string[], timeoutMs: number, via?: { command: ResolvedCommand; label: string }): Promise<string> {
+  async #run(target: Target, args: string[], timeoutMs: number, via?: Via): Promise<string> {
     this.#assertOpen();
     // An updater just rewrote the program, or it was never asked its version: a
     // candidate that names a major resolves once the program has answered.
@@ -588,7 +592,9 @@ export class HarnessUpdates {
     const id = target.descriptor.id;
     try {
       let said = '';
+      const pkg = target.route === 'self' ? prefixPackageOf(target.program) : null;
       if (target.route === 'managed') await this.#runManaged(target);
+      else if (pkg !== null) said = await this.#apt.upgrade(pkg, target.program, this.versionTimeoutMs, UPDATE_TIMEOUT_MS, (...run) => this.#run(target, ...run));
       else {
         this.#assertWritable(target);
         const npm = this.#npmInstall(target, before);

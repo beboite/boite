@@ -112,6 +112,21 @@ path and stays on the old file when npm replaces it. With a symbolic link,
 Boite can identify the package and update its own prefix directly, including on
 Windows, without asking the agent to guess its installation method.
 
+An agent a Termux package installed updates through Termux's apt. Termux builds
+its own `codex` package, and `codex update` refuses that copy with `Could not
+detect the Codex installation method`. When the program sits under a prefix
+holding its own dpkg database and `bin/apt-get`, the system's `/` excluded, and
+a `var/lib/dpkg/info/*.list` of that prefix names it, the core reads and updates
+it through apt whatever the descriptor's `update` block says:
+
+- Newest release: `apt-get update`, then the `Candidate` of `apt-cache policy
+  <package>`, epoch and Debian revision removed. The Termux repository can
+  trail the npm `latest` tag by a few days, and only its release is offered.
+  `apt-get update` exits with zero when a mirror cannot be reached and keeps
+  the old index, so its `W: Failed to fetch` or `E:` line fails the check.
+- Update: the index is fetched again, then `apt-get install --only-upgrade -y
+  <package>` keeps changed configuration files and upgrades nothing else.
+
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
 row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its

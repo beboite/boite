@@ -29,7 +29,8 @@ export function failureSummary(stdout: string, stderr: string): string | undefin
   const errors = lines(stderr);
   const output = errors.length > 0 ? errors : lines(stdout);
   // npm ends with its log location; OpenCode ends with a generic Failed frame.
-  return output.find((line) => /\berror:|\b(?:could not|cannot|unable to)\b|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
+  // apt marks its errors `E:`, after its warnings and progress.
+  return output.find((line) => /\berror:|^E: |\b(?:could not|cannot|unable to)\b|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
 }
 
 /**
