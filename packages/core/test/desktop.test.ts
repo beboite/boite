@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { AGENT_ENV, virtualDesktopCommandError, virtualDesktopSizeError } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { desktopCommand } from '../src/desktop-cli.ts';
@@ -152,6 +153,17 @@ test('archiving while the desktop restarts stops the new one too', async () => {
   expect(stack.desktops.status({ threadId: stack.thread.id }).session).toBeNull();
 });
 
+test('a program still starts with a log after something on the desktop removed the logs folder', async () => {
+  const stack = fakeStack();
+  const { session } = await stack.desktops.start({ threadId: stack.thread.id });
+  rmSync(join(dirname(session.env['XAUTHORITY']!), 'logs'), { recursive: true });
+  const { app } = await stack.desktops.run({ threadId: stack.thread.id, command: ['app'], cwd: tmpdir() });
+  expect(existsSync(app.log)).toBe(true);
+  expect(stack.desktops.status({ threadId: stack.thread.id }).session!.apps.map(entry => entry.pid)).toEqual([app.pid]);
+  await stack.desktops.stop({ threadId: stack.thread.id });
+  expect(stack.live()).toBe(0);
+});
+
 describe('boite desktop', () => {
   let harness: TestCore, threadId: string, cwd: string;
 
@@ -253,7 +265,7 @@ describe('boite desktop', () => {
     useTools(() => real!);
     const failed = await cli('run', 'sh', '-c', 'echo broken >&2; exit 3');
     expect(failed.out).toContain('exited at once with code 3');
-    const log = /its output: (\S+)/.exec(failed.out)?.[1];
+    const log = /its output is in (\S+)/.exec(failed.out)?.[1];
     expect(readFileSync(log!, 'utf8')).toBe('broken\n');
     const mark = (await harness.core.desktops.status({ threadId })).session!.env[DESKTOP_MARK]!;
     expect((await cli('stop')).out).toContain('desktop stopped');

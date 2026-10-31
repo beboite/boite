@@ -115,7 +115,7 @@ export async function desktopCommand(args: string[], io: CliIo, client: CoreClie
       const words = rest[0] === '--' ? rest.slice(1) : rest;
       if (words.length === 0) throw new Usage('desktop run needs a program, such as: boite desktop run gnome-calculator');
       const { app, session } = await client.call('desktop.run', { threadId, command: words, cwd: io.cwd });
-      const state = app.exitCode === null ? `running as pid ${app.pid} on ${session.display}` : `exited at once with code ${app.exitCode}; its output: ${app.log}`;
+      const state = app.exitCode === null ? `running as pid ${app.pid} on ${session.display}` : `exited at once with code ${app.exitCode}; its output is in ${app.log}`;
       return { lines: [`${app.command}: ${state}`, ...(app.exitCode === null ? [`log: ${app.log}`] : [])], value: { app, session } };
     }
     case 'env': {

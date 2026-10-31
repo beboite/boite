@@ -242,14 +242,16 @@ export class VirtualDesktops {
     const session = await this.#session(this.#thread(threadId, connection));
     if (session.stopping) throw refused('the desktop is stopping', { threadId });
     const [program, ...args] = command;
-    const log = join(session.dir, 'logs', `${Date.now()}-${session.apps.length}.log`);
+    // A unique name, made before the spawn: a program on the desktop can remove the folder, and a failed write must not leave a started app untracked.
+    const log = join(session.dir, 'logs', `${Date.now()}-${randomBytes(4).toString('hex')}.log`);
+    mkdirSync(join(session.dir, 'logs'), { recursive: true, mode: 0o700 });
+    writeFileSync(log, '', { mode: 0o600 });
     let spawned: SpawnedProcess;
     try {
       spawned = this.#core.procs.spawn(SCOPE, program!, args, { agentRoot: false, cwd, env: withDesktopEnv(process.env, session.env) });
     } catch (error) {
       throw refused(`${program} did not start: ${messageOf(error)}`, { threadId });
     }
-    writeFileSync(log, '', { mode: 0o600 });
     const budget = { left: APP_LOG_BYTES };
     drainTo(spawned.proc.stdout, log, budget);
     drainTo(spawned.proc.stderr, log, budget);

@@ -21,7 +21,7 @@ export interface VirtualDesktopApp {
   startedAt: number;
   /** Null while it runs. */
   exitCode: number | null;
-  /** Its stdout and stderr, the first 1 MB of each run. */
+  /** Absolute path of the file holding its stdout and stderr, the first 1 MB of the run. */
   log: string;
 }
 
@@ -33,8 +33,9 @@ export interface VirtualDesktopSession {
   startedAt: number;
   /**
    * What a program needs to reach the desktop: DISPLAY, XAUTHORITY, the D-Bus
-   * session, the accessibility switches and agent-desktop's state folder.
-   * Keys whose value is empty are to be removed from the environment.
+   * session, the accessibility switches, agent-desktop's state folder, a private
+   * HOME with XDG folders and silenced sound. Keys whose value is empty are to
+   * be removed from the environment.
    */
   env: Record<string, string>;
   apps: VirtualDesktopApp[];
