@@ -1,3 +1,5 @@
+<a href="https://mtsu.dev"><img align="right" src="https://mtsu.dev/press/mtsu-icon-1024.png" width="48" alt="MTSU"></a>
+
 <p align="center">
   <img src="apps/shell/src-tauri/icons-dev/128x128@2x.png" alt="boite logo" width="80" height="80" />
 </p>
