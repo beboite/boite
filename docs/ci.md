@@ -193,7 +193,11 @@ then install `xvfb` and `libxcomposite1` with apt and run
 `packages/core/test/window-capture-x11.test.ts` alone under `xvfb-run` at
 1280x1024x24: the X11 backend of `boite window` lists, captures and fails on
 windows the test itself creates, through Composite and without it. The suite
-before it has no `DISPLAY` and skips that file. Linux desktop packages build on Ubuntu 22.04,
+before it has no `DISPLAY` and skips that file. The same step installs
+`dbus-daemon`, `at-spi2-core` and `openbox` and runs
+`packages/core/test/desktop.test.ts` again: with the tools present, `boite
+desktop` starts a real virtual desktop of its own, runs programs on it and
+stops it. Linux desktop packages build on Ubuntu 22.04,
 setting a glibc 2.35 floor. Portable jobs run Rust tests and installed smoke
 checks against Debian, extracted AppImage and macOS application bundles.
 These verify startup, UI serving, authenticated RPC and a fixture echo turn

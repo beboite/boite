@@ -76,6 +76,8 @@ ${CONTROL_HELP}
                                  user's Device panel, capture and drive it
   window help                    capture a desktop window (Unity, a game) as a PNG
                                  or a contact sheet, or show it in the Window panel
+  desktop help                   a private virtual desktop (Linux) to run GUI apps
+                                 and drive them through agent-desktop
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   pr watch [<url|number>]        wake this thread when the PR's checks fail or
@@ -393,6 +395,14 @@ function changeRow(change: GitChange): string {
 
 type Printer = (lines: string[], value: unknown) => void;
 
+/** A command that ran a child: the child's own output and code as it gave them, or the lines with --json. */
+function childOutput(result: { lines: string[]; value: unknown; output?: { stdout: string; stderr: string; exitCode: number } }, json: boolean, io: CliIo, print: Printer): number | undefined {
+  if (result.output === undefined || json) { print(result.lines, result.value); return result.output?.exitCode; }
+  if (result.output.stdout) io.out(result.output.stdout);
+  if (result.output.stderr) io.err(result.output.stderr);
+  return result.output.exitCode;
+}
+
 async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: string, print: Printer, caller: Caller): Promise<void | number> {
   const [command, ...rest] = parsed.positional;
   if (isControlCommand(parsed)) {
@@ -456,13 +466,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       const result = await windowCommand(rest, io, client, threadId);
       print(result.lines, result.value);
     },
-    secret: async () => {
-      const result = await secretCommand(rest, io, client, threadId);
-      if (result.output === undefined || parsed.json) { print(result.lines, result.value); return result.output?.exitCode; }
-      if (result.output.stdout) io.out(result.output.stdout);
-      if (result.output.stderr) io.err(result.output.stderr);
-      return result.output.exitCode;
-    },
+    desktop: async () => childOutput(await (await import('./desktop-cli.ts')).desktopCommand(rest, io, client, threadId), parsed.json, io, print),
+    secret: async () => childOutput(await secretCommand(rest, io, client, threadId), parsed.json, io, print),
     // `boite --limit 5 logs` parsed them as globals: they come first, so the command's own flags still win.
     // A global `--level` yields to the command's own `--min-level`, which it would otherwise override.
     logs: () => logsCommand([...(parsed.limit === undefined ? [] : ['--limit', String(parsed.limit)]), ...(parsed.level === undefined || rest.some(entry => entry === '--min-level' || entry.startsWith('--min-level=')) ? [] : ['--level', parsed.level]), ...rest], client, threadId, agentCaller, io.cwd, print),

@@ -74,6 +74,7 @@ import { workdirMethods } from './fake-client/workdir';
 import { browserMethods } from './fake-client/browser';
 import { devicesMethods } from './fake-client/devices';
 import { seedWindowsDemo, windowsMethods } from './fake-client/windows';
+import { desktopMethods } from './fake-client/desktop';
 import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
@@ -579,6 +580,7 @@ export class FakeClient implements ObservableClient {
       ...browserMethods(ctx),
       ...devicesMethods(ctx),
       ...windowsMethods(ctx),
+      ...desktopMethods(ctx),
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
       // The one owner connection is this client: the event comes back to it, as the core's reaches each owner.

@@ -356,6 +356,12 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['windows.clip', 'a contact sheet of a few seconds of such a window, on the same terms as windows.screenshot'],
   ['windows.watch', 'showing such a window in its own conversation\'s Window panel; nothing is captured until the person watching presses Show'],
   ['windows.close', 'emptying its own conversation\'s Window panel'],
+  // The virtual desktop is Boite's own X server in memory, never the user's screen; a thread under execution
+  // protection is refused there (desktop/service.ts), since what it starts would run outside that protection.
+  ['desktop.status', 'whether this machine can start its conversation\'s virtual desktop and what runs on it'],
+  ['desktop.start', 'an X server in memory for its own conversation, which it could start from its shell anyway, kept until it stops it or the conversation is archived'],
+  ['desktop.run', 'a program on that desktop, as its shell would start it, kept past the turn until the desktop stops'],
+  ['desktop.stop', 'stopping its own conversation\'s desktop and what runs on it'],
   // windows.frame stays with the owner and paired devices: the stream is for the person watching, a screenshot gives
   // the agent the window. windows.consent, windows.allowlist and windows.revoke are the owner's: the agent asks, never answers.
   // devices.stream and devices.clipboard stay with the owner and paired devices: the video is for the person

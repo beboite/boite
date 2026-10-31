@@ -6,6 +6,7 @@ import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './brow
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents, PullRequestWatch } from './pull-requests';
 import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
 import type { WindowsRpcMethods, WindowsRpcEvents } from './windows';
+import type { DesktopRpcMethods } from './desktop';
 import type { CoreLogContext, CoreLogLevel, CoreLogRecord, CoreLogsQuery, DiagnosticsRpcMethods } from './diagnostics';
 export * from './diagnostics';
 export * from './pull-requests';
@@ -13,6 +14,7 @@ export * from './browser';
 export * from './browser-remote';
 export * from './mobile-devices';
 export * from './windows';
+export * from './desktop';
 export * from './agents';
 export { nextAgentOccurrence } from './agent-schedule';
 export * from './workflows';
@@ -122,6 +124,7 @@ export interface RpcMethods extends
   PullRequestsRpcMethods,
   MobileDevicesRpcMethods,
   WindowsRpcMethods,
+  DesktopRpcMethods,
   DiagnosticsRpcMethods,
   ProvidersRpcMethods,
   AccountsRpcMethods,

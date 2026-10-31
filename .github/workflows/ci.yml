@@ -319,12 +319,13 @@ jobs:
           TMP: ${{ runner.temp }}
       # The suite above has no DISPLAY and skips the X11 window capture test;
       # this runs that one file against a real X server (docs/ci.md#run-modes-and-platforms).
-      - name: X11 window capture under Xvfb
+      - name: X11 window capture and virtual desktop under Xvfb
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends xvfb libx11-6 libxcomposite1
+          sudo apt-get install -y -qq --no-install-recommends xvfb libx11-6 libxcomposite1 dbus-daemon dbus-bin at-spi2-core openbox
           xvfb-run -a -s "-screen 0 1280x1024x24" bun test packages/core/test/window-capture-x11.test.ts
+          bun test packages/core/test/desktop.test.ts
 
   core-linux-arm64:
     name: Core tests (Linux arm64)

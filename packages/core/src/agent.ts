@@ -227,6 +227,10 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('windows.watch', (params, { connection }) => core.windows.watch(params, connection));
   core.router.register('windows.frame', (params, { connection }) => core.windows.frame(params, connection));
   core.router.register('windows.close', (params, { connection }) => core.windows.close(params, connection));
+  core.router.register('desktop.status', (params, { connection }) => core.desktops.status(params, connection));
+  core.router.register('desktop.start', (params, { connection }) => core.desktops.start(params, connection));
+  core.router.register('desktop.run', (params, { connection }) => core.desktops.run(params, connection));
+  core.router.register('desktop.stop', (params, { connection }) => core.desktops.stop(params, connection));
   core.router.register('windows.consent', (params, { connection }) => core.windows.consent(params, connection));
   core.router.register('windows.allowlist', params => core.windows.allowlist(params));
   core.router.register('windows.revoke', params => core.windows.revoke(params));
@@ -314,6 +318,7 @@ export function registerAgentMethods(core: Core): void {
     core.browser.release(threadId);
     core.devices.release(threadId);
     core.windows.release(threadId);
+    core.desktops.release(threadId);
     core.agents.forget(threadId, removed);
     core.subscribers.closeAgents(threadId);
   };
