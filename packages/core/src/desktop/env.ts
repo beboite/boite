@@ -2,7 +2,10 @@
  * The environment of a virtual desktop's programs, shared by the core that
  * starts them and the CLI that runs agent-desktop on them (docs/desktop.md).
  */
-import { join } from 'node:path';
+import { posix } from 'node:path';
+
+// The desktop is an X11 session on Linux: its paths are POSIX wherever the core is built or tested.
+const { join } = posix;
 
 /** Every process of a desktop carries this variable, so a stop finds the ones that left their group. */
 export const DESKTOP_MARK = 'BOITE_DESKTOP_ID';
