@@ -135,6 +135,8 @@ and assertions when making the suite faster.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Bots](docs/bots.md): Boite's persistent agents, each a thread with a name,
   memory, routines and a desk, their `boite bot` commands and their guide.
+- [Teams](docs/teams.md): bots and the owner in one group, routing, delivery
+  through coordination letters, the reply envelope and `boite team`.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):

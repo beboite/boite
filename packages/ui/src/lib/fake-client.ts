@@ -58,6 +58,7 @@ import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
 import { clearRequestsOf, requestMethods } from './fake-client/requests';
 import { closeSecrets, secretMethods } from './fake-client/secrets';
+import { refuseTeamChats, teamMethods } from './fake-client/teams';
 import { resourceMethods } from './fake-client/resources';
 import { seed } from './fake-client/seed';
 import { settingsMethods } from './fake-client/settings';
@@ -556,6 +557,7 @@ export class FakeClient implements ObservableClient {
       ...activityMethods(ctx),
       ...requestMethods(ctx),
       ...secretMethods(ctx),
+      ...teamMethods(ctx),
       ...providerCatalogMethods(ctx),
       ...providerInstallMethods(ctx),
       ...accountMethods(ctx),
@@ -602,6 +604,6 @@ export class FakeClient implements ObservableClient {
         return { delivered: 1 };
       },
     };
-    return methods;
+    return refuseTeamChats(ctx, methods);
   }
 }

@@ -623,7 +623,9 @@ operate only on the authenticated pairing. Subscription URLs and encryption
 keys are not placed in events or logs. The encryption library loads on demand.
 
 Finished turns, errors, permission requests and questions trigger notifications
-through the shared core event bus. Stopped turns do not, and neither do the
+through the shared core event bus, and so does a bot's private post to the
+owner in a team chat ([teams](teams.md)), as a Finished notification whose
+body is `<bot>: <text>`. Stopped turns do not, and neither do the
 turns under a thread that are not news of their own: a delegated agent's turns
 (its parent's next turn reports the result), a parent's turn that ends while
 its agents still work, a bot's quiet wake (a routine or event turn

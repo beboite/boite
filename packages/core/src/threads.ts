@@ -62,6 +62,7 @@ import { eraseIncognito } from './threads/incognito.ts';
 import { removeTranscripts, threadSessions, type NativeSession } from './threads/transcript-purge.ts';
 import { ThreadCreation } from './threads/creation.ts';
 import { accountRemoved, followAgent } from './threads/account-fallback.ts';
+import { requireAgent } from './threads/agentless.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -573,7 +574,7 @@ export class ThreadStore {
 
   /** `automatic`: the core opens it by the `autoCompact` setting (`threads/auto-compact.ts`). */
   compact(threadId: ThreadId, expectedSelectionVersion?: number, automatic = false): Turn {
-    const thread = this.require(threadId);
+    const thread = requireAgent(this, threadId);
     const refusal = this.compactRefusal(thread);
     if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.#core.providers.require(thread.providerId).protocol;
@@ -617,7 +618,7 @@ export class ThreadStore {
     const startedBy = origin.kind === 'spawned' ? origin.startedBy : undefined;
     const sentFrom = origin.kind === 'user' ? origin.sentFrom ?? null : null;
     if (this.#core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
-    let thread = this.require(threadId);
+    let thread = requireAgent(this, threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
     checkAttachmentArray(attachments);
     const referenceError = previewReferencesError(previewReferences, prompt);

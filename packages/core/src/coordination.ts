@@ -1,7 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { threadActive, defaultCoordinationConfig } from '@boite/contracts';
+import { threadActive, defaultCoordinationConfig, TEAM_LETTERS_PER_BATCH } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, ContactRequest, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams, ThreadStatus } from '@boite/contracts';
 import { checkRemoteContact } from './coordination-lookup.ts';
 import { CoordinationLookups } from './coordination-directory.ts';
@@ -22,6 +22,7 @@ import { isAgentHeld } from './agents/runtime.ts';
 import { ContactMailboxes } from './contacts/mailboxes.ts';
 import { forwardCoordination } from './coordination-rpc.ts';
 import { trustCoordination, trustedCoordinationPeers } from './coordination-trust.ts';
+import { TeamLetters } from './coordination-team.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -44,6 +45,7 @@ type Row = { data: string; fingerprint: string | null };
 export class Coordination {
   readonly bridge = new CoordinationBridge();
   readonly mailboxes: ContactMailboxes;
+  readonly teamLetters: TeamLetters;
   readonly #lookups: CoordinationLookups;
   #key: ReturnType<typeof createPrivateKey> | null = null;
   #publicKey = '';
@@ -71,6 +73,9 @@ export class Coordination {
   constructor(core: Core, threadJsonChecked = false) {
     this.#core = core;
     this.mailboxes = new ContactMailboxes(core);
+    this.teamLetters = new TeamLetters(core, { rows: (where, ...params) => this.rows(where, ...params), update: (letter, status, error) => this.update(letter, status, error), accept: letter => this.acceptLetter(letter),
+      receive: (letter, threadId) => this.#core.journal.append({ type: 'coordination.received', threadId, version: 1, payload: letter }, () => this.#put(letter, 'in', threadId)),
+      kick: threadId => this.#kick(threadId), changed: threadId => this.#changed(threadId), handToWaiter: threadId => this.#handToWaiter(threadId, null), self: threadId => this.#self(threadId) });
     this.#lookups = new CoordinationLookups(core, {
       selfId: () => this.#self('').coreId, config: threadId => this.config(threadId), trusted: () => this.trusted(), localReach: threadId => this.#localReach(threadId),
       contact: (threadId, resident) => this.#contact(threadId, resident), checkLookupAccess: (threadId, remote) => this.checkLookupAccess(threadId, remote), mailboxes: this.mailboxes,
@@ -182,21 +187,20 @@ export class Coordination {
     // The owner's own choice, pause included, is never lifted by a later message.
     this.#core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     this.#saveConfig(threadId, { mode: config.mode, resources: config.resources, remote: config.remote, paused: config.paused });
-    if (config.paused) this.#core.threads.stopQueuedCoordination(threadId);
+    // Team letters answer to their team (`docs/teams.md`), not to this switch: their wakes and inbox stay.
+    if (config.paused && !this.teamLetters.onlyQueued(threadId)) this.#core.threads.stopQueuedCoordination(threadId);
     if (config.mode === 'off' || !config.remote) {
       const queued = this.rows("thread_id = ? AND status = 'uncertain'", threadId).map(row => JSON.parse(row.data) as AgentLetter)
-        .filter(letter => letter.error === 'Queued for provider delivery' && (config.mode === 'off' || !this.#inProject(letter)));
+        .filter(letter => !letter.team && letter.error === 'Queued for provider delivery' && (config.mode === 'off' || !this.#inProject(letter)));
       for (const target of new Set(queued.filter(letter => letter.to.coreId === this.#self('').coreId).map(letter => letter.to.threadId))) {
         this.#core.threads.stopQueuedCoordination(target);
       }
     }
-    if (config.mode === 'off') {
-      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) this.update(JSON.parse(row.data), 'rejected', 'Coordination disabled');
-    } else if (!config.remote) {
-      for (const row of this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId)) {
-        const letter = JSON.parse(row.data) as AgentLetter;
-        if (!this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
-      }
+    for (const row of config.mode === 'off' || !config.remote ? this.rows("thread_id = ? AND status IN ('queued', 'received')", threadId) : []) {
+      const letter = JSON.parse(row.data) as AgentLetter;
+      if (letter.team) continue;
+      if (config.mode === 'off') this.update(letter, 'rejected', 'Coordination disabled');
+      else if (!this.#inProject(letter)) this.update(letter, 'rejected', 'Cross-project or cross-machine coordination disabled');
     }
     return this.get(threadId);
   }
@@ -259,7 +263,8 @@ export class Coordination {
   #contact(threadId: string, resident = false): AgentContact {
     const thread = this.#core.threads.require(threadId);
     const config = this.config(threadId);
-    if (thread.archived || (config.mode === 'off' && !resident)) throw refused('recipient is unavailable or coordination is disabled');
+    // A team chat is no contact: its posts reach only its members, through the team.
+    if (thread.archived || thread.teamId || (config.mode === 'off' && !resident)) throw refused('recipient is unavailable or coordination is disabled');
     const project = thread.projectId === null ? null : this.#core.journal.getProject(thread.projectId);
     return {
       ...this.#self(threadId), title: thread.title.slice(0, 200), machine: this.#core.info().hostname ?? 'Boite', resources: config.resources, status: thread.status, mode: config.mode,
@@ -287,7 +292,7 @@ export class Coordination {
   /** Reachable threads, the most recently active first: an old thread never hides a live one. */
   private localDirectory(projectId?: string): AgentContact[] {
     return this.#core.journal.listThreads(projectId)
-      .filter(t => !t.archived && this.config(t.id).mode !== 'off' && (projectId !== undefined || this.config(t.id).remote))
+      .filter(t => !t.archived && !t.teamId && this.config(t.id).mode !== 'off' && (projectId !== undefined || this.config(t.id).remote))
       .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100).map(t => this.#contact(t.id));
   }
   /** What this thread may reach on its own core: its project, and every remote-enabled thread when it is one too. */
@@ -341,8 +346,10 @@ export class Coordination {
   private claim(threadId: string, from: AgentAddress | null): AgentLetter[] {
     return this.admit(threadId, this.#ready(threadId, Infinity, from), batch => {
       if (batch.length > 0) this.#restoreProject(threadId);
+      // A waiter reads a team letter as rendered, never its raw triggers.
+      const { texts } = this.teamLetters.render(threadId, batch, 'seen');
       for (const letter of batch) this.update(letter, 'delivered');
-      return withRelations(this.#core, this.#self('').coreId, threadId, batch.map(letter => ({ ...letter, status: 'delivered' as const })));
+      return withRelations(this.#core, this.#self('').coreId, threadId, batch.map(letter => ({ ...letter, ...(texts.has(letter.id) ? { text: texts.get(letter.id)! } : {}), status: 'delivered' as const })));
     }, () => this.#ready(threadId, Infinity, from, true));
   }
   /**
@@ -486,6 +493,8 @@ export class Coordination {
     this.#core.journal.append({ type: 'coordination.status', threadId: letter.to.coreId === this.#self('').coreId ? letter.to.threadId : letter.from.threadId, version: 1, payload: { id: letter.id, status, error } }, () => {
       // Each endpoint retains its own send or receipt time when acknowledgement metadata arrives.
       this.#core.journal.db.query("UPDATE coordination_letters SET status = ?, data = json_set(?, '$.createdAt', created_at) WHERE id = ?").run(status, JSON.stringify(next), letter.id);
+      // A team letter's snapshot is marked seen or released with its state (`teams/store.ts`).
+      if (next.team && letter.to.coreId === this.#self('').coreId) this.#core.teams.letterChanged(next);
     });
     for (const endpoint of [letter.from, letter.to]) if (endpoint.coreId === this.#coreId) this.#changed(endpoint.threadId);
     // Mail held for the owner came or went: the owner's list of it changed.
@@ -561,7 +570,7 @@ export class Coordination {
     return this.admit(threadId, letters, batch => {
       if (!batch.length) return null;
       this.#restoreProject(threadId);
-      const prompt = letterPrompt(batch, senderContext(this.#core, this.#self('').coreId, threadId));
+      const { prompt } = this.teamLetters.render(threadId, batch, 'seen');
       this.#core.threads.noteCoordination(threadId, turnId, prompt);
       for (const letter of batch) this.update(letter, 'delivered');
       return prompt;
@@ -575,6 +584,7 @@ export class Coordination {
    */
   #ready(threadId: string, limit: number, from: AgentAddress | null = null, local = false): AgentLetter[] {
     const letters: AgentLetter[] = [];
+    let teams = 0;
     let gate: ReturnType<typeof contactMailGate> | undefined;
     const waits = (letter: AgentLetter) => Boolean(letter.contact) && ((gate ??= contactMailGate(this.#core, threadId)).held(letter) || local && !gate.cleared(letter));
     // Its own statement: a cached one left half read at the limit breaks the next selection.
@@ -582,7 +592,8 @@ export class Coordination {
     try {
       for (const row of statement.iterate(threadId) as Iterable<Row>) {
         const letter = JSON.parse(row.data) as AgentLetter;
-        if (letter.expiresAt > Date.now() && !waits(letter) && (from === null || same(letter.from, from)) && this.#mayReceive(letter)) letters.push(letter);
+        // A batch takes at most two team letters; the others wait for the next one.
+        if (letter.expiresAt > Date.now() && !waits(letter) && (from === null || same(letter.from, from)) && this.#mayReceive(letter) && !(letter.team && teams++ >= TEAM_LETTERS_PER_BATCH)) letters.push(letter);
         if (letters.length >= limit) break;
       }
     } finally { statement.finalize(); }
@@ -618,6 +629,8 @@ export class Coordination {
     if (!policyAllowsLetter(this.#core, letter)) return false;
     const thread = this.#core.journal.getThread(letter.to.threadId);
     if (!thread || thread.archived) return false;
+    // A team letter follows its team, not the thread's communication settings.
+    if (letter.team) return this.#core.teams.mayReceive(letter);
     const resident = this.#core.workforce.projects.mayReceive(letter, letter.from.coreId === this.#self('').coreId);
     if (resident !== null) return resident;
     const recipient = this.config(letter.to.threadId);
@@ -680,27 +693,28 @@ export class Coordination {
     const ready = this.#ready(threadId, BATCH);
     if (!ready.length) return;
     this.#delivering.add(threadId);
-    const prompt = (batch: AgentLetter[]) => letterPrompt(batch, senderContext(this.#core, this.#self('').coreId, threadId));
     const local = () => this.#ready(threadId, BATCH, null, true);
     try {
       if (thread.status === 'running') {
-        const letters = this.admit(threadId, ready, batch => {
+        // A steer's team posts are in flight with its letters: seen once the provider takes them, released otherwise.
+        const steered = this.admit(threadId, ready, batch => {
           if (!batch.length || !this.#core.threads.canSteer(threadId)) return null;
           this.#restoreProject(threadId);
+          const { prompt } = this.teamLetters.render(threadId, batch, 'flight');
           for (const letter of batch) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
-          return batch;
+          return { letters: batch, prompt };
         }, local);
-        if (!letters) return;
+        if (!steered) return;
         try {
-          const result = await this.#steer(threadId, prompt(letters));
+          const result = await this.#steer(threadId, steered.prompt);
           if (result === null || this.#closed || this.#core.journal.isClosed()) return;
-          for (const letter of letters) {
+          for (const letter of steered.letters) {
             const current = this.#find(letter.id, 'in');
             if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, result.submitted ? 'delivered' : 'received');
           }
         } catch (error) {
           if (this.#closed || this.#core.journal.isClosed()) return;
-          for (const letter of letters) {
+          for (const letter of steered.letters) {
             const current = this.#find(letter.id, 'in');
             if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, 'uncertain', messageOf(error));
           }
@@ -709,9 +723,14 @@ export class Coordination {
         let held: RpcFailure | null = null;
         // One transaction records the wake, message states and scheduled turn.
         const woke = this.admit(threadId, ready, batch => batch.length > 0 && this.#core.journal.db.transaction(() => {
+          const { prompt, channel } = this.teamLetters.render(threadId, batch, 'flight', true);
           for (const letter of batch) this.update(letter, 'uncertain', 'Queued for provider delivery');
           this.#core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(threadId, Date.now());
-          this.#core.threads.startTurn(threadId, prompt(batch), { kind: 'coordination' });
+          // An owner's team post wakes the bot as the owner's own message would: no bot pause or budget holds it.
+          const owner = batch.some(letter => letter.team?.owner);
+          const turn = this.#core.threads.startTurn(threadId, prompt, owner ? { kind: 'coordination', owner: true } : { kind: 'coordination' });
+          // The wake's reply envelope: where its final answer goes, fixed now, whatever a steer brings later.
+          if (channel) this.#core.teams.envelope(turn.id, threadId, channel);
           return true;
         })(), refusal => { held = refusal; return local(); });
         // No turn of an idle thread ends to retry its refused contact mail: the refusal pauses coordination until the owner's trust or message.

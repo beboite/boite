@@ -58,6 +58,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { TeamStore } from './teams/store.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import { ContactStore } from './contacts/store.ts';
 import { SharedProjects } from './contacts/projects.ts';
@@ -202,6 +203,8 @@ export class Core {
   /** The desktop app's updater as this machine's own window reports it. */
   readonly desktopUpdates: DesktopUpdates;
   readonly coordination: Coordination;
+  /** Teams of bots (`docs/teams.md`). */
+  readonly teams: TeamStore;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
   /** Other owners' Boites linked for agent work on the projects each side opens. */
@@ -430,6 +433,7 @@ export class Core {
     this.procs.mask = (threadId, text) => this.secrets.mask(threadId, text);
 
     this.workforce = new AgentStore(this);
+    this.teams = new TeamStore(this);
     this.pullRequests = new PullRequests(this);
     this.linkedPullRequests = new LinkedPullRequests(this, (threadId, url, refresh) => this.pullRequests.detail(threadId, url, refresh));
     this.pullRequestWatches = new PullRequestWatches(this, (threadId, args) => this.pullRequests.gh(threadId, args), options.pullRequestWatches);
@@ -455,6 +459,8 @@ export class Core {
     // left running or queued is closed here, or nothing ever would.
     const interrupted = this.threads.agentState.backgroundHistory.interruptLive();
     const recovered = this.threads.recoverStuckTurns();
+    // Then what a stopped core left between a team post and its letters, or a team wake and its answer.
+    try { this.teams.recover(); } catch (error) { this.log('warn', `teams recovery failed: ${String(error)}`); }
     // After recovery: a resume planned before the previous core stopped, a usage limit's among them, goes on.
     this.threads.resumes.start();
     // Watched limits are read on their own, so an alert reaches a phone with no window open.
@@ -554,6 +560,7 @@ export class Core {
     this.delegation.beginClose();
     this.workflows.beginClose();
     this.coordination.beginClose();
+    this.teams.close();
     void this.mergedPrArchive.close();
     void this.worktreeCleanup.close();
     void this.pullRequestWatches.close();

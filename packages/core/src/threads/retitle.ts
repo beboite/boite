@@ -5,6 +5,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import type { Core } from '../core.ts';
 import { getDriver, probedModelsOf, writesTitles } from '../drivers/index.ts';
 import { messageOf, refused } from '../errors.ts';
+import { requireAgent } from './agentless.ts';
 import type { ThreadStore } from '../threads.ts';
 import { cleanAgentBranch, parseAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
 import { saveThread, withLoad } from './records.ts';
@@ -34,7 +35,7 @@ export class ThreadTitles {
 
   /** Explicit regeneration may replace an earlier manual name, but never a newer rename. */
   retitle(threadId: ThreadId): Promise<ThreadSummary> {
-    const thread = this.#threads.require(threadId);
+    const thread = requireAgent(this.#threads, threadId);
     if (this.#retitling.has(threadId)) {
       throw refused('a title is already being written for this thread', { threadId });
     }

@@ -17,6 +17,8 @@ test('a turn\'s operation, voice and autonomous source follow from its origin ki
     [{ kind: 'delegation' }, 'delegation', false, 'delegation'],
     [{ kind: 'goal-check' }, 'delegation', false, 'delegation'],
     [{ kind: 'coordination' }, 'coordination', false, 'coordination'],
+    // A team letter with the owner's post: stored as coordination, admitted as the owner's message.
+    [{ kind: 'coordination', owner: true }, 'coordination', false, null],
     [{ kind: 'background' }, 'background', false, 'background'],
     [{ kind: 'pull-request' }, 'pull-request', false, 'pull-request'],
     [{ kind: 'routine', requestId: 'r' }, 'routine', false, null],

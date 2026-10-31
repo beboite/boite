@@ -1,5 +1,5 @@
 /** Permission requests and questions: asked by a turn, answered by the user. */
-import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, isMachineSetting, MACHINE_SETTINGS, settledMachineSetting, settledExperiment, type SettingMachine, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { RpcErrorCode, agentSettingAnswerText, checkClientPreferences, checkSettingRequest, isMachineSetting, MACHINE_SETTINGS, settledMachineSetting, settledExperiment, type SettingMachine, type ClientPreferences, type ExperimentId, checkSettingsPatch, readSettings, settingAnswerText, settledSetting, type Message, type MessagePart, type PermissionRequest, type QuestionAnswer, type QuestionOption, type QuestionRequest, type AgentSettingAsk, type SettingAsk, type SettingRequestParams, type Settings, type TeamAsk, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { fakeCore } from './coordination';
 import { checkAnswer, checkAsk } from './checks';
@@ -135,6 +135,11 @@ export function askAgentSetting(ctx: FakeContext, thread: Thread, turn: Turn, re
   return drawAsync(ctx, thread, turn, null, { text: reason, options, allowText: false, multiple: false, agentSetting });
 }
 
+/** The core's `TeamStore` cards: a bot's proposal, drawn like any card asked without stopping; Apply is the owner's team method. */
+export function askTeam(ctx: FakeContext, thread: Thread, turn: Turn, text: string, team: TeamAsk): string {
+  return drawAsync(ctx, thread, turn, null, { text, options: [{ id: 'refuse', label: 'Refuse' }], allowText: false, multiple: false, team });
+}
+
 /** As the core's `AgentSettingCards.answerText`: what the asking thread reads, projects by name. */
 function agentSettingText(ctx: FakeContext, setting: AgentSettingAsk, answer: QuestionAnswer): string {
   const names = new Map(ctx.projects.map((project) => [project.id, project.name]));
@@ -207,7 +212,7 @@ function drawAsync(
   thread: Thread,
   turn: Turn,
   running: Message | null,
-  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; open?: { url: string } }
+  asked: { text: string; options: QuestionOption[]; allowText: boolean; multiple: boolean; setting?: SettingAsk; agentSetting?: AgentSettingAsk; team?: TeamAsk; open?: { url: string } }
 ): string {
   const questionId = `qst-${++ctx.seq}`;
   const text = asked.text;

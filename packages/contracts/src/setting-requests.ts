@@ -15,7 +15,7 @@ import type { QuestionAnswer, QuestionOption, Settings, ThreadId } from './index
  * The experiments this build ships, in the order Settings lists them. Each
  * device turns them on for itself (`packages/ui/src/lib/experiments.ts`).
  */
-export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'contacts', 'pinned-quotas', 'auto-goal'] as const;
+export const EXPERIMENT_IDS = ['theme-grain', 'session-import', 'prompt-cache', 'resident-agents', 'whip', 'recording-indicators', 'contacts', 'pinned-quotas', 'auto-goal', 'teams'] as const;
 export type ExperimentId = (typeof EXPERIMENT_IDS)[number];
 
 export function isExperimentId(id: unknown): id is ExperimentId {

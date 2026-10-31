@@ -4,6 +4,7 @@ import type { Connection } from '../router.ts';
 import type { Core } from '../core.ts';
 import { promptOrigin } from '../client-preferences.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { requireAgent } from './agentless.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
@@ -78,10 +79,12 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     }
   }
   core.router.register('threads.btw', async params => {
+    requireAgent(core.threads, params.threadId);
     await requireCwd(core, params.threadId);
     return core.threads.sideQuestions.ask(params.threadId, params.question, params.requestId);
   });
   core.router.register('threads.btw.fork', async params => {
+    requireAgent(core.threads, params.threadId);
     await requireCwd(core, params.threadId);
     return core.threads.sideQuestions.fork(params.threadId, params.requestId);
   });
@@ -166,7 +169,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('messages.toolPart', (params) => readToolPart(core, params));
   core.router.register('messages.attachment', params => readMessageAttachment(core, params));
   core.router.register('threads.update', async (params) => {
-    const thread = core.threads.require(params.threadId);
+    const thread = requireAgent(core.threads, params.threadId);
     const version = thread.selectionVersion ?? 0;
     if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== version) return core.threads.update(params);
     // Its account was removed: nothing to discover, and the store says what still changes.

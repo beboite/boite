@@ -8,6 +8,7 @@ import type { QuestionAnswer, QuestionOption } from './questions';
 import type { SecretRequestStatus } from './secrets';
 import type { AppLanguage, SettingAsk } from './setting-requests.ts';
 import type { ActivityTurn } from './threads';
+import type { TeamAsk, TeamPostRef } from './teams';
 import type { Turn } from './turns';
 import type { InlineView, ViewCheckCapture } from './view.ts';
 import type { WindowCaptureKind, WindowConsentAnswer } from './windows';
@@ -124,7 +125,7 @@ export type MessagePart =
    * `omitted`: characters a page left out of the end of `text` because the
    * message was too heavy to send whole (`MESSAGE_SENT_MAX_BYTES`). Never persisted.
    */
-  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: ActivityTurn; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; sentFrom?: SentFrom; omitted?: number }
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: ActivityTurn; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; sentFrom?: SentFrom; omitted?: number; teamPost?: TeamPostRef }
   /**
    * An image the user sent with the prompt, journalled with the message. A page
    * asked with `compactImages` leaves a large one's `data` empty, with
@@ -199,6 +200,8 @@ export type MessagePart =
       setting?: SettingAsk;
       /** An agent setting card: see `QuestionRequest.agentSetting`. */
       agentSetting?: AgentSettingAsk;
+      /** A bot's team proposal: see `QuestionRequest.team`. */
+      team?: TeamAsk;
       /** A page to open: see `QuestionRequest.open`. */
       open?: { url: string };
     }

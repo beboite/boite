@@ -1,5 +1,6 @@
 import { registerJournalInspection } from './journal/integrity.ts';
 import type { Core } from './core.ts';
+import { requireAgent } from './threads/agentless.ts';
 import { registerPersistentAgents } from './agents/store.ts';
 import { createAgent } from './agents/create.ts';
 import { registerAccountMethods } from './accounts.ts';
@@ -31,6 +32,7 @@ import { registerContactMethods } from './contacts/rpc.ts';
 import { registerSharedComputeMethods } from './contacts/compute.ts';
 import { registerResidentMethods } from './agents/projects.ts';
 import { registerGroupMethods } from './group/rpc.ts';
+import { registerTeams } from './teams/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
@@ -71,11 +73,13 @@ export function registerModules(core: Core): void {
   registerContactMethods(core);
   registerResidentMethods(core);
   registerGroupMethods(core);
+  registerTeams(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
-  core.router.register('threads.activity.set', (params) => core.activity.set(params));
+  // A goal starts turns: a team chat runs none (`threads/agentless.ts`).
+  core.router.register('threads.activity.set', (params) => { requireAgent(core.threads, params.threadId); return core.activity.set(params); });
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
-  core.router.register('threads.goal.track', (params) => core.activity.track(params.threadId));
+  core.router.register('threads.goal.track', (params) => { requireAgent(core.threads, params.threadId); return core.activity.track(params.threadId); });
   // Progress is for the window that asked: every other client would drop it on its requestId.
   core.router.register('quotas.list', (params, ctx) => core.quotas.list(params.refresh, params.requestId,
     (quota) => ctx.connection.sendEvent('quotas.progress', { requestId: params.requestId!, quota })));

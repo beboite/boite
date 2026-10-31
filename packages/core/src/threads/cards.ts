@@ -453,6 +453,7 @@ export class ThreadCards {
       ...(ask.async === true ? { async: true } : {}),
       ...(ask.setting === undefined ? {} : { setting: ask.setting }),
       ...(ask.agentSetting === undefined ? {} : { agentSetting: ask.agentSetting }),
+      ...(ask.team === undefined ? {} : { team: ask.team }),
       ...(ask.open === undefined ? {} : { open: ask.open }),
       createdAt: Date.now(),
     };

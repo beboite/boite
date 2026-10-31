@@ -37,6 +37,10 @@ export const fr: Translation = {
       minChars: 'Longueur du message',
       minCharsHint: 'Un message qui lance un tour avec au moins ce nombre de caractères lance un objectif automatique',
       unit: 'caractères'
+    },
+    teams: {
+      title: 'Équipes',
+      hint: "Des bots qui travaillent ensemble dans une conversation commune : un message réveille les bots qu'il nomme, et chacun répond au groupe ou en privé. Vos bots y écrivent avec boite team. Pas encore prêt pour un usage quotidien"
     }
   }
 };

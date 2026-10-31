@@ -187,8 +187,10 @@ export interface ThreadSummary {
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
   id: ThreadId;
   projectId: ProjectId | null;
-  /** Only persistent agent sessions have no project. */
+  /** Only persistent agent sessions and team chats have no project. */
   agentSessionId?: string;
+  /** A team's chat (`docs/teams.md`): it runs no agent, a turn there is one post, and no agent reaches it as a coordination contact. */
+  teamId?: string;
   /**
    * An incognito conversation of the drafts. It works in a folder of the
    * core's data directory rather than the drafts folder, lists stay quiet
